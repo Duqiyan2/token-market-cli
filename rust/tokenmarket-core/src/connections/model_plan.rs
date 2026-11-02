@@ -20,10 +20,7 @@ fn select_with_model(tool: ToolId, catalogue: &Value, default_model: &str) -> Re
     let rows = catalogue["data"]
         .as_array()
         .context("模型目录无效，原配置已保留")?;
-    if matches!(
-        tool,
-        ToolId::DeepSeekHarness | ToolId::WorkBuddy | ToolId::OpenClaw | ToolId::OpenCode
-    ) {
+    if !matches!(tool, ToolId::ClaudeCode | ToolId::Codex) {
         let mut models = vec![];
         let mut ids = std::collections::HashSet::new();
         for row in rows {

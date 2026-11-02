@@ -353,7 +353,7 @@ fn set_path(value: &mut Value, path: &[String], replacement: Option<Value>) -> R
     }
     Ok(())
 }
-enum Format {
+pub(super) enum Format {
     Json,
     Jsonc,
     Toml,
@@ -367,7 +367,7 @@ impl Format {
             Self::for_path(path)
         }
     }
-    fn for_path(path: &Path) -> Result<Self> {
+    pub(super) fn for_path(path: &Path) -> Result<Self> {
         match path.extension().and_then(|v| v.to_str()) {
             Some("json") => Ok(Self::Json),
             Some("jsonc") => Ok(Self::Jsonc),
@@ -376,7 +376,7 @@ impl Format {
             _ => bail!("不支持安全恢复此配置格式"),
         }
     }
-    fn parse(&self, bytes: Option<&[u8]>) -> Result<Value> {
+    pub(super) fn parse(&self, bytes: Option<&[u8]>) -> Result<Value> {
         let Some(bytes) = bytes else {
             return Ok(json!({}));
         };
@@ -394,7 +394,12 @@ impl Format {
         }
         Ok(result)
     }
-    fn render(&self, bytes: Option<&[u8]>, value: &Value, touched: &[String]) -> Result<Vec<u8>> {
+    pub(super) fn render(
+        &self,
+        bytes: Option<&[u8]>,
+        value: &Value,
+        touched: &[String],
+    ) -> Result<Vec<u8>> {
         match self {
             Self::Json => Ok(serde_json::to_vec_pretty(value)?),
             Self::Jsonc => super::jsonc::render(bytes, value),

@@ -8,6 +8,7 @@ use anyhow::{bail, Result};
 use std::path::{Path, PathBuf};
 
 pub const OPENCLAW_VERSION: &str = "2026.10.9";
+pub const GROK_BUILD_VERSION: &str = "1.0.70";
 pub fn managed_command_directories(home: &Path) -> Vec<PathBuf> {
     vec![
         home.join(".local/bin"),
@@ -15,6 +16,8 @@ pub fn managed_command_directories(home: &Path) -> Vec<PathBuf> {
         home.join(".tokenmarket/tools/openclaw/bin"),
         home.join(".tokenmarket/tools/openclaw"),
         home.join(".tokenmarket/tools/openclaw/runtime"),
+        home.join(".tokenmarket/tools/grok-build/bin"),
+        home.join(".grok/bin"),
     ]
 }
 pub fn availability(
@@ -42,6 +45,9 @@ pub fn plan(
 ) -> Result<InstallPlan> {
     if matches!(tool, ToolId::ClaudeCode | ToolId::Codex) {
         return super::native_cli::plan(tool, environment, architecture);
+    }
+    if tool == ToolId::GrokBuild {
+        return grok_plan(environment, architecture);
     }
     if tool != ToolId::OpenClaw {
         bail!("该工具的自动安装流程尚未配置，请查看官方安装说明")
@@ -103,6 +109,66 @@ pub fn plan(
         version: OPENCLAW_VERSION.into(),
         command: "openclaw".into(),
         steps: vec![download, execution],
+    })
+}
+fn grok_plan(environment: &InstallationEnvironment, architecture: &str) -> Result<InstallPlan> {
+    if !matches!(architecture, "aarch64" | "x86_64") {
+        bail!("Grok Build 官方安装方案不支持当前架构 {architecture}")
+    }
+    let windows = environment.platform == HostPlatform::Windows;
+    let prefix = environment.home.join(".tokenmarket/tools/grok-build/bin");
+    let installer = environment
+        .home
+        .join(".tokenmarket/installers/grok-build")
+        .join(if windows { "install.ps1" } else { "install.sh" });
+    let source = if windows {
+        "https://x.ai/cli/install.ps1"
+    } else {
+        "https://x.ai/cli/install.sh"
+    };
+    let execution = InstallStep {
+        stage: InstallStage::Installing,
+        program: if windows { "powershell.exe" } else { "bash" }.into(),
+        args: if windows {
+            vec![
+                "-NoProfile".into(),
+                "-NonInteractive".into(),
+                "-ExecutionPolicy".into(),
+                "Bypass".into(),
+                "-File".into(),
+                installer.to_string_lossy().into(),
+                "-Version".into(),
+                GROK_BUILD_VERSION.into(),
+            ]
+        } else {
+            vec![
+                installer.to_string_lossy().into(),
+                GROK_BUILD_VERSION.into(),
+            ]
+        },
+        // Deployment keys make the upstream installer write inference configuration.
+        // Install only the runtime; an existing client connection remains untouched.
+        environment: vec![
+            ("GROK_BIN_DIR".into(), prefix.to_string_lossy().into()),
+            ("GROK_CHANNEL".into(), "stable".into()),
+            ("GROK_DEPLOYMENT_KEY".into(), String::new()),
+        ],
+        download: None,
+    };
+    Ok(InstallPlan {
+        tool: ToolId::GrokBuild,
+        version: GROK_BUILD_VERSION.into(),
+        command: "grok".into(),
+        steps: vec![
+            InstallStep {
+                stage: InstallStage::Downloading,
+                program: String::new(),
+                args: vec![],
+                environment: vec![],
+                download: Some((source.into(), installer)),
+            },
+            execution,
+        ],
     })
 }
 fn ps(path: &Path) -> String {
