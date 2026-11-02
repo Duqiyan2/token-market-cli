@@ -88,6 +88,7 @@ Choose a tool in the app, or use its ID in CLI commands:
 | Pi | `pi` |
 | MiniMax Code | `minimax-code` |
 | Oh My Pi | `oh-my-pi` |
+| Kimi Code | `kimi-code` |
 
 Claude Code and Codex use `glm-5.3` in production (`glm-5.2` in test builds). Other tools receive the compatible text-generation model catalogue.
 
@@ -107,6 +108,11 @@ Oh My Pi is installed separately with **安装** or `tokenmarket install oh-my-p
 It uses the active OMP profile and `models.yml`/`models.yaml`; model roles and
 existing authentication stay intact. Open `/model` to choose a Token Market model.
 See [Oh My Pi integration](docs/oh-my-pi.md) for profiles, runtime libraries and conflicts.
+
+Kimi Code uses the official TypeScript **2.4.1** native release: **安装** or
+`tokenmarket install kimi-code`. Windows Git Bash is prepared or reused. Connect
+preserves existing defaults and Thinking settings and requires a real context limit
+for every imported model. See [Kimi Code integration](docs/kimi-code.md).
 
 ## Manage connections
 

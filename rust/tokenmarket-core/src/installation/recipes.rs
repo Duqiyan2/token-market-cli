@@ -27,6 +27,8 @@ pub fn managed_command_directories(home: &Path) -> Vec<PathBuf> {
         home.join(".tokenmarket/tools/oh-my-pi/bin"),
         home.join(".tokenmarket/tools/pi/runtime"),
         home.join(".tokenmarket/tools/pi/git/bin"),
+        home.join(".tokenmarket/runtime/git/bin"),
+        home.join(".tokenmarket/tools/kimi-code/bin"),
     ]
 }
 pub fn availability(
@@ -77,6 +79,9 @@ pub fn plan(
     }
     if matches!(tool, ToolId::ClaudeCode | ToolId::Codex) {
         return super::native_cli::plan(tool, environment, architecture);
+    }
+    if tool == ToolId::KimiCode {
+        return super::kimi::plan(environment, architecture);
     }
     if tool == ToolId::MiniMaxCode {
         return super::minimax::plan(environment, architecture);

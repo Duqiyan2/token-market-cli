@@ -88,6 +88,7 @@ tokenmarket workspace <workspace-id>
 | Pi | `pi` |
 | MiniMax Code | `minimax-code` |
 | Oh My Pi | `oh-my-pi` |
+| Kimi Code | `kimi-code` |
 
 Claude Code、Codex 在正式环境使用 `glm-5.3`，测试包使用 `glm-5.2`。其他工具会配置兼容的文本生成模型目录。
 
@@ -105,6 +106,10 @@ MiniMax Code 固定使用官方 0.7.2 发布包，安装目录与活动数据/pr
 Oh My Pi 可独立点击 **安装**，或运行 `tokenmarket install oh-my-pi`。接入使用
 当前 OMP profile 的 `models.yml`/`models.yaml`，保留模型角色和已有认证。
 在 `/model` 中选择 Token Market 模型。详见 [Oh My Pi 接入说明](docs/oh-my-pi.md)。
+
+Kimi Code 可点击 **安装**，或运行 `tokenmarket install kimi-code`，使用官方
+TypeScript 版 **2.4.1** 独立二进制，并准备或复用 Windows Git Bash。接入保留
+默认模型和 Thinking 设置，每个导入模型均需真实上下文数据。详见 [Kimi Code 接入说明](docs/kimi-code.md)。
 
 ## 管理连接
 

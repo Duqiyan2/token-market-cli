@@ -6,6 +6,7 @@ mod grok;
 mod harness;
 mod hermes;
 mod jsonc;
+mod kimi;
 mod minimax;
 mod model_plan;
 mod multi_model;
@@ -426,6 +427,7 @@ impl ConnectionManager {
                 | ToolId::Pi
                 | ToolId::MiniMaxCode
                 | ToolId::OhMyPi
+                | ToolId::KimiCode
         ) {
             bail!("此工具的桌面接入尚未开放")
         }

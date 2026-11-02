@@ -149,6 +149,7 @@ impl ProviderConfig {
         }
         match tool {
             ToolId::GrokBuild => super::grok::validate(&value)?,
+            ToolId::KimiCode => super::kimi::validate(&value, path)?,
             ToolId::Hermes => super::hermes::validate(&value, path)?,
             ToolId::Pi => super::pi::validate(&value, path)?,
             ToolId::MiniMaxCode => super::minimax::validate(&value, path)?,
@@ -170,6 +171,7 @@ impl ProviderConfig {
     pub fn credential(&self, gateway: &str) -> Result<Option<String>> {
         match self.tool {
             ToolId::GrokBuild => super::grok::credential(&self.document.value, gateway),
+            ToolId::KimiCode => super::kimi::credential(&self.document.value, gateway),
             ToolId::Hermes => super::hermes::credential(&self.document.value, gateway),
             ToolId::Pi => super::pi::credential(&self.document.value, gateway),
             ToolId::MiniMaxCode => super::minimax::credential(&self.document.value, gateway),
@@ -186,6 +188,10 @@ impl ProviderConfig {
     ) -> Result<PreparedConfiguration> {
         match self.tool {
             ToolId::GrokBuild => super::grok::apply(&mut self.document, gateway, key, models)?,
+            ToolId::KimiCode => {
+                super::kimi::validate(&self.document.value, &self.document.path)?;
+                super::kimi::apply(&mut self.document, gateway, key, models)?;
+            }
             ToolId::Hermes => {
                 super::hermes::validate(&self.document.value, &self.document.path)?;
                 super::hermes::apply(&mut self.document, gateway, key, models)?;

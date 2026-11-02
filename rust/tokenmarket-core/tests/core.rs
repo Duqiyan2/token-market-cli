@@ -19,7 +19,8 @@ fn registers_all_supported_tools() {
             "hermes",
             "pi",
             "minimax-code",
-            "oh-my-pi"
+            "oh-my-pi",
+            "kimi-code"
         ]
     );
 }
@@ -43,6 +44,7 @@ fn serializes_every_tool_with_the_server_contract_id() {
         ("pi", "pi"),
         ("minimax-code", "minimax-code"),
         ("oh-my-pi", "oh-my-pi"),
+        ("kimi-code", "kimi-code"),
     ] {
         let tool = tool_id(input).unwrap();
         let value = serde_json::to_value(&tool).unwrap();

@@ -190,6 +190,13 @@ impl ToolInventory {
     }
     /// Desktop discovery and desktop writes share this path. Terminal CLI paths are unchanged.
     pub fn config_path(&self, tool: ToolId) -> PathBuf {
+        if tool == ToolId::KimiCode {
+            return std::env::var_os("KIMI_CODE_HOME")
+                .filter(|v| !v.is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| self.environment.home.join(".kimi-code"))
+                .join("config.toml");
+        }
         if tool == ToolId::Hermes {
             return crate::config::hermes_home(&self.environment.home, self.environment.platform)
                 .join("config.yaml");
@@ -290,6 +297,7 @@ impl ToolInventory {
             ToolId::Pi => &["pi"],
             ToolId::MiniMaxCode => &["mcode"],
             ToolId::OhMyPi => &["omp"],
+            ToolId::KimiCode => &["kimi"],
         };
         commands
             .iter()
@@ -359,6 +367,7 @@ pub fn official_download_url(tool: ToolId) -> &'static str {
         ToolId::Pi => "https://pi.dev/",
         ToolId::MiniMaxCode => "https://github.com/MiniMax-AI/minimax-code/releases/tag/v0.7.2",
         ToolId::OhMyPi => "https://omp.sh/",
+        ToolId::KimiCode => "https://github.com/MoonshotAI/kimi-code",
     }
 }
 
@@ -571,6 +580,7 @@ impl ToolInventory {
             ToolId::Pi => "pi",
             ToolId::MiniMaxCode => "mcode",
             ToolId::OhMyPi => "omp",
+            ToolId::KimiCode => "kimi",
         };
         let target = self
             .environment
@@ -603,25 +613,32 @@ impl ToolInventory {
             } else {
                 command
             };
+            let mut launch_environment = vec![("PATH".into(), path)];
+            if tool == ToolId::KimiCode
+                && std::env::var_os("KIMI_SHELL_PATH").is_none_or(|v| v.is_empty())
+            {
+                if let Some(bash) = crate::installation::portable_git::bash_path(&self.environment)
+                {
+                    launch_environment
+                        .push(("KIMI_SHELL_PATH".into(), bash.to_string_lossy().into()));
+                }
+            }
+            if tool == ToolId::MiniMaxCode {
+                launch_environment.push((
+                    "MINIMAX_DATA_DIR".into(),
+                    self.config_path(tool)
+                        .parent()
+                        .context("MiniMax Code 数据目录无效")?
+                        .to_string_lossy()
+                        .into_owned(),
+                ));
+            }
             return Ok(ToolLaunchPlan {
                 program: "cmd".into(),
                 args: ["/c", "start", "", "cmd", "/k", fixed]
                     .map(str::to_owned)
                     .to_vec(),
-                environment: {
-                    let mut values = vec![("PATH".into(), path)];
-                    if tool == ToolId::MiniMaxCode {
-                        values.push((
-                            "MINIMAX_DATA_DIR".into(),
-                            self.config_path(tool)
-                                .parent()
-                                .context("MiniMax Code 数据目录无效")?
-                                .to_string_lossy()
-                                .into_owned(),
-                        ));
-                    }
-                    values
-                },
+                environment: launch_environment,
                 wait_for_exit: false,
             });
         }
