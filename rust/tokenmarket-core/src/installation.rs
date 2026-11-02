@@ -505,12 +505,16 @@ impl InstallationManager {
                 return Ok(());
             }
         }
+        let repairing_owned;
         if let Some(path) = self.environment.command_path(&plan.command) {
             let repair = attempt::repair(&self.environment, plan, &path)?;
             let version = self.executor.version(&path);
             if repair {
+                repairing_owned = true;
                 if version.as_ref().is_ok_and(|version| {
-                    !recipes::compatible_existing_version(plan.tool, version, &plan.version)
+                    !version
+                        .split_whitespace()
+                        .any(|part| part.trim_start_matches('v') == plan.version)
                 }) {
                     bail!("未完成安装的版本已改变；请按官方说明处理，未自动升级或覆盖")
                 }
@@ -525,11 +529,14 @@ impl InstallationManager {
                 self.update(plan.tool, |state| state.version = Some(version));
                 return Ok(());
             }
+        } else {
+            repairing_owned = attempt::pending(&self.environment, plan)?;
         }
         // An independently installed GUI must not be overwritten by a CLI installer.
-        if ToolInventory::new(self.environment.clone())
-            .application_path(plan.tool)
-            .is_some()
+        if !repairing_owned
+            && ToolInventory::new(self.environment.clone())
+                .application_path(plan.tool)
+                .is_some()
         {
             bail!("已检测到应用安装，请使用原有安装；未自动替换或升级")
         }

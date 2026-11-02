@@ -194,37 +194,55 @@ fn an_external_install_is_not_hidden_or_repaired_by_an_owned_incomplete_attempt(
 
 #[test]
 fn a_late_external_app_remains_usable_without_launching_its_incomplete_cli_sibling() {
-    let root = tempfile::tempdir().unwrap();
-    let home = root.path();
-    let command = home.join(".tokenmarket/tools/openclaw/bin/openclaw");
-    let executor = Arc::new(PartialInstaller {
-        command,
-        runtime: home.join("required-runtime"),
-        broken_version: false,
-        cancel_first: false,
-        initial: AtomicBool::new(true),
-        entered: AtomicBool::new(false),
-        execution_count: Mutex::new(0),
-    });
-    let mut env = environment(home, HostPlatform::MacOs);
-    env.application_directories = vec![home.join("Applications")];
-    let manager = InstallationManager::new(env.clone(), "aarch64".into(), executor);
-    manager.start(ToolId::OpenClaw).unwrap();
-    finished(&manager, ToolId::OpenClaw);
-    let app = home.join("Applications/OpenClaw.app/Contents");
-    std::fs::create_dir_all(&app).unwrap();
-    std::fs::write(app.join("Info.plist"),"<?xml version=\"1.0\"?><plist version=\"1.0\"><dict><key>CFBundleExecutable</key><string>OpenClaw</string></dict></plist>").unwrap();
-    executable(&app.join("MacOS/OpenClaw"), "2026.10.9", None).unwrap();
-    let inventory = ToolInventory::new(env);
-    assert!(inventory.is_installed(ToolId::OpenClaw));
-    assert_eq!(
-        inventory.launch_plan(ToolId::OpenClaw).unwrap().program,
-        "open"
-    );
-    assert!(
-        inventory.terminal_launch_plan(ToolId::OpenClaw).is_err(),
-        "a complete GUI must not make an incomplete CLI runnable"
-    );
+    for keep_launcher in [true, false] {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path();
+        let command = home.join(".tokenmarket/tools/openclaw/bin/openclaw");
+        let executor = Arc::new(PartialInstaller {
+            command,
+            runtime: home.join("required-runtime"),
+            broken_version: false,
+            cancel_first: false,
+            initial: AtomicBool::new(true),
+            entered: AtomicBool::new(false),
+            execution_count: Mutex::new(0),
+        });
+        let mut env = environment(home, HostPlatform::MacOs);
+        env.application_directories = vec![home.join("Applications")];
+        let manager = InstallationManager::new(env.clone(), "aarch64".into(), executor.clone());
+        manager.start(ToolId::OpenClaw).unwrap();
+        finished(&manager, ToolId::OpenClaw);
+        let app = home.join("Applications/OpenClaw.app/Contents");
+        std::fs::create_dir_all(&app).unwrap();
+        std::fs::write(app.join("Info.plist"),"<?xml version=\"1.0\"?><plist version=\"1.0\"><dict><key>CFBundleExecutable</key><string>OpenClaw</string></dict></plist>").unwrap();
+        executable(&app.join("MacOS/OpenClaw"), "2026.10.9", None).unwrap();
+        let inventory = ToolInventory::new(env);
+        assert!(inventory.is_installed(ToolId::OpenClaw));
+        assert_eq!(
+            inventory.launch_plan(ToolId::OpenClaw).unwrap().program,
+            "open"
+        );
+        assert!(
+            inventory.terminal_launch_plan(ToolId::OpenClaw).is_err(),
+            "a complete GUI must not make an incomplete CLI runnable"
+        );
+        let app_before = std::fs::read(app.join("MacOS/OpenClaw")).unwrap();
+        if !keep_launcher {
+            std::fs::remove_file(&executor.command).unwrap();
+        }
+        executor.initial.store(false, Ordering::SeqCst);
+        manager.start(ToolId::OpenClaw).unwrap();
+        assert_eq!(
+            finished(&manager, ToolId::OpenClaw).stage,
+            tokenmarket_core::installation::InstallStage::Succeeded,
+            "owned CLI repair must not be blocked by a separate app"
+        );
+        assert!(inventory.terminal_launch_plan(ToolId::OpenClaw).is_ok());
+        assert_eq!(
+            std::fs::read(app.join("MacOS/OpenClaw")).unwrap(),
+            app_before
+        );
+    }
 }
 
 #[cfg(unix)]
@@ -306,4 +324,49 @@ fn private_node_preparation_repairs_an_existing_node_whose_npm_is_incomplete() {
         );
         assert!(prefix.join("runtime/complete").exists());
     }
+}
+
+#[test]
+fn repair_does_not_replace_a_user_changed_version_even_in_a_compatible_major_range() {
+    struct ChangedVersion {
+        command: PathBuf,
+    }
+    impl InstallExecutor for ChangedVersion {
+        fn execute(
+            &self,
+            _: &InstallStep,
+            _: &AtomicBool,
+            _: &mut dyn FnMut(String),
+        ) -> Result<()> {
+            executable(&self.command, "1.19.5", None)?;
+            bail!("fixture interrupted after publishing command")
+        }
+        fn version(&self, _: &Path) -> Result<String> {
+            Ok("1.19.6".into())
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    let command = root.path().join(".tokenmarket/tools/opencode/bin/opencode");
+    let manager = InstallationManager::new(
+        environment(root.path(), HostPlatform::MacOs),
+        "aarch64".into(),
+        Arc::new(ChangedVersion {
+            command: command.clone(),
+        }),
+    );
+    manager.start(ToolId::OpenCode).unwrap();
+    finished(&manager, ToolId::OpenCode);
+    executable(&command, "1.19.6", None).unwrap();
+    let manual = std::fs::read(&command).unwrap();
+    manager.start(ToolId::OpenCode).unwrap();
+    let state = finished(&manager, ToolId::OpenCode);
+    assert_eq!(
+        state.stage,
+        tokenmarket_core::installation::InstallStage::Failed
+    );
+    assert_eq!(
+        std::fs::read(command).unwrap(),
+        manual,
+        "repair must not downgrade a subsequently selected version"
+    );
 }

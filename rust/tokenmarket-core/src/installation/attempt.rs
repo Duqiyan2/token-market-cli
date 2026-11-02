@@ -37,6 +37,10 @@ fn read(environment: &InstallationEnvironment, tool: ToolId) -> Result<Option<At
         Err(e) => Err(e).context("无法读取安装恢复记录"),
     }
 }
+pub(super) fn pending(environment: &InstallationEnvironment, plan: &InstallPlan) -> Result<bool> {
+    Ok(read(environment, plan.tool)?
+        .is_some_and(|attempt| attempt.version == plan.version && !attempt.commands.is_empty()))
+}
 pub(super) fn repair(
     environment: &InstallationEnvironment,
     plan: &InstallPlan,
