@@ -37,13 +37,12 @@ impl InstallExecutor for GuiInstaller {
     fn version(&self, _: &Path) -> Result<String> {
         panic!("GUI installation must not launch the application to probe its version")
     }
-    fn application_version(&self, tool: ToolId, application: &Path) -> Result<String> {
-        if tool == ToolId::WorkBuddy && application.is_file() {
-            // The external Windows file-version boundary is represented by its
-            // published product version; no test Agent executable is launched.
-            return Ok("5.9.3".into());
+    fn application_version(&self, application: &Path) -> Result<Option<String>> {
+        if application.is_file() {
+            // Windows ProductVersion is an external metadata boundary.
+            return Ok(Some("5.9.3".into()));
         }
-        tokenmarket_core::installation::NativeInstallExecutor.application_version(tool, application)
+        tokenmarket_core::installation::NativeInstallExecutor.application_version(application)
     }
 }
 fn environment(home: &Path, platform: HostPlatform) -> InstallationEnvironment {

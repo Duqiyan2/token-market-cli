@@ -18,6 +18,7 @@ pub fn managed_command_directories(home: &Path) -> Vec<PathBuf> {
         home.join(".tokenmarket/tools/openclaw/bin"),
         home.join(".tokenmarket/tools/openclaw"),
         home.join(".tokenmarket/tools/openclaw/runtime"),
+        home.join(".tokenmarket/tools/opencode/bin"),
         home.join(".tokenmarket/tools/grok-build/bin"),
         home.join(".grok/bin"),
     ]
@@ -40,6 +41,14 @@ pub fn availability(
         },
     }
 }
+pub fn compatible_existing_version(tool: ToolId, actual: &str, target: &str) -> bool {
+    if tool == ToolId::OpenCode {
+        return super::opencode::compatible_existing_version(actual);
+    }
+    actual
+        .split_whitespace()
+        .any(|part| part.trim_start_matches('v') == target)
+}
 pub fn plan(
     tool: ToolId,
     environment: &InstallationEnvironment,
@@ -47,6 +56,9 @@ pub fn plan(
 ) -> Result<InstallPlan> {
     if super::gui::is_gui(tool) {
         return super::gui::plan(tool, environment, architecture);
+    }
+    if tool == ToolId::OpenCode {
+        return super::opencode::plan(environment, architecture);
     }
     if matches!(tool, ToolId::ClaudeCode | ToolId::Codex) {
         return super::native_cli::plan(tool, environment, architecture);

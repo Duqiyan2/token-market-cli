@@ -93,61 +93,25 @@ pub(super) fn plan(
         }, handoff],
     })
 }
-pub(super) fn application_version(tool: ToolId, application: &Path) -> Result<String> {
-    if tool == ToolId::DeepSeekHarness {
-        let resources = if application.is_dir() {
-            application.join("Contents/Resources")
-        } else {
-            application
-                .parent()
-                .context("应用路径无效")?
-                .join("resources")
-        };
-        let package: serde_json::Value = if resources.join("app.asar").exists() {
-            read_asar_package(&resources.join("app.asar"))?
-        } else {
-            read_package_json(&resources.join("app/package.json"))?
-        };
-        return package["version"]
-            .as_str()
-            .filter(|value| !value.is_empty())
-            .map(str::to_owned)
-            .context("无法读取 Harness 完整版本元数据");
-    }
-    if application.is_dir() {
-        let plist = plist::Value::from_file(application.join("Contents/Info.plist"))?;
-        return plist
-            .as_dictionary()
-            .and_then(|info| info.get("CFBundleShortVersionString"))
-            .and_then(plist::Value::as_string)
-            .map(str::to_owned)
-            .context("无法读取应用版本元数据");
-    }
-    #[cfg(windows)]
-    {
-        use std::{sync::atomic::AtomicBool, time::Duration};
-        let mut output = vec![];
-        let script = format!("$ErrorActionPreference = 'Stop'; [System.Diagnostics.FileVersionInfo]::GetVersionInfo('{}').ProductVersion", application.to_string_lossy().replace('\'', "''"));
-        super::run_process(
-            "powershell.exe",
-            &[
-                "-NoProfile".into(),
-                "-NonInteractive".into(),
-                "-Command".into(),
-                script,
-            ],
-            &[],
-            &AtomicBool::new(false),
-            &mut |line| output.push(line),
-            Duration::from_secs(15),
-        )?;
-        return output
-            .into_iter()
-            .find(|line| !line.trim().is_empty())
-            .context("无法读取应用版本元数据");
-    }
-    #[cfg(not(windows))]
-    bail!("无法读取当前平台的应用版本元数据")
+pub(super) fn harness_application_version(application: &Path) -> Result<String> {
+    let resources = if application.is_dir() {
+        application.join("Contents/Resources")
+    } else {
+        application
+            .parent()
+            .context("应用路径无效")?
+            .join("resources")
+    };
+    let package = if resources.join("app.asar").exists() {
+        read_asar_package(&resources.join("app.asar"))?
+    } else {
+        read_package_json(&resources.join("app/package.json"))?
+    };
+    package["version"]
+        .as_str()
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .context("无法读取 Harness 完整版本元数据")
 }
 
 fn harness_plan(environment: &InstallationEnvironment, architecture: &str) -> Result<InstallPlan> {

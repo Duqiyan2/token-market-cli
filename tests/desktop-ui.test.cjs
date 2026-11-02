@@ -113,6 +113,20 @@ test('GUI installation waits for native completion and can stop waiting without 
   }finally{await f.close();}
 });
 
+test('OpenCode installation uses the shared flow and leaves connection as a separate action', async () => {
+  const f=await openFixture(); try {
+    const p=f.page;
+    await p.locator('[data-tool="opencode"] .tool-install').click();
+    await p.locator('.tool-install-status').filter({hasText:'安装完成'}).waitFor();
+    assert.deepEqual((await calls(p,'start_tool_installation'))[0].args,{tool:'opencode'});
+    assert.equal((await calls(p,'connect_tool')).length,0);
+    assert.equal((await calls(p,'test_tool_connection')).length,0);
+    await p.locator('.tool-install-close').click();
+    await p.locator('[data-tool="opencode"] .tool-connect').waitFor();
+    assert.deepEqual(f.errors,[]);
+  } finally { await f.close(); }
+});
+
 test('installation failure preserves the error and offers a retry', async () => {
   const f=await openFixture({installFail:true}); try {
     const p=f.page;
