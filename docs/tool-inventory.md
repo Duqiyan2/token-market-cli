@@ -21,14 +21,14 @@ connection action. No environment variable or real configuration is mutated.
 Configuration locations continue to use the existing adapters and their explicit
 `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `WORKBUDDY_CONFIG_PATH`, `DSH_HOME`,
 `DSH_ACTIVE_PROFILE`, `OPENCLAW_CONFIG_PATH` and `OPENCODE_CONFIG` overrides.
-New adapters also respect `GROK_HOME`, `PI_CODING_AGENT_DIR`, and MiniMax
+New adapters also respect `GROK_HOME`, `HERMES_HOME`, `PI_CODING_AGENT_DIR`, and MiniMax
 `MINIMAX_DATA_DIR` / `MAVIS_DATA_DIR` (see [MiniMax profile rules](minimax-code.md)).
 Windows home discovery uses `USERPROFILE`.
 
 ## Installation evidence
 
 - Commands: `claude`, `codex`, `workbuddy`, `dsh`, `openclaw`, `opencode`, `grok`,
-  `pi`, `mcode`.
+  `hermes`, `pi`, `mcode`, `omp`.
   Unix discovery requires an executable file, including a valid symlink target.
   Search includes PATH and common user/package-manager binary directories.
 - macOS desktop applications: WorkBuddy, DeepSeek Harness, OpenClaw and OpenCode
@@ -67,6 +67,7 @@ never supplies an arbitrary download URL. Verified primary pages, 2026-10-28:
 | DeepSeek Harness | [DeepSeek downloads](https://www.deepseek.com/download/) |
 | OpenClaw | [OpenClaw install](https://docs.openclaw.ai/install) |
 | OpenCode | [OpenCode install](https://opencode.ai/docs/) |
+| Hermes | [Hermes CLI installation](https://hermes-agent.nousresearch.com/docs/getting-started/installation) |
 
 DeepSeek's [desktop README](https://github.com/deepseek-ai/deepseek-harness/blob/master/apps/desktop/README.md)
 confirms `dsh` / `dsh.cmd`, optional command registration and uninstall preservation
@@ -133,3 +134,8 @@ revision; a successful job is CI proof for that revision. These checks do not
 establish installed-bundle protocol handoff, registry/installer integration,
 application/computer restart, actual tool launch or target deployment. Those
 remain separate [native acceptance](desktop-login.md#verification-boundaries).
+
+Hermes CLI uses the pinned source bootstrap and provider YAML contract documented
+in [Hermes adapter notes](hermes.md). Its Windows data root is LOCALAPPDATA/hermes,
+with HERMES_HOME taking precedence; desktop package architecture limits do not
+restrict the verified CLI matrix.
