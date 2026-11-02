@@ -84,6 +84,7 @@ Choose a tool in the app, or use its ID in CLI commands:
 | OpenClaw | `openclaw` |
 | OpenCode | `opencode` |
 | Grok Build | `grok-build` |
+| Hermes | `hermes` |
 | Pi | `pi` |
 | MiniMax Code | `minimax-code` |
 | Oh My Pi | `oh-my-pi` |

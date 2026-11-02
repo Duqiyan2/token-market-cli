@@ -190,6 +190,10 @@ impl ToolInventory {
     }
     /// Desktop discovery and desktop writes share this path. Terminal CLI paths are unchanged.
     pub fn config_path(&self, tool: ToolId) -> PathBuf {
+        if tool == ToolId::Hermes {
+            return crate::config::hermes_home(&self.environment.home, self.environment.platform)
+                .join("config.yaml");
+        }
         if tool == ToolId::OhMyPi {
             return crate::connections::oh_my_pi::config_path(&self.environment.home);
         }
@@ -282,6 +286,7 @@ impl ToolInventory {
             ToolId::OpenClaw => &["openclaw"],
             ToolId::OpenCode => &["opencode"],
             ToolId::GrokBuild => &["grok"],
+            ToolId::Hermes => &["hermes"],
             ToolId::Pi => &["pi"],
             ToolId::MiniMaxCode => &["mcode"],
             ToolId::OhMyPi => &["omp"],
@@ -350,6 +355,7 @@ pub fn official_download_url(tool: ToolId) -> &'static str {
         ToolId::OpenClaw => "https://docs.openclaw.ai/install",
         ToolId::OpenCode => "https://opencode.ai/docs/",
         ToolId::GrokBuild => "https://github.com/xai-org/grok-build",
+        ToolId::Hermes => "https://hermes-agent.nousresearch.com/docs/getting-started/installation",
         ToolId::Pi => "https://pi.dev/",
         ToolId::MiniMaxCode => "https://github.com/MiniMax-AI/minimax-code/releases/tag/v0.7.2",
         ToolId::OhMyPi => "https://omp.sh/",
@@ -561,6 +567,7 @@ impl ToolInventory {
             ToolId::OpenClaw => "openclaw",
             ToolId::OpenCode => "opencode",
             ToolId::GrokBuild => "grok",
+            ToolId::Hermes => "hermes",
             ToolId::Pi => "pi",
             ToolId::MiniMaxCode => "mcode",
             ToolId::OhMyPi => "omp",

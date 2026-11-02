@@ -71,7 +71,7 @@ impl ConfigDocument {
     pub fn parse(tool: ToolId, before: &Option<Vec<u8>>, path: &Path) -> Result<Self> {
         if matches!(
             tool,
-            ToolId::GrokBuild | ToolId::Pi | ToolId::MiniMaxCode | ToolId::OhMyPi
+            ToolId::Hermes | ToolId::GrokBuild | ToolId::Pi | ToolId::MiniMaxCode | ToolId::OhMyPi
         ) {
             return Ok(Self::Provider(ProviderConfig::parse(tool, before, path)?));
         }

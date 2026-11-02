@@ -16,6 +16,7 @@ fn registers_all_supported_tools() {
             "openclaw",
             "opencode",
             "grok-build",
+            "hermes",
             "pi",
             "minimax-code",
             "oh-my-pi"
@@ -38,6 +39,7 @@ fn serializes_every_tool_with_the_server_contract_id() {
         ("openclaw", "openclaw"),
         ("opencode", "opencode"),
         ("grok-build", "grok-build"),
+        ("hermes", "hermes"),
         ("pi", "pi"),
         ("minimax-code", "minimax-code"),
         ("oh-my-pi", "oh-my-pi"),

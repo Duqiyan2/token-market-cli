@@ -21,6 +21,8 @@ pub fn managed_command_directories(home: &Path) -> Vec<PathBuf> {
         home.join(".tokenmarket/tools/opencode/bin"),
         home.join(".tokenmarket/tools/grok-build/bin"),
         home.join(".grok/bin"),
+        home.join(".tokenmarket/tools/hermes/checkout/.hermes/bin"),
+        crate::config::hermes_home(home, HostPlatform::Windows).join("bin"),
         home.join(".tokenmarket/tools/minimax-code/bin"),
         home.join(".tokenmarket/tools/oh-my-pi/bin"),
         home.join(".tokenmarket/tools/pi/runtime"),
@@ -46,6 +48,12 @@ pub fn availability(
     }
 }
 pub fn compatible_existing_version(tool: ToolId, actual: &str, target: &str) -> bool {
+    if tool == ToolId::Hermes {
+        return actual.split_whitespace().any(|part| {
+            let version = part.trim_start_matches('v');
+            version.starts_with("0.22.") && version[5..].parse::<u64>().is_ok()
+        });
+    }
     if tool == ToolId::OpenCode {
         return super::opencode::compatible_existing_version(actual);
     }
@@ -58,6 +66,9 @@ pub fn plan(
     environment: &InstallationEnvironment,
     architecture: &str,
 ) -> Result<InstallPlan> {
+    if tool == ToolId::Hermes {
+        return super::hermes::plan(environment, architecture);
+    }
     if super::gui::is_gui(tool) {
         return super::gui::plan(tool, environment, architecture);
     }

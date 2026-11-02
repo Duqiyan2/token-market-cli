@@ -20,7 +20,7 @@ fn missing_tools_offer_official_downloads_and_refuse_connection_even_with_leftov
     std::fs::create_dir_all(root.path().join("Applications/WorkBuddy.app")).unwrap();
     let inventory = ToolInventory::new(environment(root.path(), HostPlatform::MacOs));
     let entries = inventory.list().unwrap();
-    assert_eq!(entries.len(), 10);
+    assert_eq!(entries.len(), 11);
     assert_eq!(
         entries.iter().map(|e| e.name).collect::<Vec<_>>(),
         [
@@ -31,6 +31,7 @@ fn missing_tools_offer_official_downloads_and_refuse_connection_even_with_leftov
             "OpenClaw",
             "OpenCode",
             "Grok Build",
+            "Hermes",
             "Pi",
             "MiniMax Code",
             "Oh My Pi"

@@ -4,6 +4,7 @@ mod issuance;
 pub use issuance::CredentialLoss;
 mod grok;
 mod harness;
+mod hermes;
 mod jsonc;
 mod minimax;
 mod model_plan;
@@ -421,6 +422,7 @@ impl ConnectionManager {
                 | ToolId::OpenClaw
                 | ToolId::OpenCode
                 | ToolId::GrokBuild
+                | ToolId::Hermes
                 | ToolId::Pi
                 | ToolId::MiniMaxCode
                 | ToolId::OhMyPi

@@ -84,6 +84,7 @@ tokenmarket workspace <workspace-id>
 | OpenClaw | `openclaw` |
 | OpenCode | `opencode` |
 | Grok Build | `grok-build` |
+| Hermes | `hermes` |
 | Pi | `pi` |
 | MiniMax Code | `minimax-code` |
 | Oh My Pi | `oh-my-pi` |
