@@ -13,6 +13,53 @@ async function detail(page,id) { await page.locator(`[data-tool="${id}"] .tool-d
 async function switchTeam(page) { await page.locator('.workspace-switch').click();await page.locator('dialog[open] [data-workspace-id="team"]').click();await page.locator('.workspace-switch').filter({hasText:'团队空间'}).waitFor(); }
 async function manage(page) { await page.locator('.tool-menu summary').click(); }
 
+test('OpenClaw installs with progress and refreshes without implicitly connecting or testing', async () => {
+  const f=await openFixture(); try {
+    const p=f.page;
+    await p.locator('[data-tool="openclaw"] .tool-install').click();
+    await p.locator('.tool-install-dialog[open]').waitFor();
+    await p.locator('.tool-install-status').filter({hasText:'安装完成'}).waitFor();
+    assert.match(await p.locator('.tool-install-output').innerText(),/运行依赖/);
+    assert.equal((await calls(p,'start_tool_installation')).length,1);
+    assert.equal((await calls(p,'connect_tool')).length,0);
+    assert.equal((await calls(p,'test_tool_connection')).length,0);
+    await p.locator('.tool-install-close').click();
+    await p.locator('[data-tool="openclaw"] .tool-connect').waitFor();
+    assert.deepEqual(f.errors,[]);
+  } finally { await f.close(); }
+});
+
+test('installation can be cancelled and unsupported installs explain their disabled action', async () => {
+  const f=await openFixture({installPending:true}); try {
+    const p=f.page;
+    const unsupported=p.locator('[data-tool="opencode"] .tool-install');
+    assert.equal(await unsupported.isDisabled(),true);
+    assert.match(await unsupported.getAttribute('title'),/兼容安装方案/);
+    await p.locator('[data-tool="openclaw"] .tool-install').click();
+    await p.locator('.tool-install-status').filter({hasText:'运行依赖'}).waitFor();
+    await p.locator('.tool-install-cancel').click();
+    await p.locator('.tool-install-status').filter({hasText:'安装已取消'}).waitFor();
+    assert.equal(await p.locator('.tool-install-retry').isVisible(),true);
+    assert.equal((await calls(p,'cancel_tool_installation')).length,1);
+    assert.equal((await calls(p,'connect_tool')).length,0);
+    assert.equal((await calls(p,'test_tool_connection')).length,0);
+    assert.deepEqual(f.errors,[]);
+  } finally { await f.close(); }
+});
+
+test('installation failure preserves the error and offers a retry', async () => {
+  const f=await openFixture({installFail:true}); try {
+    const p=f.page;
+    await p.locator('[data-tool="openclaw"] .tool-install').click();
+    await p.locator('.tool-install-status').filter({hasText:'依赖下载失败'}).waitFor();
+    assert.match(await p.locator('.tool-install-output').innerText(),/运行依赖/);
+    await p.locator('.tool-install-retry').click();
+    await p.locator('.tool-install-status').filter({hasText:'依赖下载失败'}).waitFor();
+    assert.equal((await calls(p,'start_tool_installation')).length,2);
+    assert.deepEqual(f.errors,[]);
+  } finally { await f.close(); }
+});
+
 test('real UI renders safe native summaries, searches, navigates and fits desktop/mobile', async () => {
   const f = await openFixture();try {
     const p=f.page;assert.equal(await p.locator('.tool-row').count(),6);

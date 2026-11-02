@@ -43,8 +43,12 @@ Windows home discovery uses `USERPROFILE`.
 - A configuration directory such as `.dsh`, credentials or an old key record is
   never sufficient installation evidence. No detection probe executes a tool.
 
-The six rows display native SVG tool marks, names and installation status.
-Missing tools offer the fixed official download page and a disabled Connect.
+The rows display tool marks, names and installation status. Missing tools offer
+an Install button with catalogue-owned compatibility information. OpenClaw's
+first installation slice uses the shared installation manager; recipes for the
+other tools are added separately. An unavailable recipe disables Install with
+an explanation and retains the fixed official installation-guide link.
+Connection remains unavailable until actual installation is detected.
 The UI refreshes after login, explicit re-detection, foreground/visibility return
 and every 15 seconds while visible and authenticated. Logout clears the region
 and late results cannot restore a previous account's inventory. Old CLI key-history files are not read or projected. Unknown tool configuration
@@ -67,6 +71,27 @@ confirms `dsh` / `dsh.cmd`, optional command registration and uninstall preserva
 of `.dsh`. WorkBuddy's [vendor download archive](https://www.codebuddy.cn/docs/workbuddy/Download-History)
 links the vendor's current site and macOS/Windows installers. These are verified
 landing-page entries, not a claim that downloading/installing succeeded.
+
+## Explicit installation
+
+`InstallationManager` is separate from connection and credential management.
+OpenClaw uses official version-bound rootless installation on macOS/Linux, or
+private Node preparation and private-prefix npm installation on Windows. Both
+skip onboarding and Gateway service work. The initial source-checked stable pin
+is `2026.10.9`; native/runtime acceptance remains separate.
+
+The desktop exposes progress, output, cancellation and failure retry, then
+refreshes actual installation and retained connection state. The terminal entry
+is `tokenmarket install openclaw`; Ctrl-C cancels the managed process tree.
+Cancellation retains dependencies already prepared. Installer success without
+an executable does not count as installed. Same-tool installation is serialized
+across client processes by an OS file lock.
+
+Version probes run only during explicit operations. Read-only inventory never
+executes tools. The public explicit `installed_version` probe can support a
+tool-specific compatibility gate before Connect writes configuration; an
+installer's selected version must not be confused with the adapter's entire
+documented compatible version range.
 
 ## Integration and verification boundaries
 

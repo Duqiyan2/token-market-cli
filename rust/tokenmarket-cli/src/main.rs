@@ -24,6 +24,8 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Commands {
+    /// Install a supported tool without connecting it or running a paid test
+    Install { tool: String },
     /// Sign in once for both CLI and desktop; no tool Key is issued
     Login {
         #[arg(long)]
@@ -84,6 +86,38 @@ fn workspace_client(session: &DesktopSession) -> DesktopWorkspace {
 }
 async fn run() -> Result<()> {
     match Cli::parse().command {
+        Commands::Install { tool } => {
+            let tool = tool_id(&tool)?;
+            let manager = tokenmarket_core::installation::InstallationManager::current();
+            manager.start(tool)?;
+            let mut printed = 0;
+            loop {
+                let state = manager.status(tool).context("安装状态不可用")?;
+                let new_lines = state.output_sequence.saturating_sub(printed) as usize;
+                for line in state
+                    .output
+                    .iter()
+                    .skip(state.output.len().saturating_sub(new_lines))
+                {
+                    println!("{line}");
+                }
+                printed = state.output_sequence;
+                if state.stage.is_terminal() {
+                    println!("{}", state.detail);
+                    if state.stage != tokenmarket_core::installation::InstallStage::Succeeded {
+                        bail!("安装未完成")
+                    }
+                    break;
+                }
+                tokio::select! {
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(200)) => {},
+                    result = tokio::signal::ctrl_c() => {
+                        result.context("无法监听安装取消信号")?;
+                        manager.cancel(tool)?;
+                    }
+                }
+            }
+        }
         Commands::Login { no_browser } => {
             let login = login_manager();
             if let Some(session) = login.restore().await? {

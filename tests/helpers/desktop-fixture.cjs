@@ -13,6 +13,8 @@ module.exports = async function openFixture(browser, options = {}) {
     const connection = (id, state = 'configured_untested') => ({state,owner:{id:user.id,name:user.name},boundWorkspace:{id:personal.id,name:personal.name},models:[options.model || 'server-model'],keyId:'receipt-'+id,protocol:'OPENAI_CHAT_COMPLETIONS',testResult:null});
     fixture.entries = [['claude-code','Claude Code'],['codex','Codex CLI'],['workbuddy','WorkBuddy'],['deepseek-harness','DeepSeek Harness'],['openclaw','OpenClaw'],['opencode','OpenCode']].map(([id,name],i) => ({id,name,installed:i<3,canConnect:i<3,connection:i<2?connection(id,i===0?'test_passed':options.changed?'configuration_changed':'configured_untested'):null}));
     if (options.multi) fixture.entries[2].connection = {...connection('workbuddy'),models:['server-model-a','server-model-b']};
+    fixture.entries.forEach(entry => { entry.installation = {supported:entry.id === 'openclaw',reason:entry.id === 'openclaw'?null:'当前系统暂无兼容安装方案',version:entry.id === 'openclaw'?'2026.10.9':null}; });
+    fixture.installation = null;
     if (options.legacy) fixture.entries[3].connection = {state:'legacy',owner:null,boundWorkspace:null,keyId:null,protocol:null,models:['legacy-model']};
     const clone = value => structuredClone(value);
     const loginStatus = () => ({context:fixture.signedIn?{user:{id:user.id,name:user.name},default_workspace:fixture.current}:null,pending:fixture.pending});
@@ -25,6 +27,9 @@ module.exports = async function openFixture(browser, options = {}) {
       if (options.credentialLost && ['connect_tool','reconnect_tool'].includes(command) && !args.recovery) throw {message:'本机保存的连接信息已丢失',recovery:{keyId:'missing-fixture',ownerId:user.id,workspaceId:fixture.current.id,ownerName:user.name,workspaceName:fixture.current.name}};
       if (args.recovery && (args.recovery.ownerId!==user.id || args.recovery.workspaceId!==fixture.current.id)) throw Error('账号或空间已改变');
       switch(command) {
+        case 'start_tool_installation': fixture.installation={tool:args.tool,stage:'dependencies',detail:'正在准备运行依赖',output:['准备工具运行依赖'],installed:false}; return clone(fixture.installation);
+        case 'tool_installation_status': if(fixture.installation.stage !== 'cancelled' && !options.installPending && !options.installFail){fixture.installation={...fixture.installation,stage:'succeeded',detail:'安装完成，请单独接入',installed:true};entry.installed=true;entry.canConnect=true;} if(options.installFail)fixture.installation={...fixture.installation,stage:'failed',detail:'依赖下载失败，请重试'}; return clone(fixture.installation);
+        case 'cancel_tool_installation': fixture.installation={...fixture.installation,stage:'cancelled',detail:'安装已取消，已准备的依赖保留'}; return null;
         case 'desktop_login_status': case 'refresh_desktop_session': return clone(loginStatus());
         case 'desktop_workspace_context': if(fixture.workspaceError)throw Error('空间读取失败');return clone(workspace());
         case 'desktop_tool_inventory': if(fixture.inventoryError)throw Error('工具读取失败');if(fixture.deferInventory)return new Promise(resolve=>fixture.resolveInventory=()=>resolve(clone(fixture.entries)));return clone(fixture.entries);
