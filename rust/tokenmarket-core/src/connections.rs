@@ -81,6 +81,8 @@ pub struct ConnectionRecord {
     #[serde(default)]
     pub platform_url: String,
     pub created_at: String,
+    #[serde(default)]
+    configuration_location: Option<crate::inventory::ConfigurationLocation>,
     pub receipts: Vec<FileReceipt>,
     api_key: String,
 }
@@ -453,6 +455,7 @@ impl ConnectionManager {
         if fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
             bail!("工具配置是符号链接，请先确认实际配置路径");
         }
+        let configuration_location = inventory.configuration_location(tool)?;
         let before = match fs::read(&path) {
             Ok(v) => Some(v),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
@@ -550,6 +553,7 @@ impl ConnectionManager {
                 &key,
                 &mut records,
                 previous.as_ref(),
+                configuration_location,
             )
             .await;
         let connection = result?;
@@ -571,6 +575,7 @@ impl ConnectionManager {
         key: &IssuedKey,
         records: &mut Vec<ConnectionRecord>,
         previous: Option<&ConnectionRecord>,
+        configuration_location: crate::inventory::ConfigurationLocation,
     ) -> Result<ConnectionSummary> {
         if key.bound_workspace.id != context.workspace_id
             || key.owner.id != context.owner_id
@@ -631,6 +636,7 @@ impl ConnectionManager {
             .transpose()?;
         self.validate_for_apply(context, tool, device_id, key)
             .await?;
+        configuration_location.verify(tool)?;
         let mut receipts = vec![];
         for file in &files {
             let current = match fs::read(&file.path) {
@@ -709,6 +715,7 @@ impl ConnectionManager {
             gateway_url: self.gateway_url.clone(),
             platform_url: self.platform_url.trim_end_matches('/').into(),
             created_at: crate::config::now_iso8601(),
+            configuration_location: Some(configuration_location),
             receipts,
             api_key: key.api_key.clone(),
         };

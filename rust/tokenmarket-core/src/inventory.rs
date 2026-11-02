@@ -4,13 +4,13 @@ use crate::{
     ToolId,
 };
 use anyhow::{bail, Context, Result};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     fs,
     path::{Path, PathBuf},
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HostPlatform {
     MacOs,
     Windows,
@@ -18,7 +18,7 @@ pub enum HostPlatform {
 }
 
 /// Platform boundary used by the desktop and by isolated filesystem fixtures.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstallationEnvironment {
     pub platform: HostPlatform,
     pub home: PathBuf,
@@ -132,6 +132,38 @@ pub struct ToolInventoryEntry {
     pub installation: crate::installation::InstallationAvailability,
 }
 
+/// Private connection context: re-resolve the same installation's effective path
+/// using current overrides before displaying a valid verdict or sending traffic.
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct ConfigurationLocation {
+    environment: InstallationEnvironment,
+    path: PathBuf,
+    follows_process_home: bool,
+}
+impl ConfigurationLocation {
+    pub(crate) fn verify(&self, tool: ToolId) -> Result<()> {
+        let mut environment = self.environment.clone();
+        if self.follows_process_home {
+            environment.home = crate::config::home_dir();
+        }
+        let current = ToolInventory::new(environment).config_path(tool);
+        if absolute_config_path(&current)? != self.path {
+            bail!(
+                "{} 活动配置目录/profile 已改变，请先取消原连接后重新检测接入",
+                get_adapter(tool).name
+            )
+        }
+        Ok(())
+    }
+}
+fn absolute_config_path(path: &Path) -> Result<PathBuf> {
+    Ok(if path.is_absolute() {
+        path.into()
+    } else {
+        std::env::current_dir()?.join(path)
+    })
+}
+
 pub struct ToolInventory {
     environment: InstallationEnvironment,
 }
@@ -141,6 +173,13 @@ impl ToolInventory {
     }
     pub fn current() -> Self {
         Self::new(InstallationEnvironment::current())
+    }
+    pub(crate) fn configuration_location(&self, tool: ToolId) -> Result<ConfigurationLocation> {
+        Ok(ConfigurationLocation {
+            environment: self.environment.clone(),
+            path: absolute_config_path(&self.config_path(tool))?,
+            follows_process_home: self.environment.home == crate::config::home_dir(),
+        })
     }
     pub fn list(&self) -> Result<Vec<ToolInventoryEntry>> {
         let manager = crate::connections::ConnectionManager::new(

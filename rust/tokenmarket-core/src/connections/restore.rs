@@ -549,6 +549,9 @@ fn rollback(written: &[&Change]) -> Result<()> {
 
 /// Check actual owned fields before billable traffic; diagnostics never include values.
 pub(super) fn verify_applied(record: &ConnectionRecord) -> Result<()> {
+    if let Some(location) = &record.configuration_location {
+        location.verify(record.tool)?;
+    }
     if record.receipts.is_empty()
         || record.receipts.iter().all(|receipt| {
             receipt.fields.iter().all(|field| {
