@@ -291,16 +291,19 @@ fn native_windows_application_metadata_handles_literal_paths_and_rejects_read_er
     let missing = directory.join("missing.exe");
     assert!(NativeInstallExecutor.application_version(&missing).is_err());
 
-    // Copy an OS-supplied PE rather than running any installed Agent or installer.
+    // Compare copies with the same resource context. Reading the OS source can
+    // also resolve a localized MUI sidecar that is absent beside either copy.
     let original = PathBuf::from(std::env::var_os("SystemRoot").unwrap())
         .join("System32/WindowsPowerShell/v1.0/powershell.exe");
+    let ordinary = root.path().join("application.exe");
+    let copied = directory.join("application.exe");
+    std::fs::copy(&original, &ordinary).unwrap();
+    std::fs::copy(&original, &copied).unwrap();
     let expected = NativeInstallExecutor
-        .application_version(&original)
+        .application_version(&ordinary)
         .unwrap()
         .expect("the OS PowerShell executable has version metadata");
     assert!(expected.starts_with(|c: char| c.is_ascii_digit()));
-    let copied = directory.join("application.exe");
-    std::fs::copy(original, &copied).unwrap();
     assert_eq!(
         NativeInstallExecutor.application_version(&copied).unwrap(),
         Some(expected)
