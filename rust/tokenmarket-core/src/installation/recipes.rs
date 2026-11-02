@@ -1,0 +1,104 @@
+//! Official version-bound installer recipes. Adding a tool does not alter connection policy.
+use super::{InstallPlan, InstallStage, InstallStep, InstallationAvailability};
+use crate::{
+    inventory::{HostPlatform, InstallationEnvironment},
+    ToolId,
+};
+use anyhow::{bail, Result};
+use std::path::{Path, PathBuf};
+
+pub const OPENCLAW_VERSION: &str = "2026.10.9";
+pub fn managed_command_directories(home: &Path) -> Vec<PathBuf> {
+    vec![
+        home.join(".tokenmarket/tools/openclaw/bin"),
+        home.join(".tokenmarket/tools/openclaw"),
+        home.join(".tokenmarket/tools/openclaw/runtime"),
+    ]
+}
+pub fn availability(
+    tool: ToolId,
+    environment: &InstallationEnvironment,
+    architecture: &str,
+) -> InstallationAvailability {
+    match plan(tool, environment, architecture) {
+        Ok(plan) => InstallationAvailability {
+            supported: true,
+            reason: None,
+            version: Some(plan.version),
+        },
+        Err(error) => InstallationAvailability {
+            supported: false,
+            reason: Some(error.to_string()),
+            version: None,
+        },
+    }
+}
+pub fn plan(
+    tool: ToolId,
+    environment: &InstallationEnvironment,
+    architecture: &str,
+) -> Result<InstallPlan> {
+    if tool != ToolId::OpenClaw {
+        bail!("该工具的自动安装流程尚未配置，请查看官方安装说明")
+    }
+    if !matches!(architecture, "aarch64" | "x86_64") {
+        bail!("官方安装方案不支持当前架构 {architecture}")
+    }
+    let prefix = environment.home.join(".tokenmarket/tools/openclaw");
+    let scripts = environment.home.join(".tokenmarket/installers/openclaw");
+    let step = if environment.platform == HostPlatform::Windows {
+        let installer = scripts.join("install.ps1");
+        let script = format!("& '{}' -NodeOnly -NodePrefix '{}'; if (-not $?) {{ exit 1 }}; $env:PATH = '{};' + $env:PATH; & '{}' install --global --prefix '{}' 'openclaw@{}'; if ($LASTEXITCODE -ne 0) {{ exit $LASTEXITCODE }}", ps(&installer), ps(&prefix.join("runtime")), ps(&prefix.join("runtime")), ps(&prefix.join("runtime/npm.cmd")), ps(&prefix.join("runtime")), OPENCLAW_VERSION);
+        InstallStep {
+            stage: InstallStage::Dependencies,
+            program: "powershell.exe".into(),
+            args: vec![
+                "-NoProfile".into(),
+                "-NonInteractive".into(),
+                "-ExecutionPolicy".into(),
+                "Bypass".into(),
+                "-Command".into(),
+                script,
+            ],
+            environment: vec![("OPENCLAW_NO_ONBOARD".into(), "1".into())],
+            download: Some(("https://openclaw.ai/install.ps1".into(), installer)),
+        }
+    } else {
+        let installer = scripts.join("install-cli.sh");
+        InstallStep {
+            stage: InstallStage::Dependencies,
+            program: "bash".into(),
+            args: vec![
+                installer.to_string_lossy().into(),
+                "--prefix".into(),
+                prefix.to_string_lossy().into(),
+                "--version".into(),
+                OPENCLAW_VERSION.into(),
+                "--npm".into(),
+                "--runtime-only".into(),
+                "--no-onboard".into(),
+                "--json".into(),
+            ],
+            environment: vec![("OPENCLAW_NO_ONBOARD".into(), "1".into())],
+            download: Some(("https://openclaw.ai/install-cli.sh".into(), installer)),
+        }
+    };
+    let mut execution = step.clone();
+    execution.download = None;
+    let download = InstallStep {
+        stage: InstallStage::Downloading,
+        program: String::new(),
+        args: vec![],
+        environment: vec![],
+        download: step.download,
+    };
+    Ok(InstallPlan {
+        tool,
+        version: OPENCLAW_VERSION.into(),
+        command: "openclaw".into(),
+        steps: vec![download, execution],
+    })
+}
+fn ps(path: &Path) -> String {
+    path.to_string_lossy().replace('\'', "''")
+}

@@ -13,6 +13,7 @@ pub mod credential_vault;
 pub mod desktop;
 
 pub mod desktop_workspace;
+pub mod installation;
 pub mod inventory;
 
 pub mod connections;

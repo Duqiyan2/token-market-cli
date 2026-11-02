@@ -47,6 +47,9 @@ impl InstallationEnvironment {
             home.join(".cargo/bin"),
             home.join(".opencode/bin"),
         ]);
+        command_directories.extend(crate::installation::recipes::managed_command_directories(
+            &home,
+        ));
         let mut application_directories = vec![];
         if platform == HostPlatform::Windows {
             if let Some(appdata) = std::env::var_os("APPDATA") {
@@ -126,6 +129,7 @@ pub struct ToolInventoryEntry {
     pub download_url: &'static str,
     pub config_path: String,
     pub connection: Option<ConnectionProjection>,
+    pub installation: crate::installation::InstallationAvailability,
 }
 
 pub struct ToolInventory {
@@ -161,6 +165,11 @@ impl ToolInventory {
                     id: adapter.id,
                     name: adapter.name,
                     installed,
+                    installation: crate::installation::recipes::availability(
+                        adapter.id,
+                        &self.environment,
+                        std::env::consts::ARCH,
+                    ),
                     can_connect: installed,
                     download_url: official_download_url(adapter.id),
                     config_path: self.config_path(adapter.id).display().to_string(),
@@ -298,7 +307,7 @@ impl InstallationEnvironment {
     pub(crate) fn has_command(&self, command: &str) -> bool {
         self.command_path(command).is_some()
     }
-    fn command_path(&self, command: &str) -> Option<PathBuf> {
+    pub(crate) fn command_path(&self, command: &str) -> Option<PathBuf> {
         for directory in &self.command_directories {
             if self.platform != HostPlatform::Windows {
                 let path = directory.join(command);

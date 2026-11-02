@@ -11,6 +11,7 @@
   let pendingReconnect = null;
   let pendingRecovery = null;
   let generation = 0;
+  let installing = false;
   let entries = [];
   let selectedTool = null, filter = 'all', search = '';
   const detailRoot = document.getElementById('tool-detail-region');
@@ -51,6 +52,43 @@
   function actionButton(label, className, action, disabled = false) {
     const button = text('button', label, className); button.type = 'button'; button.disabled = disabled; button.onclick = action; return button;
   }
+  const installDialog = document.createElement('dialog');
+  installDialog.className = 'tool-install-dialog';
+  installDialog.innerHTML = '<h3></h3><p class="tool-install-status" role="status" aria-live="polite"></p><pre class="tool-install-output"></pre><div class="tool-actions"><button type="button" class="tool-install-cancel">取消安装</button><button type="button" class="tool-install-retry" hidden>重试安装</button><button type="button" class="tool-install-close" hidden>关闭</button></div>';
+  document.body.append(installDialog);
+  let installationTool = null;
+  const installTerminal = state => ['succeeded','failed','cancelled'].includes(state?.stage);
+  const installStages = {preparing:'正在准备安装',downloading:'正在下载安装程序',dependencies:'正在准备运行依赖',installing:'正在安装',waiting_for_user:'请完成原生安装器中的步骤',detecting:'正在检测实际安装',succeeded:'安装完成',failed:'安装未完成',cancelled:'安装已取消'};
+  function renderInstallation(state) {
+    const label = installStages[state.stage] || '正在安装';
+    installDialog.querySelector('.tool-install-status').textContent = !state.detail || state.detail === label ? label : `${label}：${state.detail}`;
+    const output = installDialog.querySelector('.tool-install-output'); output.textContent = (state.output || []).join('\n'); output.scrollTop = output.scrollHeight;
+    const terminal = installTerminal(state);
+    installDialog.querySelector('.tool-install-cancel').hidden = terminal || state.stage === 'waiting_for_user';
+    installDialog.querySelector('.tool-install-retry').hidden = !['failed','cancelled'].includes(state.stage);
+    installDialog.querySelector('.tool-install-close').hidden = !terminal && state.stage !== 'waiting_for_user';
+  }
+  async function install(entry) {
+    const current = generation; installing = true; installationTool = entry;
+    installDialog.querySelector('h3').textContent = `安装 ${entry.name}`;
+    renderInstallation({stage:'preparing',detail:'安装不会自动接入或发起模型测试',output:[]});
+    if (!installDialog.open) installDialog.showModal(); render();
+    try {
+      let state = await invoke('start_tool_installation', {tool:entry.id});
+      while (authenticated && current === generation) {
+        renderInstallation(state);
+        if (installTerminal(state)) break;
+        await new Promise(resolve => setTimeout(resolve, 300));
+        state = await invoke('tool_installation_status', {tool:entry.id});
+        if (!state) throw new Error('安装状态暂时不可用，请重新检测');
+      }
+    } catch (error) { if (authenticated && current === generation) renderInstallation({stage:'failed',detail:String(error),output:[]}); }
+    finally { installing = false; if (authenticated && current === generation) await refresh(true); }
+  }
+  installDialog.querySelector('.tool-install-close').onclick = () => installDialog.close();
+  installDialog.querySelector('.tool-install-retry').onclick = () => { if (installationTool) void install(installationTool); };
+  installDialog.querySelector('.tool-install-cancel').onclick = async () => { if (!installationTool) return; try { await invoke('cancel_tool_installation', {tool:installationTool.id}); } catch (error) { feedback(String(error),true); } };
+  installDialog.addEventListener('cancel', event => { if (installing) event.preventDefault(); });
   async function launch(entry) {
     const current = generation;
     try { await invoke('launch_connected_tool', {tool:entry.id}); if (authenticated && current === generation) feedback('已请求启动。现有会话请退出后重新启动以读取配置。'); }
@@ -68,7 +106,7 @@
   }
   function actions(entry, detailed = false) {
     const testing = Boolean(window.TokenMarketConnectionTests?.busy);
-    const locked = loading || connecting || disconnecting || testing;
+    const locked = loading || connecting || disconnecting || testing || installing;
     const group = text('div', '', 'tool-actions');
     if (entry.connection) {
       group.append(actionButton('打开工具', 'primary tool-launch', () => launch(entry), !entry.installed || locked));
@@ -84,11 +122,12 @@
       }
     } else if (!entry.connection && entry.installed) {
       group.append(actionButton('接入', 'primary tool-connect', () => connect(entry), !entry.canConnect || locked));
-    } else if (!entry.installed) {
-      group.append(actionButton('前往安装', 'tool-download', async () => {
-        try { await invoke('download_tool', {tool:entry.id}); feedback('已打开官网。安装完成后点击“重新检测”。'); }
-        catch (error) { showResult('无法打开安装页面', String(error)); }
-      }, locked));
+    }
+    if (!entry.installed) {
+      const button = actionButton('安装', 'tool-install', () => install(entry), locked || !entry.installation?.supported);
+      if (!entry.installation?.supported) button.title = entry.installation?.reason || '暂无兼容安装方案';
+      group.append(button);
+      if (!entry.installation?.supported) group.append(text('span', entry.installation?.reason || '暂无兼容安装方案', 'tool-install-unavailable'));
     }
     return group;
   }
@@ -362,6 +401,7 @@
       root.hidden = !value;
       if (value === authenticated) return;
       authenticated = value; generation += 1;
+      if (!value && installDialog.open) installDialog.close();
       window.dispatchEvent(new CustomEvent('tokenmarket-tools-auth', {detail:{authenticated:value}}));
       if (value) refresh();
       else { pendingRecovery = null; if (recoveryDialog.open) recoveryDialog.close(); if (disconnectConfirm.open) disconnectConfirm.close(); if (resultDialog.open) resultDialog.close(); if (reconnectDialog.open) reconnectDialog.close(); pendingReconnect = null; if (dialog.open) dialog.close(); if (disconnectDialog.open) disconnectDialog.close(); pendingDisconnect = null; entries = []; selectedTool = null; detailRoot.replaceChildren(); pendingConnect = null; if (connectDialog.open) connectDialog.close(); list.replaceChildren(); feedback(''); }
