@@ -6,6 +6,7 @@ mod grok;
 mod harness;
 mod hermes;
 mod jsonc;
+mod minimax;
 mod model_plan;
 mod multi_model;
 pub(crate) mod oh_my_pi;
@@ -423,6 +424,7 @@ impl ConnectionManager {
                 | ToolId::GrokBuild
                 | ToolId::Hermes
                 | ToolId::Pi
+                | ToolId::MiniMaxCode
                 | ToolId::OhMyPi
         ) {
             bail!("此工具的桌面接入尚未开放")

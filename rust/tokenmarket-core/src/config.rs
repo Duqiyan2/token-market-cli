@@ -166,6 +166,7 @@ pub fn parse_tool_id(value: &str) -> Result<ToolId> {
         "grok-build" => Ok(ToolId::GrokBuild),
         "hermes" => Ok(ToolId::Hermes),
         "pi" => Ok(ToolId::Pi),
+        "minimax-code" => Ok(ToolId::MiniMaxCode),
         "oh-my-pi" => Ok(ToolId::OhMyPi),
         other => bail!("unsupported tool: {other}"),
     }
