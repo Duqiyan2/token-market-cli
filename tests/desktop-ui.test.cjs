@@ -29,6 +29,24 @@ test('OpenClaw installs with progress and refreshes without implicitly connectin
   } finally { await f.close(); }
 });
 
+test('Claude Code and Codex install through shared actions without automatic connection or testing', async () => {
+  const f=await openFixture({missingNativeCli:true}); try {
+    const p=f.page;
+    for(const tool of ['claude-code','codex']) {
+      const install = p.locator(`[data-tool="${tool}"] .tool-install`);
+      assert.equal(await install.isDisabled(),false);
+      await install.click();
+      await p.locator('.tool-install-status').filter({hasText:'安装完成'}).waitFor();
+      await p.locator('.tool-install-close').click();
+      await p.locator(`[data-tool="${tool}"] .tool-connect`).waitFor();
+    }
+    assert.deepEqual((await calls(p,'start_tool_installation')).map(call=>call.args.tool),['claude-code','codex']);
+    assert.equal((await calls(p,'connect_tool')).length,0);
+    assert.equal((await calls(p,'test_tool_connection')).length,0);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
 test('installation can be cancelled and unsupported installs explain their disabled action', async () => {
   const f=await openFixture({installPending:true}); try {
     const p=f.page;

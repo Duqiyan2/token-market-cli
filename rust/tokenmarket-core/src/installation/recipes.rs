@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 pub const OPENCLAW_VERSION: &str = "2026.10.9";
 pub fn managed_command_directories(home: &Path) -> Vec<PathBuf> {
     vec![
+        home.join(".local/bin"),
+        home.join(".tokenmarket/tools/codex/bin"),
         home.join(".tokenmarket/tools/openclaw/bin"),
         home.join(".tokenmarket/tools/openclaw"),
         home.join(".tokenmarket/tools/openclaw/runtime"),
@@ -38,6 +40,9 @@ pub fn plan(
     environment: &InstallationEnvironment,
     architecture: &str,
 ) -> Result<InstallPlan> {
+    if matches!(tool, ToolId::ClaudeCode | ToolId::Codex) {
+        return super::native_cli::plan(tool, environment, architecture);
+    }
     if tool != ToolId::OpenClaw {
         bail!("该工具的自动安装流程尚未配置，请查看官方安装说明")
     }
