@@ -251,6 +251,12 @@ fn run_process(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // A client launched from pwsh 7 inherits its incompatible module paths.
+    // Windows PowerShell only repairs those paths when started directly by
+    // pwsh, not through this Rust/cmd intermediate. Let each installation child
+    // construct its defaults; preserve the parent and all other environment.
+    #[cfg(windows)]
+    command.env_remove("PSModulePath");
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;

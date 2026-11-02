@@ -619,6 +619,34 @@ fn minimax_installation_failure_retry_existing_version_and_missing_evidence_do_n
 }
 #[test]
 fn minimax_native_verifier_rejects_a_corrupt_package_before_node_preparation_or_npm() {
+    #[cfg(windows)]
+    const MODULE_PATH_CHILD: &str = "TOKENMARKET_MINIMAX_MODULE_PATH_CHILD";
+    #[cfg(windows)]
+    if std::env::var_os(MODULE_PATH_CHILD).is_none() {
+        // Windows PowerShell preserves an inherited PSModulePath that omits its
+        // own Modules directory, as when pwsh 7 launches a Rust intermediate.
+        // Isolate this process environment so parallel tests remain unaffected.
+        let root = tempfile::tempdir().unwrap();
+        let modules = root.path().join("conflicting modules ' & path");
+        std::fs::create_dir_all(&modules).unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "minimax_native_verifier_rejects_a_corrupt_package_before_node_preparation_or_npm",
+                "--nocapture",
+            ])
+            .env(MODULE_PATH_CHILD, &modules)
+            .env("PSModulePath", &modules)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "conflicting-module-path child failed: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
     use tokenmarket_core::installation::{
         InstallExecutor, InstallStage, InstallationManager, NativeInstallExecutor,
     };
@@ -669,6 +697,12 @@ fn minimax_native_verifier_rejects_a_corrupt_package_before_node_preparation_or_
         .join(".tokenmarket/tools/minimax-code/runtime")
         .exists());
     assert!(!root.path().join(".minimax").exists());
+    #[cfg(windows)]
+    assert_eq!(
+        std::env::var_os("PSModulePath"),
+        std::env::var_os(MODULE_PATH_CHILD),
+        "the installer's module-path repair must affect only its child process"
+    );
 }
 
 #[tokio::test]
