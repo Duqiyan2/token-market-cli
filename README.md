@@ -76,6 +76,7 @@ Choose a tool in the app, or use its ID in CLI commands:
 | OpenClaw | `openclaw` |
 | OpenCode | `opencode` |
 | Grok Build | `grok-build` |
+| Hermes | `hermes` |
 
 Claude Code and Codex use `glm-5.3` in production (`glm-5.2` in test builds). Other tools receive the compatible text-generation model catalogue.
 

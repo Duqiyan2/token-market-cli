@@ -1,4 +1,5 @@
 //! Explicit tool installation, independent of credentials and Tool Connections.
+mod hermes;
 mod native_cli;
 pub mod opencode;
 pub mod recipes;

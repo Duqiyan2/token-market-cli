@@ -75,12 +75,21 @@ impl ProviderConfig {
         {
             bail!("Grok Build 配置必须使用 TOML 文件")
         }
+        if tool == ToolId::Hermes
+            && !matches!(
+                path.extension().and_then(|extension| extension.to_str()),
+                Some("yaml" | "yml")
+            )
+        {
+            bail!("Hermes 配置必须使用 YAML 文件")
+        }
         let value = Format::for_path(path)?.parse(before.as_deref())?;
         if !value.is_object() {
             bail!("工具 provider 配置必须是对象")
         }
         match tool {
             ToolId::GrokBuild => super::grok::validate(&value)?,
+            ToolId::Hermes => super::hermes::validate(&value, path)?,
             _ => bail!("此工具没有受支持的 provider 配置"),
         }
         Ok(Self {
@@ -98,6 +107,7 @@ impl ProviderConfig {
     pub fn credential(&self, gateway: &str) -> Result<Option<String>> {
         match self.tool {
             ToolId::GrokBuild => super::grok::credential(&self.document.value, gateway),
+            ToolId::Hermes => super::hermes::credential(&self.document.value, gateway),
             _ => bail!("此工具没有受支持的 provider 配置"),
         }
     }
@@ -110,6 +120,7 @@ impl ProviderConfig {
     ) -> Result<PreparedConfiguration> {
         match self.tool {
             ToolId::GrokBuild => super::grok::apply(&mut self.document, gateway, key, models)?,
+            ToolId::Hermes => super::hermes::apply(&mut self.document, gateway, key, models)?,
             _ => bail!("此工具没有受支持的 provider 配置"),
         }
         self.document.finish()

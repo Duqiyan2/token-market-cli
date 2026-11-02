@@ -190,6 +190,10 @@ impl ToolInventory {
     }
     /// Desktop discovery and desktop writes share this path. Terminal CLI paths are unchanged.
     pub fn config_path(&self, tool: ToolId) -> PathBuf {
+        if tool == ToolId::Hermes {
+            return crate::config::hermes_home(&self.environment.home, self.environment.platform)
+                .join("config.yaml");
+        }
         if tool == ToolId::GrokBuild {
             return std::env::var_os("GROK_HOME")
                 .filter(|v| !v.to_string_lossy().trim().is_empty())
@@ -252,6 +256,7 @@ impl ToolInventory {
             ToolId::OpenClaw => &["openclaw"],
             ToolId::OpenCode => &["opencode"],
             ToolId::GrokBuild => &["grok"],
+            ToolId::Hermes => &["hermes"],
         };
         commands
             .iter()
@@ -317,6 +322,7 @@ pub fn official_download_url(tool: ToolId) -> &'static str {
         ToolId::OpenClaw => "https://docs.openclaw.ai/install",
         ToolId::OpenCode => "https://opencode.ai/docs/",
         ToolId::GrokBuild => "https://github.com/xai-org/grok-build",
+        ToolId::Hermes => "https://hermes-agent.nousresearch.com/docs/getting-started/installation",
     }
 }
 
@@ -525,6 +531,7 @@ impl ToolInventory {
             ToolId::OpenClaw => "openclaw",
             ToolId::OpenCode => "opencode",
             ToolId::GrokBuild => "grok",
+            ToolId::Hermes => "hermes",
         };
         let target = self
             .environment

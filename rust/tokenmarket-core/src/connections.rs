@@ -4,6 +4,7 @@ mod issuance;
 pub use issuance::CredentialLoss;
 mod grok;
 mod harness;
+mod hermes;
 mod jsonc;
 mod model_plan;
 mod multi_model;
@@ -418,6 +419,7 @@ impl ConnectionManager {
                 | ToolId::OpenClaw
                 | ToolId::OpenCode
                 | ToolId::GrokBuild
+                | ToolId::Hermes
         ) {
             bail!("此工具的桌面接入尚未开放")
         }

@@ -41,6 +41,7 @@ pub enum ToolId {
     #[serde(rename = "opencode")]
     OpenCode,
     GrokBuild,
+    Hermes,
 }
 
 impl std::fmt::Display for ToolId {
@@ -53,6 +54,7 @@ impl std::fmt::Display for ToolId {
             ToolId::OpenClaw => "openclaw",
             ToolId::OpenCode => "opencode",
             ToolId::GrokBuild => "grok-build",
+            ToolId::Hermes => "hermes",
         };
         f.write_str(value)
     }
@@ -106,6 +108,7 @@ enum PathKind {
     OpenClaw,
     OpenCode,
     GrokBuild,
+    Hermes,
 }
 
 impl Adapter {
@@ -144,6 +147,15 @@ impl Adapter {
                 home.join(".config/opencode/opencode.json")
             }),
             PathKind::GrokBuild => env_path("GROK_HOME", || home.join(".grok")).join("config.toml"),
+            PathKind::Hermes => crate::config::hermes_home(
+                &home,
+                if cfg!(windows) {
+                    crate::inventory::HostPlatform::Windows
+                } else {
+                    crate::inventory::HostPlatform::Unix
+                },
+            )
+            .join("config.yaml"),
         }
     }
 
@@ -153,6 +165,31 @@ impl Adapter {
 
     pub fn read_config(&self) -> Result<Option<ToolConfig>> {
         match self.id {
+            ToolId::Hermes => {
+                let Some(text) = read_file_if_exists(&self.config_path())? else {
+                    return Ok(None);
+                };
+                let value: Value =
+                    serde_yaml::from_str(&text).context("Hermes 配置不是有效 YAML")?;
+                let provider = &value["providers"]["tokenmarket"];
+                let Some(base_url) = provider["api"].as_str() else {
+                    return Ok(None);
+                };
+                let Some(api_key) = provider["api_key"].as_str() else {
+                    return Ok(None);
+                };
+                let model = provider["models"]
+                    .as_object()
+                    .and_then(|models| models.keys().next())
+                    .cloned()
+                    .unwrap_or_default();
+                Ok(Some(ToolConfig {
+                    base_url: base_url.into(),
+                    api_key: api_key.into(),
+                    model,
+                    context_window_tokens: None,
+                }))
+            }
             ToolId::GrokBuild => {
                 let Some(content) = read_file_if_exists(&self.config_path())? else {
                     return Ok(None);
@@ -360,6 +397,7 @@ impl Adapter {
 
         match self.id {
             ToolId::GrokBuild => bail!("请使用共享客户端接入流程配置 Grok Build"),
+            ToolId::Hermes => bail!("请使用共享客户端接入流程配置 Hermes"),
             ToolId::ClaudeCode => {
                 let mut current = read_json_if_exists(&config_path)?;
                 if current.is_null() {
@@ -600,6 +638,13 @@ pub fn adapters() -> Vec<Adapter> {
             protocol: Protocol::OpenAiCompatible,
             requires_restart: true,
             path_kind: PathKind::GrokBuild,
+        },
+        Adapter {
+            id: ToolId::Hermes,
+            name: "Hermes",
+            protocol: Protocol::OpenAiCompatible,
+            requires_restart: true,
+            path_kind: PathKind::Hermes,
         },
     ]
 }

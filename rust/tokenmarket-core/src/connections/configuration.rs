@@ -69,7 +69,7 @@ impl ConfigDocument {
             .map(str::to_owned))
     }
     pub fn parse(tool: ToolId, before: &Option<Vec<u8>>, path: &Path) -> Result<Self> {
-        if tool == ToolId::GrokBuild {
+        if matches!(tool, ToolId::GrokBuild | ToolId::Hermes) {
             return Ok(Self::Provider(ProviderConfig::parse(tool, before, path)?));
         }
         if tool == ToolId::OpenCode

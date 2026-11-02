@@ -34,6 +34,23 @@ pub fn token_market_home() -> PathBuf {
     home_dir().join(".tokenmarket")
 }
 
+pub(crate) fn hermes_home(home: &Path, platform: crate::inventory::HostPlatform) -> PathBuf {
+    let nonempty = |name: &str| {
+        std::env::var_os(name)
+            .filter(|value| !value.to_string_lossy().trim().is_empty())
+            .map(PathBuf::from)
+    };
+    nonempty("HERMES_HOME").unwrap_or_else(|| {
+        if platform == crate::inventory::HostPlatform::Windows {
+            nonempty("LOCALAPPDATA")
+                .unwrap_or_else(|| home.join("AppData/Local"))
+                .join("hermes")
+        } else {
+            home.join(".hermes")
+        }
+    })
+}
+
 pub fn backups_root() -> PathBuf {
     token_market_home().join("backups")
 }
@@ -147,6 +164,7 @@ pub fn parse_tool_id(value: &str) -> Result<ToolId> {
         "openclaw" => Ok(ToolId::OpenClaw),
         "opencode" => Ok(ToolId::OpenCode),
         "grok-build" => Ok(ToolId::GrokBuild),
+        "hermes" => Ok(ToolId::Hermes),
         other => bail!("unsupported tool: {other}"),
     }
 }
