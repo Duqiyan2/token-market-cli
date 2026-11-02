@@ -11,9 +11,9 @@ module.exports = async function openFixture(browser, options = {}) {
     const team = {id:'team',name:'团队空间',type:'TEAM',status:'ACTIVE',roleCode:'TEAM_MEMBER'};
     const fixture = window.__fixture = {calls:[],user,personal,team,current:personal,signedIn:options.signedIn !== false,pending:null,testPassed:true,conflicts:options.conflicts || false,inventoryError:options.inventoryError || false,workspaceError:options.workspaceError || false,events:{}};
     const connection = (id, state = 'configured_untested') => ({state,owner:{id:user.id,name:user.name},boundWorkspace:{id:personal.id,name:personal.name},models:[options.model || 'server-model'],keyId:'receipt-'+id,protocol:'OPENAI_CHAT_COMPLETIONS',testResult:null});
-    fixture.entries = [['claude-code','Claude Code'],['codex','Codex CLI'],['workbuddy','WorkBuddy'],['deepseek-harness','DeepSeek Harness'],['openclaw','OpenClaw'],['opencode','OpenCode']].map(([id,name],i) => ({id,name,installed:i<3,canConnect:i<3,connection:i<2?connection(id,i===0?'test_passed':options.changed?'configuration_changed':'configured_untested'):null}));
+    fixture.entries = [['claude-code','Claude Code'],['codex','Codex CLI'],['workbuddy','WorkBuddy'],['deepseek-harness','DeepSeek Harness'],['openclaw','OpenClaw'],['opencode','OpenCode'],['grok-build','Grok Build']].map(([id,name],i) => ({id,name,installed:i<3,canConnect:i<3,connection:i<2?connection(id,i===0?'test_passed':options.changed?'configuration_changed':'configured_untested'):null}));
     if (options.multi) fixture.entries[2].connection = {...connection('workbuddy'),models:['server-model-a','server-model-b']};
-    fixture.entries.forEach(entry => { entry.installation = {supported:entry.id === 'openclaw',reason:entry.id === 'openclaw'?null:'当前系统暂无兼容安装方案',version:entry.id === 'openclaw'?'2026.10.9':null}; });
+    fixture.entries.forEach(entry => { const versions = {openclaw:'2026.10.9','grok-build':'1.0.70'}; entry.installation = {supported:Boolean(versions[entry.id]),reason:versions[entry.id]?null:'当前系统暂无兼容安装方案',version:versions[entry.id] || null}; });
     fixture.installation = null;
     if (options.legacy) fixture.entries[3].connection = {state:'legacy',owner:null,boundWorkspace:null,keyId:null,protocol:null,models:['legacy-model']};
     const clone = value => structuredClone(value);

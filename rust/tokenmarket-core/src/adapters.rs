@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::{
@@ -40,6 +40,7 @@ pub enum ToolId {
     OpenClaw,
     #[serde(rename = "opencode")]
     OpenCode,
+    GrokBuild,
 }
 
 impl std::fmt::Display for ToolId {
@@ -51,6 +52,7 @@ impl std::fmt::Display for ToolId {
             ToolId::DeepSeekHarness => "deepseek-harness",
             ToolId::OpenClaw => "openclaw",
             ToolId::OpenCode => "opencode",
+            ToolId::GrokBuild => "grok-build",
         };
         f.write_str(value)
     }
@@ -103,6 +105,7 @@ enum PathKind {
     DeepSeekHarness { fallback_root: bool },
     OpenClaw,
     OpenCode,
+    GrokBuild,
 }
 
 impl Adapter {
@@ -140,6 +143,7 @@ impl Adapter {
             PathKind::OpenCode => env_path("OPENCODE_CONFIG", || {
                 home.join(".config/opencode/opencode.json")
             }),
+            PathKind::GrokBuild => env_path("GROK_HOME", || home.join(".grok")).join("config.toml"),
         }
     }
 
@@ -149,6 +153,35 @@ impl Adapter {
 
     pub fn read_config(&self) -> Result<Option<ToolConfig>> {
         match self.id {
+            ToolId::GrokBuild => {
+                let Some(content) = read_file_if_exists(&self.config_path())? else {
+                    return Ok(None);
+                };
+                let value: Value =
+                    toml_edit::de::from_str(&content).context("Grok Build 配置不是有效 TOML")?;
+                for (name, model) in value
+                    .get("model")
+                    .and_then(Value::as_object)
+                    .into_iter()
+                    .flatten()
+                {
+                    if name.starts_with("tokenmarket/") {
+                        if let (Some(base_url), Some(api_key), Some(model_id)) = (
+                            model["base_url"].as_str(),
+                            model["api_key"].as_str(),
+                            model["model"].as_str(),
+                        ) {
+                            return Ok(Some(ToolConfig {
+                                base_url: base_url.into(),
+                                api_key: api_key.into(),
+                                model: model_id.into(),
+                                context_window_tokens: model["context_window"].as_u64(),
+                            }));
+                        }
+                    }
+                }
+                Ok(None)
+            }
             ToolId::ClaudeCode => {
                 let value = read_json_if_exists(&self.config_path())?;
                 let base_url = value
@@ -326,6 +359,7 @@ impl Adapter {
         let backup_path = create_backup(&config_path)?;
 
         match self.id {
+            ToolId::GrokBuild => bail!("请使用共享客户端接入流程配置 Grok Build"),
             ToolId::ClaudeCode => {
                 let mut current = read_json_if_exists(&config_path)?;
                 if current.is_null() {
@@ -559,6 +593,13 @@ pub fn adapters() -> Vec<Adapter> {
             protocol: Protocol::OpenAiCompatible,
             requires_restart: false,
             path_kind: PathKind::OpenCode,
+        },
+        Adapter {
+            id: ToolId::GrokBuild,
+            name: "Grok Build",
+            protocol: Protocol::OpenAiCompatible,
+            requires_restart: true,
+            path_kind: PathKind::GrokBuild,
         },
     ]
 }
