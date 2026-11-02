@@ -96,7 +96,9 @@ pub(super) fn begin(environment: &InstallationEnvironment, plan: &InstallPlan) -
         .write(true)
         .open(&temporary)?
         .sync_all()?;
-    std::fs::rename(temporary, destination).context("无法保存安装恢复记录")?;
+    std::fs::rename(temporary, &destination).context("无法保存安装恢复记录")?;
+    #[cfg(unix)]
+    std::fs::File::open(destination.parent().unwrap())?.sync_all()?;
     Ok(())
 }
 pub(super) fn complete(environment: &InstallationEnvironment, tool: ToolId) -> Result<()> {
