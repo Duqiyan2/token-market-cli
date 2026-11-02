@@ -76,6 +76,11 @@ default-model selection exception was accepted during this interview.
   installation without automatically upgrading it. If its version is
   incompatible, explain the reason and the available resolution. Upgrade and
   uninstall management remain outside this scope.
+- Harness-only exception: during implementation, the official stable feeds were
+  unavailable and the available documented production preview was
+  `0.2.1-rc.5`. The user explicitly permits that fixed official candidate for
+  DeepSeek Harness only. All other tools retain the official stable-version
+  rule; do not describe the Harness candidate as stable.
 
 ## Rationale
 
@@ -100,6 +105,9 @@ installation plus actual-tool streaming/tool-use release acceptance.
 - Verify each new adapter's actual authentication, supported request protocol,
   model catalogue configuration and configuration restoration. Explain absent
   compatible models instead of writing an unusable connection.
+- Register the six new tool IDs in the platform's existing client-specific
+  scope validation so actual Key requests are accepted. This is a companion
+  registration change, not a change to Key lifecycle, permissions or billing.
 - Keep automated fixtures, native installation checks, paid protocol checks and
   actual-tool streaming/tool-use acceptance as distinct evidence. Do not claim
   installed-tool acceptance from source or mocked tests.

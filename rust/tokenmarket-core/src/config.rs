@@ -146,6 +146,7 @@ pub fn parse_tool_id(value: &str) -> Result<ToolId> {
         "deepseek-harness" => Ok(ToolId::DeepSeekHarness),
         "openclaw" => Ok(ToolId::OpenClaw),
         "opencode" => Ok(ToolId::OpenCode),
+        "grok-build" => Ok(ToolId::GrokBuild),
         other => bail!("unsupported tool: {other}"),
     }
 }

@@ -190,6 +190,13 @@ impl ToolInventory {
     }
     /// Desktop discovery and desktop writes share this path. Terminal CLI paths are unchanged.
     pub fn config_path(&self, tool: ToolId) -> PathBuf {
+        if tool == ToolId::GrokBuild {
+            return std::env::var_os("GROK_HOME")
+                .filter(|v| !v.to_string_lossy().trim().is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| self.environment.home.join(".grok"))
+                .join("config.toml");
+        }
         if tool == ToolId::WorkBuddy {
             let override_path = |name: &str| {
                 std::env::var_os(name)
@@ -244,6 +251,7 @@ impl ToolInventory {
             ToolId::DeepSeekHarness => &["dsh"],
             ToolId::OpenClaw => &["openclaw"],
             ToolId::OpenCode => &["opencode"],
+            ToolId::GrokBuild => &["grok"],
         };
         commands
             .iter()
@@ -308,6 +316,7 @@ pub fn official_download_url(tool: ToolId) -> &'static str {
         ToolId::DeepSeekHarness => "https://www.deepseek.com/download/",
         ToolId::OpenClaw => "https://docs.openclaw.ai/install",
         ToolId::OpenCode => "https://opencode.ai/docs/",
+        ToolId::GrokBuild => "https://github.com/xai-org/grok-build",
     }
 }
 
@@ -515,6 +524,7 @@ impl ToolInventory {
             ToolId::WorkBuddy => "workbuddy",
             ToolId::OpenClaw => "openclaw",
             ToolId::OpenCode => "opencode",
+            ToolId::GrokBuild => "grok",
         };
         let target = self
             .environment

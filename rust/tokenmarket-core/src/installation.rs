@@ -1,5 +1,6 @@
 //! Explicit tool installation, independent of credentials and Tool Connections.
 pub mod opencode;
+mod native_cli;
 pub mod recipes;
 use crate::{
     inventory::{InstallationEnvironment, ToolInventory},

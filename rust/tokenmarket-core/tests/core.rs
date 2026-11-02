@@ -14,7 +14,8 @@ fn registers_all_supported_tools() {
             "workbuddy",
             "deepseek-harness",
             "openclaw",
-            "opencode"
+            "opencode",
+            "grok-build"
         ]
     );
 }
@@ -33,6 +34,7 @@ fn serializes_every_tool_with_the_server_contract_id() {
         ("deepseek-harness", "deepseek-harness"),
         ("openclaw", "openclaw"),
         ("opencode", "opencode"),
+        ("grok-build", "grok-build"),
     ] {
         let tool = tool_id(input).unwrap();
         let value = serde_json::to_value(&tool).unwrap();

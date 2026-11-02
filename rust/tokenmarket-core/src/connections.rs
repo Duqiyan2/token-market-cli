@@ -2,11 +2,13 @@
 mod configuration;
 mod issuance;
 pub use issuance::CredentialLoss;
+mod grok;
 mod harness;
 mod jsonc;
 mod model_plan;
 mod multi_model;
 mod private_storage;
+mod provider_config;
 mod restore;
 mod testing;
 use configuration::{ConfigDocument, PreparedFile};
@@ -415,6 +417,7 @@ impl ConnectionManager {
                 | ToolId::WorkBuddy
                 | ToolId::OpenClaw
                 | ToolId::OpenCode
+                | ToolId::GrokBuild
         ) {
             bail!("此工具的桌面接入尚未开放")
         }
