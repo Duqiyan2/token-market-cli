@@ -44,9 +44,8 @@ Windows home discovery uses `USERPROFILE`.
   never sufficient installation evidence. No detection probe executes a tool.
 
 The rows display tool marks, names and installation status. Missing tools offer
-an Install button with catalogue-owned compatibility information. OpenClaw's
-first installation slice uses the shared installation manager; recipes for the
-other tools are added separately. An unavailable recipe disables Install with
+an Install button with catalogue-owned compatibility information. The shared
+installation manager selects each tool's verified recipe. An unavailable recipe disables Install with
 an explanation and retains the fixed official installation-guide link.
 Connection remains unavailable until actual installation is detected.
 The UI refreshes after login, explicit re-detection, foreground/visibility return
@@ -80,12 +79,30 @@ private Node preparation and private-prefix npm installation on Windows. Both
 skip onboarding and Gateway service work. The initial source-checked stable pin
 is `2026.10.9`; native/runtime acceptance remains separate.
 
+OpenCode installs the official V1 `1.19.5` release archive into a user-private
+command directory, checks its release SHA256 before extraction, and uses the
+baseline x64 artifacts rather than assuming AVX2 support. Stable existing V1
+installations are reused without upgrading to the install pin. A positively
+identified V2 CLI or desktop application stops Connect/Reconnect before Key
+issuance or configuration mutation. CLI and application identities are both
+checked because desktop launch prefers an application while terminal management
+may use a separate command. Version metadata is read without launching the GUI.
+Unknown version metadata is not proof of incompatibility.
+
+The supported contract is the [version-tagged V1 provider implementation](https://github.com/anomalyco/opencode/blob/v1.19.5/packages/opencode/src/provider/provider.ts)
+and [V1 configuration](https://github.com/anomalyco/opencode/blob/v1.19.5/packages/opencode/src/config/config.ts).
+The [official release](https://github.com/anomalyco/opencode/releases/tag/v1.19.5)
+publishes the archive digests. Source/fixture checks do not establish installed
+binary or Agent runtime acceptance.
+
 The desktop exposes progress, output, cancellation and failure retry, then
 refreshes actual installation and retained connection state. The terminal entry
 is `tokenmarket install openclaw`; Ctrl-C cancels the managed process tree.
 Cancellation retains dependencies already prepared. Installer success without
 an executable does not count as installed. Same-tool installation is serialized
 across client processes by an OS file lock.
+Connect/Reconnect holds the same per-tool lock through configuration publication,
+so a partially visible installation cannot race credential/configuration work.
 
 Version probes run only during explicit operations. Read-only inventory never
 executes tools. The public explicit `installed_version` probe can support a

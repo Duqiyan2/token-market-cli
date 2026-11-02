@@ -235,6 +235,14 @@ impl ToolInventory {
         }
         Ok(())
     }
+    pub fn connection_guard(&self, tool: ToolId) -> Result<crate::installation::InstallationGuard> {
+        crate::installation::InstallationManager::new(
+            self.environment.clone(),
+            std::env::consts::ARCH.into(),
+            std::sync::Arc::new(crate::installation::NativeInstallExecutor),
+        )
+        .connection_guard(tool)
+    }
     pub fn is_installed(&self, tool: ToolId) -> bool {
         let commands: &[&str] = match tool {
             ToolId::ClaudeCode => &["claude"],

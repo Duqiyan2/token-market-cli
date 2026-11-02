@@ -13,9 +13,10 @@ module.exports = async function openFixture(browser, options = {}) {
     const connection = (id, state = 'configured_untested') => ({state,owner:{id:user.id,name:user.name},boundWorkspace:{id:personal.id,name:personal.name},models:[options.model || 'server-model'],keyId:'receipt-'+id,protocol:'OPENAI_CHAT_COMPLETIONS',testResult:null});
     fixture.entries = [['claude-code','Claude Code'],['codex','Codex CLI'],['workbuddy','WorkBuddy'],['deepseek-harness','DeepSeek Harness'],['openclaw','OpenClaw'],['opencode','OpenCode'],['grok-build','Grok Build']].map(([id,name],i) => ({id,name,installed:i<3,canConnect:i<3,connection:i<2?connection(id,i===0?'test_passed':options.changed?'configuration_changed':'configured_untested'):null}));
     if (options.multi) fixture.entries[2].connection = {...connection('workbuddy'),models:['server-model-a','server-model-b']};
-    const installVersions = {'claude-code':'2.1.309',codex:'0.166.0',openclaw:'2026.10.9','grok-build':'1.0.70'};
+    const installVersions = {'claude-code':'2.1.309',codex:'0.166.0',openclaw:'2026.10.9',opencode:'1.19.5','grok-build':'1.0.70'};
     fixture.entries.forEach(entry => {
-      entry.installation = {supported:Boolean(installVersions[entry.id]),reason:installVersions[entry.id]?null:'当前系统暂无兼容安装方案',version:installVersions[entry.id]||null};
+      const supported=Boolean(installVersions[entry.id]) && options.unsupportedTool !== entry.id;
+      entry.installation = {supported,reason:supported?null:'当前系统暂无兼容安装方案',version:installVersions[entry.id]||null};
       if (options.missingNativeCli && ['claude-code','codex'].includes(entry.id)) { entry.installed=false;entry.canConnect=false;entry.connection=null; }
     });
     fixture.installation = null;
