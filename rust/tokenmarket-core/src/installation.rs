@@ -193,10 +193,24 @@ impl InstallExecutor for NativeInstallExecutor {
             .context("无法读取已安装版本")
     }
     fn application_version(&self, application: &Path) -> Result<Option<String>> {
+        // Metadata belongs to the detected artifact, which can differ from the
+        // host platform in a replaceable installation environment.
+        if application.is_dir() {
+            let metadata = application.join("Contents/Info.plist");
+            if !metadata.exists() {
+                return Ok(None);
+            }
+            let plist = plist::Value::from_file(metadata)?;
+            return Ok(plist
+                .as_dictionary()
+                .and_then(|properties| properties.get("CFBundleShortVersionString"))
+                .and_then(plist::Value::as_string)
+                .map(str::to_owned));
+        }
         #[cfg(windows)]
         {
             let mut lines = vec![];
-            let script = format!("$v = [System.Diagnostics.FileVersionInfo]::GetVersionInfo('{}'); if ($v.ProductVersion) {{ Write-Output $v.ProductVersion }} else {{ Write-Output $v.FileVersion }}", application.to_string_lossy().replace('\'', "''"));
+            let script = format!("$ErrorActionPreference = 'Stop'; $v = [System.Diagnostics.FileVersionInfo]::GetVersionInfo('{}'); if ($v.ProductVersion) {{ Write-Output $v.ProductVersion }} else {{ Write-Output $v.FileVersion }}", application.to_string_lossy().replace('\'', "''"));
             run_process(
                 "powershell.exe",
                 &[
@@ -214,16 +228,7 @@ impl InstallExecutor for NativeInstallExecutor {
         }
         #[cfg(not(windows))]
         {
-            let metadata = application.join("Contents/Info.plist");
-            if !metadata.exists() {
-                return Ok(None);
-            }
-            let plist = plist::Value::from_file(metadata)?;
-            Ok(plist
-                .as_dictionary()
-                .and_then(|properties| properties.get("CFBundleShortVersionString"))
-                .and_then(plist::Value::as_string)
-                .map(str::to_owned))
+            Ok(None)
         }
     }
 }
