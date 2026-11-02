@@ -704,7 +704,7 @@ async fn minimax_active_data_overrides_and_guarded_profile_use_one_effective_con
             .await
             .unwrap_err()
             .to_string()
-            .contains("活动数据"));
+            .contains("活动配置"));
         assert_eq!(
             manager
                 .disconnect(tool, &connected.key_id, None, Default::default())

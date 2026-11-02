@@ -139,3 +139,23 @@ Hermes CLI uses the pinned source bootstrap and provider YAML contract documente
 in [Hermes adapter notes](hermes.md). Its Windows data root is LOCALAPPDATA/hermes,
 with HERMES_HOME taking precedence; desktop package architecture limits do not
 restrict the verified CLI matrix.
+
+## Interrupted installation and terminal launch
+
+Client-owned installation attempts keep a path-scoped incomplete marker until
+all recipe steps and explicit version detection finish. Read-only discovery does
+not advertise such a launcher as usable. Install can repair that recorded work
+after failure, cancellation or a client restart, preserving prepared dependencies.
+An external compatible installation is still reused and is not upgraded by repair.
+Native GUI Stop Waiting retains its separate late-install detection behavior.
+
+`terminal_launch_plan` returns a foreground executable/argument/environment plan;
+the source CLI exposes it as `tokenmarket run <tool>` and prints that next step
+after Install and in Status. Private wrappers and Windows Git Bash stay available
+through process-only environment settings. Linux/SSH needs no GUI or persistent
+PATH edit. Launch is always a separate explicit action from installation.
+
+New connection records retain their effective configuration-location context.
+Summaries and Test re-resolve it with current directory/profile overrides, so an
+old receipt cannot authorize a model request for an inactive configuration root.
+Disconnect continues restoring the receipt's original files after a root changes.

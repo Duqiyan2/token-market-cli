@@ -621,9 +621,11 @@ async fn kimi_environment_overrides_are_scoped_and_detected_before_a_paid_test()
     server.await.unwrap();
     let before = std::fs::read(&path).unwrap();
     for (name, value) in [
+        ("KIMI_CODE_HOME", "another-active-kimi-root"),
         ("KIMI_MODEL_NAME", "temporary-other-model"),
         ("KIMI_CODE_CUSTOM_HEADERS", "Authorization: Bearer manual"),
     ] {
+        let original = std::env::var_os(name);
         std::env::set_var(name, value);
         assert_eq!(
             manager.summaries().unwrap()[0].1.state,
@@ -640,10 +642,30 @@ async fn kimi_environment_overrides_are_scoped_and_detected_before_a_paid_test()
             )
             .await
             .unwrap_err();
-        assert!(error.to_string().contains(name));
+        assert!(
+            error.to_string().contains(if name == "KIMI_CODE_HOME" {
+                "活动配置"
+            } else {
+                name
+            }),
+            "{error}"
+        );
         assert_eq!(std::fs::read(&path).unwrap(), before);
-        std::env::remove_var(name);
+        if let Some(original) = original {
+            std::env::set_var(name, original);
+        } else {
+            std::env::remove_var(name);
+        }
     }
+    std::env::set_var("KIMI_CODE_HOME", "another-active-kimi-root");
+    assert_eq!(
+        manager
+            .disconnect(tool, &connected.key_id, None, Default::default())
+            .await
+            .unwrap()
+            .state,
+        "disconnected"
+    );
 }
 
 #[cfg(unix)]

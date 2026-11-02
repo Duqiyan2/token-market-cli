@@ -195,3 +195,27 @@ fn macos_launch_plan_uses_nvm_target_and_quotes_paths_for_terminal_and_applescri
     assert!(plan.args[3].contains("env PATH="));
     assert!(plan.wait_for_exit);
 }
+
+#[test]
+fn linux_terminal_launch_resolves_private_wrappers_and_process_environment_without_a_shell_search()
+{
+    let root = tempfile::tempdir().unwrap();
+    let mut env = environment(root.path(), HostPlatform::Unix);
+    let prefix = root.path().join("home/.tokenmarket/tools/minimax-code/bin");
+    env.command_directories = vec![prefix.clone()];
+    executable(&prefix.join("mcode"));
+    let inventory = ToolInventory::new(env);
+    let plan = inventory.launch_plan(ToolId::MiniMaxCode).unwrap();
+    assert_eq!(std::path::PathBuf::from(plan.program), prefix.join("mcode"));
+    assert!(plan.args.is_empty());
+    assert!(plan.wait_for_exit);
+    assert!(plan
+        .environment
+        .iter()
+        .any(|(key, value)| key == "PATH"
+            && value.starts_with(&prefix.to_string_lossy().to_string())));
+    assert!(plan
+        .environment
+        .iter()
+        .any(|(key, value)| key == "MINIMAX_DATA_DIR" && value.ends_with(".minimax")));
+}

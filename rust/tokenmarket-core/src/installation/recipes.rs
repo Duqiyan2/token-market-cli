@@ -31,6 +31,49 @@ pub fn managed_command_directories(home: &Path) -> Vec<PathBuf> {
         home.join(".tokenmarket/tools/kimi-code/bin"),
     ]
 }
+/// Only destinations written by our selected installer can be repaired automatically.
+pub(super) fn owned_command_paths(
+    tool: ToolId,
+    environment: &InstallationEnvironment,
+) -> Vec<PathBuf> {
+    let home = &environment.home;
+    let directories = match tool {
+        ToolId::ClaudeCode => vec![home.join(".local/bin")],
+        ToolId::Codex => vec![home.join(".tokenmarket/tools/codex/bin")],
+        ToolId::DeepSeekHarness => vec![home.join(".tokenmarket/tools/deepseek-harness/bin")],
+        ToolId::OpenClaw => vec![
+            home.join(".tokenmarket/tools/openclaw/bin"),
+            home.join(".tokenmarket/tools/openclaw/runtime"),
+            home.join(".tokenmarket/tools/openclaw"),
+        ],
+        ToolId::OpenCode => vec![home.join(".tokenmarket/tools/opencode/bin")],
+        ToolId::GrokBuild => vec![home.join(".tokenmarket/tools/grok-build/bin")],
+        ToolId::Hermes => vec![
+            home.join(".local/bin"),
+            home.join(".tokenmarket/tools/hermes/checkout/.hermes/bin"),
+            crate::config::hermes_home(home, HostPlatform::Windows).join("bin"),
+        ],
+        ToolId::Pi => vec![home.join(".tokenmarket/tools/pi/runtime")],
+        ToolId::MiniMaxCode => vec![home.join(".tokenmarket/tools/minimax-code/bin")],
+        ToolId::OhMyPi => vec![home.join(".tokenmarket/tools/oh-my-pi/bin")],
+        ToolId::KimiCode => vec![home.join(".tokenmarket/tools/kimi-code/bin")],
+        ToolId::WorkBuddy => vec![],
+    };
+    let names: Vec<_> = if environment.platform == HostPlatform::Windows {
+        vec![
+            tool.command().to_owned(),
+            format!("{}.exe", tool.command()),
+            format!("{}.cmd", tool.command()),
+            format!("{}.bat", tool.command()),
+        ]
+    } else {
+        vec![tool.command().to_owned()]
+    };
+    directories
+        .into_iter()
+        .flat_map(|d| names.iter().map(move |n| d.join(n)))
+        .collect()
+}
 pub fn availability(
     tool: ToolId,
     environment: &InstallationEnvironment,
