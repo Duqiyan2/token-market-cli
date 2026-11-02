@@ -85,5 +85,8 @@ The origin of an API key, distinguishing credentials issued through client autho
 **Tool**:
 The target Agent product, such as Claude Code, Codex CLI, WorkBuddy, DeepSeek Harness, OpenClaw, or OpenCode.
 
+**Tool Installation**:
+A locally installed copy of a Tool that can be run on the device. It exists independently of a Tool Connection; installing a Tool does not establish its access to Token Market.
+
 **Adapter Directory Detection**:
 The discovery of the local configuration location used by a particular tool installation.
