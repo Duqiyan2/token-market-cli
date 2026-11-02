@@ -1,6 +1,7 @@
 //! Explicit tool installation, independent of credentials and Tool Connections.
 mod gui;
 mod harness_cli;
+mod minimax;
 mod native_cli;
 mod oh_my_pi;
 pub mod opencode;
