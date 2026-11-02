@@ -49,6 +49,26 @@ pub enum ToolId {
     KimiCode,
 }
 
+impl ToolId {
+    /// The upstream command identity is shared by discovery and all launch surfaces.
+    pub fn command(self) -> &'static str {
+        match self {
+            Self::ClaudeCode => "claude",
+            Self::Codex => "codex",
+            Self::WorkBuddy => "workbuddy",
+            Self::DeepSeekHarness => "dsh",
+            Self::OpenClaw => "openclaw",
+            Self::OpenCode => "opencode",
+            Self::GrokBuild => "grok",
+            Self::Hermes => "hermes",
+            Self::Pi => "pi",
+            Self::MiniMaxCode => "mcode",
+            Self::OhMyPi => "omp",
+            Self::KimiCode => "kimi",
+        }
+    }
+}
+
 impl std::fmt::Display for ToolId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let value = match self {

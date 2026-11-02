@@ -1,4 +1,5 @@
 //! Explicit tool installation, independent of credentials and Tool Connections.
+pub(crate) mod attempt;
 mod gui;
 mod harness_cli;
 mod hermes;
@@ -504,12 +505,25 @@ impl InstallationManager {
             }
         }
         if let Some(path) = self.environment.command_path(&plan.command) {
-            let version = self.executor.version(&path)?;
-            if !recipes::compatible_existing_version(plan.tool, &version, &plan.version) {
-                bail!("已安装版本 {version} 尚未验证兼容（当前支持 {}）；未自动升级，请按官方说明处理", plan.version)
+            let repair = attempt::repair(&self.environment, plan, &path)?;
+            let version = self.executor.version(&path);
+            if repair {
+                if version.as_ref().is_ok_and(|version| {
+                    !recipes::compatible_existing_version(plan.tool, version, &plan.version)
+                }) {
+                    bail!("未完成安装的版本已改变；请按官方说明处理，未自动升级或覆盖")
+                }
+                self.update(plan.tool, |state| {
+                    state.detail = "正在恢复上次未完成的安装；保留已有依赖".into()
+                });
+            } else {
+                let version = version?;
+                if !recipes::compatible_existing_version(plan.tool, &version, &plan.version) {
+                    bail!("已安装版本 {version} 尚未验证兼容（当前支持 {}）；未自动升级，请按官方说明处理", plan.version)
+                }
+                self.update(plan.tool, |state| state.version = Some(version));
+                return Ok(());
             }
-            self.update(plan.tool, |state| state.version = Some(version));
-            return Ok(());
         }
         // An independently installed GUI must not be overwritten by a CLI installer.
         if ToolInventory::new(self.environment.clone())
@@ -517,6 +531,13 @@ impl InstallationManager {
             .is_some()
         {
             bail!("已检测到应用安装，请使用原有安装；未自动替换或升级")
+        }
+        let native_gui = plan
+            .steps
+            .iter()
+            .any(|step| step.stage == InstallStage::WaitingForUser);
+        if !native_gui {
+            attempt::begin(&self.environment, plan)?;
         }
         for step in &plan.steps {
             if cancelled.load(Ordering::SeqCst) {
@@ -590,6 +611,7 @@ impl InstallationManager {
                 plan.version
             )
         }
+        attempt::complete(&self.environment, plan.tool)?;
         Ok(())
     }
     fn wait_for_application(&self, plan: &InstallPlan, cancelled: &AtomicBool) -> Result<()> {

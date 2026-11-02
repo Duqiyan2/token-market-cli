@@ -268,6 +268,16 @@ impl ToolInventory {
     }
     /// Rechecks the filesystem immediately before a connection operation begins.
     pub fn require_installed(&self, tool: ToolId) -> Result<()> {
+        if self
+            .environment
+            .command_path(tool.command())
+            .is_some_and(|path| {
+                crate::installation::attempt::incomplete(&self.environment, tool, &path)
+            })
+            && self.application_path(tool).is_none()
+        {
+            bail!("上次安装尚未完成，请重试 tokenmarket install {tool}；已准备的依赖保留")
+        }
         if !self.is_installed(tool) {
             bail!(
                 "{} 未安装，请先从官网下载并重新检测",
@@ -285,23 +295,11 @@ impl ToolInventory {
         .connection_guard(tool)
     }
     pub fn is_installed(&self, tool: ToolId) -> bool {
-        let commands: &[&str] = match tool {
-            ToolId::ClaudeCode => &["claude"],
-            ToolId::Codex => &["codex"],
-            ToolId::WorkBuddy => &["workbuddy"],
-            ToolId::DeepSeekHarness => &["dsh"],
-            ToolId::OpenClaw => &["openclaw"],
-            ToolId::OpenCode => &["opencode"],
-            ToolId::GrokBuild => &["grok"],
-            ToolId::Hermes => &["hermes"],
-            ToolId::Pi => &["pi"],
-            ToolId::MiniMaxCode => &["mcode"],
-            ToolId::OhMyPi => &["omp"],
-            ToolId::KimiCode => &["kimi"],
-        };
-        commands
-            .iter()
-            .any(|command| self.environment.has_command(command))
+        self.environment
+            .command_path(tool.command())
+            .is_some_and(|path| {
+                !crate::installation::attempt::incomplete(&self.environment, tool, &path)
+            })
             || self.application_path(tool).is_some()
     }
     /// Verified application launch target; command launchers are handled separately.
@@ -568,20 +566,7 @@ impl ToolInventory {
                 HostPlatform::Unix => bail!("请从系统应用入口打开工具"),
             };
         }
-        let command = match tool {
-            ToolId::ClaudeCode => "claude",
-            ToolId::Codex => "codex",
-            ToolId::DeepSeekHarness => "dsh",
-            ToolId::WorkBuddy => "workbuddy",
-            ToolId::OpenClaw => "openclaw",
-            ToolId::OpenCode => "opencode",
-            ToolId::GrokBuild => "grok",
-            ToolId::Hermes => "hermes",
-            ToolId::Pi => "pi",
-            ToolId::MiniMaxCode => "mcode",
-            ToolId::OhMyPi => "omp",
-            ToolId::KimiCode => "kimi",
-        };
+        let command = tool.command();
         let target = self
             .environment
             .command_path(command)
