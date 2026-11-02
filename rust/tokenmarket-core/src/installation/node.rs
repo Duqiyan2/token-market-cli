@@ -55,7 +55,7 @@ pub(super) fn asset(platform: HostPlatform, architecture: &str) -> Result<Asset>
 /// No package, profile or tool configuration belongs to runtime preparation.
 pub(super) fn posix_prepare(compatibility: &str) -> String {
     r#"usable_node() {
- [ -n "$1" ] && [ -x "$1" ] && [ -x "$(dirname "$1")/npm" ] && "$1" -e '__COMPATIBILITY__'
+ [ -n "$1" ] && [ -x "$1" ] && [ -x "$(dirname "$1")/npm" ] && "$1" -e '__COMPATIBILITY__' && PATH="$(dirname "$1"):$PATH" "$(dirname "$1")/npm" --version >/dev/null
 }
 node=$(command -v node || true)
 if ! usable_node "$node"; then

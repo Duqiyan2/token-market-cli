@@ -594,6 +594,9 @@ impl ToolInventory {
             .environment
             .command_path(command)
             .context("未检测到命令行启动文件，请从系统应用入口打开此工具")?;
+        if crate::installation::attempt::incomplete(&self.environment, tool, &target) {
+            bail!("命令行安装尚未完成，请重试 tokenmarket install {tool}；桌面应用可单独打开")
+        }
         let mut directories = vec![target.parent().context("工具启动目录无效")?.to_path_buf()];
         directories.extend(
             self.environment

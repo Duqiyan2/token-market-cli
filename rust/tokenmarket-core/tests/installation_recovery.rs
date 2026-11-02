@@ -191,3 +191,119 @@ fn an_external_install_is_not_hidden_or_repaired_by_an_owned_incomplete_attempt(
     assert_eq!(std::fs::read(external).unwrap(), bytes);
     assert!(!runtime.exists());
 }
+
+#[test]
+fn a_late_external_app_remains_usable_without_launching_its_incomplete_cli_sibling() {
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path();
+    let command = home.join(".tokenmarket/tools/openclaw/bin/openclaw");
+    let executor = Arc::new(PartialInstaller {
+        command,
+        runtime: home.join("required-runtime"),
+        broken_version: false,
+        cancel_first: false,
+        initial: AtomicBool::new(true),
+        entered: AtomicBool::new(false),
+        execution_count: Mutex::new(0),
+    });
+    let mut env = environment(home, HostPlatform::MacOs);
+    env.application_directories = vec![home.join("Applications")];
+    let manager = InstallationManager::new(env.clone(), "aarch64".into(), executor);
+    manager.start(ToolId::OpenClaw).unwrap();
+    finished(&manager, ToolId::OpenClaw);
+    let app = home.join("Applications/OpenClaw.app/Contents");
+    std::fs::create_dir_all(&app).unwrap();
+    std::fs::write(app.join("Info.plist"),"<?xml version=\"1.0\"?><plist version=\"1.0\"><dict><key>CFBundleExecutable</key><string>OpenClaw</string></dict></plist>").unwrap();
+    executable(&app.join("MacOS/OpenClaw"), "2026.10.9", None).unwrap();
+    let inventory = ToolInventory::new(env);
+    assert!(inventory.is_installed(ToolId::OpenClaw));
+    assert_eq!(
+        inventory.launch_plan(ToolId::OpenClaw).unwrap().program,
+        "open"
+    );
+    assert!(
+        inventory.terminal_launch_plan(ToolId::OpenClaw).is_err(),
+        "a complete GUI must not make an incomplete CLI runnable"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn private_node_preparation_repairs_an_existing_node_whose_npm_is_incomplete() {
+    use tokenmarket_core::installation::NativeInstallExecutor;
+    fn script(path: &Path, body: &str) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    struct RuntimeFixture {
+        bin: PathBuf,
+        prefix: PathBuf,
+        version: String,
+    }
+    impl InstallExecutor for RuntimeFixture {
+        fn execute(
+            &self,
+            step: &InstallStep,
+            cancelled: &AtomicBool,
+            output: &mut dyn FnMut(String),
+        ) -> Result<()> {
+            if let Some((_, path)) = &step.download {
+                std::fs::create_dir_all(path.parent().unwrap())?;
+                std::fs::write(path, "fixture archive; no download")?;
+                return Ok(());
+            }
+            let mut step = step.clone();
+            step.environment.extend([
+                (
+                    "PATH".into(),
+                    format!("{}:/usr/bin:/bin", self.bin.display()),
+                ),
+                (
+                    "FIXTURE_RUNTIME".into(),
+                    self.prefix.join("runtime").to_string_lossy().into_owned(),
+                ),
+            ]);
+            NativeInstallExecutor.execute(&step, cancelled, output)
+        }
+        fn version(&self, _: &Path) -> Result<String> {
+            Ok(self.version.clone())
+        }
+    }
+    for (tool, folder, version) in [
+        (ToolId::DeepSeekHarness, "deepseek-harness", "0.2.1-rc.5"),
+        (ToolId::MiniMaxCode, "minimax-code", "0.7.2"),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let prefix = root.path().join(".tokenmarket/tools").join(folder);
+        let bin = root.path().join("fake-processes");
+        // The incomplete private runtime can execute Node, but its npm dependency is missing.
+        script(&prefix.join("runtime/bin/node"), "exit 0");
+        script(&prefix.join("runtime/bin/npm"),"[ -f \"$FIXTURE_RUNTIME/complete\" ] || exit 8\nif [ \"$1\" = --version ]; then echo fixture-npm; fi\nexit 0");
+        script(&bin.join("node"), "exit 1");
+        script(&bin.join("npm"), "exit 1");
+        script(&bin.join("curl"),"while [ \"$#\" -gt 0 ]; do if [ \"$1\" = --output ]; then shift; : > \"$1\"; fi; shift; done");
+        script(&bin.join("sha256sum"),"case \"$1\" in *minimax-code-0.7.2.tar.gz) echo aa055b696945286cbab62f8b748835de1428e4d08a598bbf5de4c8a5de71f4e4;; *) echo d132557e7ee2b85af08b0c8c34338e65c6430f2238d01f727728ef42dc83b035;; esac");
+        script(&bin.join("tar"), "touch \"$FIXTURE_RUNTIME/complete\"");
+        let manager = InstallationManager::new(
+            environment(root.path(), HostPlatform::MacOs),
+            "x86_64".into(),
+            Arc::new(RuntimeFixture {
+                bin,
+                prefix: prefix.clone(),
+                version: version.into(),
+            }),
+        );
+        manager.start(tool).unwrap();
+        let status = finished(&manager, tool);
+        assert_eq!(
+            status.stage,
+            tokenmarket_core::installation::InstallStage::Succeeded,
+            "{tool}: {} {:?}",
+            status.detail,
+            status.output
+        );
+        assert!(prefix.join("runtime/complete").exists());
+    }
+}

@@ -46,7 +46,13 @@ if ((Get-FileHash -Algorithm SHA256 -LiteralPath '{package}').Hash.ToLowerInvari
 function Usable-Node($candidate) {{
  if (-not $candidate -or -not (Test-Path -LiteralPath $candidate) -or -not (Test-Path -LiteralPath (Join-Path (Split-Path $candidate) 'npm.cmd'))) {{ return $false }}
  & $candidate -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit((a===22 && b>=19)||(a===24 && b>=2)||a===25||a===26?0:1)'
- return $LASTEXITCODE -eq 0
+ if ($LASTEXITCODE -ne 0) {{ return $false }}
+ $previousPath=$env:PATH
+ try {{
+  $env:PATH=(Split-Path $candidate)+';'+$env:PATH
+  & (Join-Path (Split-Path $candidate) 'npm.cmd') --version | Out-Null
+  return $LASTEXITCODE -eq 0
+ }} finally {{ $env:PATH=$previousPath }}
 }}
 $node=(Get-Command node.exe -ErrorAction SilentlyContinue).Source
 if (-not (Usable-Node $node)) {{
