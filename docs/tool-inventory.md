@@ -44,9 +44,8 @@ Windows home discovery uses `USERPROFILE`.
   never sufficient installation evidence. No detection probe executes a tool.
 
 The rows display tool marks, names and installation status. Missing tools offer
-an Install button with catalogue-owned compatibility information. OpenClaw and
-OpenCode use the shared installation manager; recipes for the other tools are
-added separately. An unavailable recipe disables Install with
+an Install button with catalogue-owned compatibility information. The shared
+installation manager selects each tool's verified recipe. An unavailable recipe disables Install with
 an explanation and retains the fixed official installation-guide link.
 Connection remains unavailable until actual installation is detected.
 The UI refreshes after login, explicit re-detection, foreground/visibility return

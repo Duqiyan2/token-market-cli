@@ -235,7 +235,7 @@ impl ToolInventory {
         }
         Ok(())
     }
-    pub fn connection_guard(&self, tool: ToolId) -> Result<std::fs::File> {
+    pub fn connection_guard(&self, tool: ToolId) -> Result<crate::installation::InstallationGuard> {
         crate::installation::InstallationManager::new(
             self.environment.clone(),
             std::env::consts::ARCH.into(),

@@ -1,6 +1,6 @@
 //! Explicit tool installation, independent of credentials and Tool Connections.
-pub mod opencode;
 mod native_cli;
+pub mod opencode;
 pub mod recipes;
 use crate::{
     inventory::{InstallationEnvironment, ToolInventory},
@@ -307,6 +307,16 @@ struct Job {
     status: InstallStatus,
     cancelled: Arc<AtomicBool>,
 }
+/// Explicitly release the OS lock even if a concurrent process probe briefly
+/// inherited a descriptor. Closing only this copy can leave that lock alive.
+pub struct InstallationGuard {
+    file: std::fs::File,
+}
+impl Drop for InstallationGuard {
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
+}
 #[derive(Clone)]
 pub struct InstallationManager {
     environment: InstallationEnvironment,
@@ -352,7 +362,7 @@ impl InstallationManager {
     }
     /// Held throughout an explicit Connect/Reconnect so installation cannot race
     /// with configuration mutation. This is never part of read-only discovery.
-    pub fn connection_guard(&self, tool: ToolId) -> Result<std::fs::File> {
+    pub fn connection_guard(&self, tool: ToolId) -> Result<InstallationGuard> {
         let guard = installation_lock(&self.environment, tool)?;
         if tool == ToolId::OpenCode {
             let command_version = self.installed_version(tool).ok().flatten();
@@ -524,7 +534,10 @@ impl InstallationManager {
     }
 }
 
-fn installation_lock(environment: &InstallationEnvironment, tool: ToolId) -> Result<std::fs::File> {
+fn installation_lock(
+    environment: &InstallationEnvironment,
+    tool: ToolId,
+) -> Result<InstallationGuard> {
     let directory = environment.home.join(".tokenmarket/install-locks");
     std::fs::create_dir_all(&directory)?;
     let file = std::fs::OpenOptions::new()
@@ -535,7 +548,7 @@ fn installation_lock(environment: &InstallationEnvironment, tool: ToolId) -> Res
         .open(directory.join(format!("{tool}.lock")))?;
     file.try_lock()
         .map_err(|_| anyhow::anyhow!("该工具正在安装或接入，请等待另一个客户端操作完成"))?;
-    Ok(file)
+    Ok(InstallationGuard { file })
 }
 
 fn safe_output(line: &str) -> String {
