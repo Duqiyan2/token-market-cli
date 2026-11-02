@@ -383,7 +383,17 @@ impl Format {
         let result: Value = match self {
             Self::Jsonc => super::jsonc::parse(bytes)?,
             Self::Json => serde_json::from_slice(bytes).context("配置不是有效 JSON，未执行恢复")?,
-            Self::Yaml => serde_yaml::from_slice(bytes).context("配置不是有效 YAML，未执行恢复")?,
+            Self::Yaml => {
+                let value: Value =
+                    serde_yaml::from_slice(bytes).context("配置不是有效 YAML，未执行恢复")?;
+                // YAML's empty/null document represents an empty config mapping.
+                // Keep the original bytes when no owned fields need restoration.
+                if value.is_null() {
+                    json!({})
+                } else {
+                    value
+                }
+            }
             Self::Toml => {
                 toml_edit::de::from_str(std::str::from_utf8(bytes).context("配置编码无效")?)
                     .context("配置不是有效 TOML，未执行恢复")?

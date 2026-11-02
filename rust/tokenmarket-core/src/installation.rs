@@ -3,6 +3,7 @@ mod gui;
 mod harness_cli;
 mod minimax;
 mod native_cli;
+mod oh_my_pi;
 pub mod opencode;
 mod pi;
 pub mod recipes;

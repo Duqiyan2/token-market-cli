@@ -86,6 +86,7 @@ tokenmarket workspace <workspace-id>
 | Grok Build | `grok-build` |
 | Pi | `pi` |
 | MiniMax Code | `minimax-code` |
+| Oh My Pi | `oh-my-pi` |
 
 Claude Code、Codex 在正式环境使用 `glm-5.3`，测试包使用 `glm-5.2`。其他工具会配置兼容的文本生成模型目录。
 
@@ -99,6 +100,10 @@ Pi 可点击 **安装**，或运行 `tokenmarket install pi`。接入后在 Pi �
 原 API Key 或 OAuth 信息。详见 [Pi 接入说明](docs/pi.md)。
 
 MiniMax Code 固定使用官方 0.7.2 发布包，安装目录与活动数据/profile 配置分开处理。详见 [MiniMax Code 接入说明](docs/minimax-code.md)。
+
+Oh My Pi 可独立点击 **安装**，或运行 `tokenmarket install oh-my-pi`。接入使用
+当前 OMP profile 的 `models.yml`/`models.yaml`，保留模型角色和已有认证。
+在 `/model` 中选择 Token Market 模型。详见 [Oh My Pi 接入说明](docs/oh-my-pi.md)。
 
 ## 管理连接
 

@@ -687,6 +687,24 @@ async fn minimax_active_data_overrides_and_guarded_profile_use_one_effective_con
             read_config(&expected)["custom_provider"]["tokenmarket"]["api"],
             "openai-completions"
         );
+        std::env::set_var("MINIMAX_DATA_DIR", root.join("other-active-profile"));
+        assert_eq!(
+            manager.summaries().unwrap()[0].1.state,
+            "configuration_changed"
+        );
+        assert!(manager
+            .test_connection(
+                tool,
+                &connected.key_id,
+                tokenmarket_core::connections::ConnectionTestRequest {
+                    confirmed: true,
+                    model: Some("alpha.model".into())
+                }
+            )
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("活动数据"));
         assert_eq!(
             manager
                 .disconnect(tool, &connected.key_id, None, Default::default())

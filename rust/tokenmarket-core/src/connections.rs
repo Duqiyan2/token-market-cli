@@ -8,6 +8,7 @@ mod jsonc;
 mod minimax;
 mod model_plan;
 mod multi_model;
+pub(crate) mod oh_my_pi;
 mod pi;
 mod private_storage;
 mod provider_config;
@@ -422,6 +423,7 @@ impl ConnectionManager {
                 | ToolId::GrokBuild
                 | ToolId::Pi
                 | ToolId::MiniMaxCode
+                | ToolId::OhMyPi
         ) {
             bail!("此工具的桌面接入尚未开放")
         }

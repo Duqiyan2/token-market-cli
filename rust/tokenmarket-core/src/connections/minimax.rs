@@ -2,8 +2,30 @@
 use super::provider_config::ProviderDocument;
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
+use std::path::{Path, PathBuf};
 
-pub(super) fn validate(value: &Value) -> Result<()> {
+pub(super) fn validate(value: &Value, path: &Path) -> Result<()> {
+    if !matches!(
+        path.extension().and_then(|v| v.to_str()),
+        Some("yaml" | "yml")
+    ) {
+        bail!("MiniMax Code 配置必须使用 YAML 文件")
+    }
+    let data = path.parent().context("MiniMax Code 数据目录无效")?;
+    let home = data.parent().context("MiniMax Code 数据目录无效")?;
+    let absolute = |path: &Path| -> Result<PathBuf> {
+        Ok(if path.is_absolute() {
+            path.into()
+        } else {
+            std::env::current_dir()?.join(path)
+        })
+    };
+    if absolute(data)? != absolute(&crate::adapters::minimax_data_dir(home))? {
+        bail!("MiniMax Code 活动数据目录/profile 已改变，请返回原目录取消接入后重新检测")
+    }
+    validate_value(value)
+}
+fn validate_value(value: &Value) -> Result<()> {
     let Some(providers) = value.get("custom_provider") else {
         return Ok(());
     };
@@ -127,7 +149,7 @@ pub(super) fn apply(
     key: &str,
     models: &[Value],
 ) -> Result<()> {
-    validate(&document.value)?;
+    validate_value(&document.value)?;
     for (field, value) in [
         ("api", json!("openai-completions")),
         ("name", json!("Token Market")),

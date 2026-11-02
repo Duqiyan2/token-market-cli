@@ -44,6 +44,7 @@ pub enum ToolId {
     Pi,
     #[serde(rename = "minimax-code")]
     MiniMaxCode,
+    OhMyPi,
 }
 
 impl std::fmt::Display for ToolId {
@@ -58,6 +59,7 @@ impl std::fmt::Display for ToolId {
             ToolId::GrokBuild => "grok-build",
             ToolId::Pi => "pi",
             ToolId::MiniMaxCode => "minimax-code",
+            ToolId::OhMyPi => "oh-my-pi",
         };
         f.write_str(value)
     }
@@ -113,6 +115,7 @@ enum PathKind {
     GrokBuild,
     Pi,
     MiniMaxCode,
+    OhMyPi,
 }
 
 impl Adapter {
@@ -152,6 +155,7 @@ impl Adapter {
             }),
             PathKind::GrokBuild => env_path("GROK_HOME", || home.join(".grok")).join("config.toml"),
             PathKind::MiniMaxCode => minimax_data_dir(&home).join("config.yaml"),
+            PathKind::OhMyPi => crate::connections::oh_my_pi::config_path(&home),
             PathKind::Pi => {
                 env_path("PI_CODING_AGENT_DIR", || home.join(".pi/agent")).join("models.json")
             }
@@ -187,6 +191,7 @@ impl Adapter {
                     },
                 )
             }
+            ToolId::OhMyPi => bail!("请使用共享客户端连接状态查看 Oh My Pi 配置"),
             ToolId::Pi => {
                 let value = read_json_if_exists(&self.config_path())?;
                 let provider = &value["providers"]["tokenmarket"];
@@ -416,6 +421,7 @@ impl Adapter {
 
         match self.id {
             ToolId::MiniMaxCode => bail!("请使用共享客户端接入流程配置 MiniMax Code"),
+            ToolId::OhMyPi => bail!("请使用共享客户端接入流程配置 Oh My Pi"),
             ToolId::Pi => bail!("请使用共享客户端接入流程配置 Pi"),
             ToolId::GrokBuild => bail!("请使用共享客户端接入流程配置 Grok Build"),
             ToolId::ClaudeCode => {
@@ -672,6 +678,13 @@ pub fn adapters() -> Vec<Adapter> {
             protocol: Protocol::OpenAiCompatible,
             requires_restart: true,
             path_kind: PathKind::MiniMaxCode,
+        },
+        Adapter {
+            id: ToolId::OhMyPi,
+            name: "Oh My Pi",
+            protocol: Protocol::OpenAiCompatible,
+            requires_restart: false,
+            path_kind: PathKind::OhMyPi,
         },
     ]
 }
