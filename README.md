@@ -4,7 +4,7 @@
 
 Connect local AI agent tools to Token Market from the desktop app or terminal. Both share your sign-in, current workspace and tool connections, so you can switch between them.
 
-**Version 1.1.0** · [Desktop download](https://github.com/FitBBC/token-market-cli/releases/tag/v1.1.0) · [npm package](https://www.npmjs.com/package/tokenmarket)
+**Version 1.1.1** · [Desktop download](https://github.com/FitBBC/token-market-cli/releases/tag/v1.1.1) · [npm package](https://www.npmjs.com/package/tokenmarket)
 
 ## Install
 
@@ -12,7 +12,7 @@ Have a Token Market account and install the AI agent tool you want to connect fi
 
 ### Desktop
 
-Download an installer from [Releases](https://github.com/FitBBC/token-market-cli/releases/tag/v1.1.0):
+Download an installer from [Releases](https://github.com/FitBBC/token-market-cli/releases/tag/v1.1.1):
 
 | System | Installation |
 | --- | --- |
@@ -24,14 +24,14 @@ Download an installer from [Releases](https://github.com/FitBBC/token-market-cli
 Requires **Node.js 20+**. Supports macOS arm64/x64, Windows x64 and Linux x64/arm64 with glibc 2.35+.
 
 ```bash
-npm install -g tokenmarket@1.1.0
+npm install -g tokenmarket@1.1.1
 tokenmarket --version
 ```
 
 Or run without a global installation:
 
 ```bash
-npx --yes tokenmarket@1.1.0 login
+npx --yes tokenmarket@1.1.1 login
 ```
 
 The npm package includes all five native binaries; the launcher selects the one for your system.
@@ -126,7 +126,7 @@ Reconnect validates the saved credential. Deleted or reset credentials can be re
 | Installed tool is missing | Click **重新检测**, or make sure the tool is available in your terminal and reopen the terminal. |
 | Tool still uses old settings | Fully quit and reopen it. Restart the OpenClaw Gateway/session; check OpenCode project settings for overrides. |
 | App reports changed configuration or disables testing | Follow the prompts to repair or reconnect, then test again. |
-| npm reports a missing bundled binary | Reinstall with `npm install -g tokenmarket@1.1.0`. |
+| npm reports a missing bundled binary | Reinstall with `npm install -g tokenmarket@1.1.1`. |
 | Need to restore settings | Use **取消接入** or `disconnect`. Encrypted restoration records are under `~/.tokenmarket/desktop-connections/`. |
 
 ### macOS blocks the first launch
@@ -146,4 +146,4 @@ Then reopen the app. For internal builds and shared keychain signing, see the [m
 - [Tool inventory and configuration](docs/tool-inventory.md)
 - [Shared credential lifecycle](docs/adr/0004-shared-client-key-lifecycle.md)
 
-CLI and desktop use the same `rust/tokenmarket-core` and version number. Release tags `cli-v1.1.0` and `v1.1.0` point to the same commit and trigger their respective builds.
+CLI and desktop use the same `rust/tokenmarket-core` and version number. Release tags `cli-v1.1.1` and `v1.1.1` point to the same commit and trigger their respective builds.

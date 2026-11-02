@@ -46,7 +46,7 @@ impl Document {
         Ok(PreparedFile {
             path: self.path,
             before: self.before,
-            bytes: serde_yaml::to_string(&self.value)?.into_bytes(),
+            bytes: crate::yaml::to_string(&self.value)?.into_bytes(),
             fields: self.fields,
             created_containers: self.containers,
         })

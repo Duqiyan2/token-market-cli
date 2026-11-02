@@ -482,7 +482,7 @@ fn write_deepseek_harness(
         },
         "tokenMarketSetup": {"setupId": context.setup_id, "keyId": context.key_id}
     }));
-    let yaml = serde_yaml::to_string(&next)?;
+    let yaml = crate::yaml::to_string(&next)?;
     write_private_file(&config_path, &yaml)
 }
 

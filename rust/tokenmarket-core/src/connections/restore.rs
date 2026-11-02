@@ -398,7 +398,7 @@ impl Format {
         match self {
             Self::Json => Ok(serde_json::to_vec_pretty(value)?),
             Self::Jsonc => super::jsonc::render(bytes, value),
-            Self::Yaml => Ok(serde_yaml::to_string(value)?.into_bytes()),
+            Self::Yaml => Ok(crate::yaml::to_string(value)?.into_bytes()),
             Self::Toml => {
                 let mut document = std::str::from_utf8(bytes.unwrap_or(b""))
                     .context("配置编码无效")?

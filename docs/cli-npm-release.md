@@ -39,15 +39,15 @@ npm run test:package -- .
 
 首次发布需要有权创建 `tokenmarket` 包的 npm 账号，以及仓库 Actions secret `NPM_TOKEN`。Token 需要允许发布，并满足 npm 的 2FA 要求。通过校验后，手动运行 **CLI npm packages** 并勾选 `publish`。
 
-CLI 和 App 从 1.1.0 起统一版本。`package.json`、`rust/tokenmarket-cli/Cargo.toml`、`rust/tokenmarket-core/Cargo.toml`、`src-tauri/Cargo.toml` 与 `src-tauri/tauri.conf.json` 的版本必须一致。正式发布时，在同一提交上创建 CLI tag `cli-v1.1.0` 和桌面 tag `v1.1.0`，分别触发 npm 五平台验证／发布和桌面安装包构建。
+CLI 和 App 从 1.1.0 起统一版本。`package.json`、`rust/tokenmarket-cli/Cargo.toml`、`rust/tokenmarket-core/Cargo.toml`、`src-tauri/Cargo.toml` 与 `src-tauri/tauri.conf.json` 的版本必须一致。正式发布时，在同一提交上创建 CLI tag `cli-v1.1.1` 和桌面 tag `v1.1.1`，分别触发 npm 五平台验证／发布和桌面安装包构建。
 
 发布脚本先检查 tarball 包名、版本与全部平台文件，再执行发布预演。失败后可以使用相同的 `npm-release` artifact 重试：已发布包的 integrity 完全一致才会跳过；如果同版本内容不同，必须使用新版本。
 
 发布完成后，在空目录用公共 registry 验证：
 
 ```bash
-npx --yes --registry=https://registry.npmjs.org tokenmarket@1.1.0 --version
-npx --yes --registry=https://registry.npmjs.org tokenmarket@1.1.0 --help
+npx --yes --registry=https://registry.npmjs.org tokenmarket@1.1.1 --version
+npx --yes --registry=https://registry.npmjs.org tokenmarket@1.1.1 --help
 ```
 
 完整浏览器授权和实际工具配置仍是独立验收步骤，需要用户真实登录。仅通过打包测试不能证明线上授权、Key 权限或模型请求可用。

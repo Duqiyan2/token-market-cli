@@ -172,6 +172,22 @@ async fn harness_connect_imports_every_chat_model_in_catalogue_order_and_preserv
     );
     assert_eq!(record.receipts.len(), 2);
     assert!(record.receipts.iter().all(|r| r.backup_path.is_some()));
+    // Read as an independent YAML consumer: serde_json's arbitrary-precision
+    // deserializer can otherwise hide its own numeric serialization wrappers.
+    let native_profile: serde_yaml::Value =
+        serde_yaml::from_slice(&std::fs::read(&profile).unwrap()).unwrap();
+    assert_eq!(
+        native_profile[1]["config"]["providers"]["tokenmarket"]["models"][0]["contextWindow"]
+            .as_u64(),
+        Some(65536)
+    );
+    assert_eq!(
+        native_profile[1]["config"]["providers"]["tokenmarket"]["models"][0]["maxTokens"].as_u64(),
+        Some(8192)
+    );
+    let native_credentials: serde_yaml::Value =
+        serde_yaml::from_slice(&std::fs::read(&credentials).unwrap()).unwrap();
+    assert_eq!(native_credentials["version"].as_u64(), Some(1));
     assert_eq!(
         server.await.unwrap(),
         vec![
@@ -413,6 +429,9 @@ async fn harness_disconnect_restores_both_owned_scopes_and_preserves_later_provi
     expected_credentials["refs"]["NEW"] = json!("new-secret");
     expected_credentials["records"]["new-provider"] = json!({"key":"new-secret"});
     assert_eq!(yaml(&credentials), expected_credentials);
+    let native: serde_yaml::Value =
+        serde_yaml::from_slice(&std::fs::read(&credentials).unwrap()).unwrap();
+    assert_eq!(native["version"].as_u64(), Some(1));
 }
 
 #[tokio::test]

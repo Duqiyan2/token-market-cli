@@ -16,3 +16,4 @@ pub mod desktop_workspace;
 pub mod inventory;
 
 pub mod connections;
+mod yaml;
