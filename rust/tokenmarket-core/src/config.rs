@@ -148,6 +148,7 @@ pub fn parse_tool_id(value: &str) -> Result<ToolId> {
         "opencode" => Ok(ToolId::OpenCode),
         "grok-build" => Ok(ToolId::GrokBuild),
         "pi" => Ok(ToolId::Pi),
+        "oh-my-pi" => Ok(ToolId::OhMyPi),
         other => bail!("unsupported tool: {other}"),
     }
 }

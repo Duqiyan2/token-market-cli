@@ -190,6 +190,9 @@ impl ToolInventory {
     }
     /// Desktop discovery and desktop writes share this path. Terminal CLI paths are unchanged.
     pub fn config_path(&self, tool: ToolId) -> PathBuf {
+        if tool == ToolId::OhMyPi {
+            return crate::connections::oh_my_pi::config_path(&self.environment.home);
+        }
         if tool == ToolId::DeepSeekHarness
             && std::env::var_os("DSH_ACTIVE_PROFILE").is_none()
             && self.application_path(tool).is_none()
@@ -277,6 +280,7 @@ impl ToolInventory {
             ToolId::OpenCode => &["opencode"],
             ToolId::GrokBuild => &["grok"],
             ToolId::Pi => &["pi"],
+            ToolId::OhMyPi => &["omp"],
         };
         commands
             .iter()
@@ -343,6 +347,7 @@ pub fn official_download_url(tool: ToolId) -> &'static str {
         ToolId::OpenCode => "https://opencode.ai/docs/",
         ToolId::GrokBuild => "https://github.com/xai-org/grok-build",
         ToolId::Pi => "https://pi.dev/",
+        ToolId::OhMyPi => "https://omp.sh/",
     }
 }
 
@@ -552,6 +557,7 @@ impl ToolInventory {
             ToolId::OpenCode => "opencode",
             ToolId::GrokBuild => "grok",
             ToolId::Pi => "pi",
+            ToolId::OhMyPi => "omp",
         };
         let target = self
             .environment
