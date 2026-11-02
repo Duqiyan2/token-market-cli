@@ -55,8 +55,15 @@ impl InstallExecutor for FixtureInstaller {
     }
 }
 fn fixture(root: &Path) -> (InstallationManager, Arc<FixtureInstaller>) {
+    fixture_on(root, HostPlatform::MacOs)
+}
+fn fixture_on(root: &Path, platform: HostPlatform) -> (InstallationManager, Arc<FixtureInstaller>) {
     let executor = Arc::new(FixtureInstaller {
-        executable: root.join("bin/openclaw"),
+        executable: root.join("bin").join(if platform == HostPlatform::Windows {
+            "openclaw.cmd"
+        } else {
+            "openclaw"
+        }),
         fail: AtomicBool::new(false),
         no_install: AtomicBool::new(false),
         wait: AtomicBool::new(false),
@@ -64,11 +71,11 @@ fn fixture(root: &Path) -> (InstallationManager, Arc<FixtureInstaller>) {
         version: Mutex::new("2026.10.9".into()),
     });
     let environment = InstallationEnvironment {
-        platform: HostPlatform::MacOs,
+        platform,
         home: root.into(),
         command_directories: vec![root.join("bin")],
         application_directories: vec![],
-        executable_extensions: vec![],
+        executable_extensions: vec![".CMD".into()],
     };
     (
         InstallationManager::new(environment, "aarch64".into(), executor.clone()),
@@ -215,4 +222,41 @@ fn an_incompatible_existing_version_is_not_upgraded_or_overwritten() {
         std::fs::read_to_string(&executor.executable).unwrap(),
         "original installation"
     );
+}
+
+#[test]
+fn windows_install_prepares_a_private_runtime_and_exposes_it_only_to_the_install_process() {
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join("Quoted ' & home");
+    let (manager, executor) = fixture_on(&home, HostPlatform::Windows);
+    manager.start(ToolId::OpenClaw).unwrap();
+    assert_eq!(finished(&manager).stage, InstallStage::Succeeded);
+    let steps = executor.commands.lock().unwrap();
+    let script = steps.last().unwrap().args.last().unwrap();
+    assert!(script.contains("-NodeOnly -NodePrefix"));
+    assert!(script.contains("$env:PATH = '"));
+    assert!(script.contains("Quoted '' & home"));
+    assert!(script.contains("'openclaw@2026.10.9'"));
+    assert!(!script.contains("gateway"));
+    assert!(!script.contains("setx"));
+}
+
+#[test]
+fn unsupported_architecture_is_explained_without_running_an_installer() {
+    let root = tempfile::tempdir().unwrap();
+    let (_, executor) = fixture(root.path());
+    let environment = InstallationEnvironment {
+        platform: HostPlatform::Unix,
+        home: root.path().into(),
+        command_directories: vec![],
+        application_directories: vec![],
+        executable_extensions: vec![],
+    };
+    let manager = InstallationManager::new(environment, "armv7".into(), executor.clone());
+    let available = manager.availability(ToolId::OpenClaw);
+    assert!(!available.supported);
+    assert!(available.reason.unwrap().contains("armv7"));
+    assert!(manager.start(ToolId::OpenClaw).is_err());
+    assert!(executor.commands.lock().unwrap().is_empty());
+    assert!(!root.path().join(".tokenmarket").exists());
 }

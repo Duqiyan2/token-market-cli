@@ -300,6 +300,16 @@ impl InstallationManager {
     pub fn availability(&self, tool: ToolId) -> InstallationAvailability {
         recipes::availability(tool, &self.environment, &self.architecture)
     }
+    /// Explicit-operation probe only. Read-only inventory must never call this.
+    /// Adapters can compare this with their documented supported version range
+    /// before configuration mutation; the installer pin is not that whole range.
+    pub fn installed_version(&self, tool: ToolId) -> Result<Option<String>> {
+        let plan = recipes::plan(tool, &self.environment, &self.architecture)?;
+        self.environment
+            .command_path(&plan.command)
+            .map(|path| self.executor.version(&path))
+            .transpose()
+    }
     pub fn status(&self, tool: ToolId) -> Option<InstallStatus> {
         self.jobs
             .lock()

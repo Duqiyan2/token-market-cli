@@ -128,6 +128,10 @@
       if (!entry.installation?.supported) button.title = entry.installation?.reason || '暂无兼容安装方案';
       group.append(button);
       if (!entry.installation?.supported) group.append(text('span', entry.installation?.reason || '暂无兼容安装方案', 'tool-install-unavailable'));
+      if (!entry.installation?.supported) group.append(actionButton('官方安装说明', 'quiet tool-download', async () => {
+        try { await invoke('download_tool', {tool:entry.id}); }
+        catch (error) { showResult('无法打开安装说明', String(error)); }
+      }, locked));
     }
     return group;
   }

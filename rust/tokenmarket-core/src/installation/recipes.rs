@@ -48,7 +48,8 @@ pub fn plan(
     let scripts = environment.home.join(".tokenmarket/installers/openclaw");
     let step = if environment.platform == HostPlatform::Windows {
         let installer = scripts.join("install.ps1");
-        let script = format!("& '{}' -NodeOnly -NodePrefix '{}'; if (-not $?) {{ exit 1 }}; $env:PATH = '{};' + $env:PATH; & '{}' install --global --prefix '{}' 'openclaw@{}'; if ($LASTEXITCODE -ne 0) {{ exit $LASTEXITCODE }}", ps(&installer), ps(&prefix.join("runtime")), ps(&prefix.join("runtime")), ps(&prefix.join("runtime/npm.cmd")), ps(&prefix.join("runtime")), OPENCLAW_VERSION);
+        let runtime = prefix.join("runtime");
+        let script = format!("$runtimeReady = $false; if (Test-Path -LiteralPath '{}') {{ $nodeVersion = & '{}' --version; if ($LASTEXITCODE -eq 0 -and $nodeVersion -match '^v(24|26)\\.(\\d+)\\.(\\d+)$') {{ $runtimeReady = ([int]$Matches[1] -eq 24 -and ([int]$Matches[2] -gt 22 -or ([int]$Matches[2] -eq 22 -and [int]$Matches[3] -ge 1))) -or ([int]$Matches[1] -eq 26 -and ([int]$Matches[2] -gt 12 -or ([int]$Matches[2] -eq 12 -and [int]$Matches[3] -ge 1))) }} }}; if (-not $runtimeReady) {{ & '{}' -NodeOnly -NodePrefix '{}'; if (-not $?) {{ exit 1 }} }}; $env:PATH = '{};' + $env:PATH; & '{}' install --global --prefix '{}' 'openclaw@{}'; if ($LASTEXITCODE -ne 0) {{ exit $LASTEXITCODE }}", ps(&runtime.join("node.exe")), ps(&runtime.join("node.exe")), ps(&installer), ps(&runtime), ps(&runtime), ps(&runtime.join("npm.cmd")), ps(&runtime), OPENCLAW_VERSION);
         InstallStep {
             stage: InstallStage::Dependencies,
             program: "powershell.exe".into(),

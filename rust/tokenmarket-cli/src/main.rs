@@ -94,7 +94,11 @@ async fn run() -> Result<()> {
             loop {
                 let state = manager.status(tool).context("安装状态不可用")?;
                 let new_lines = state.output_sequence.saturating_sub(printed) as usize;
-                for line in state.output.iter().skip(state.output.len().saturating_sub(new_lines)) {
+                for line in state
+                    .output
+                    .iter()
+                    .skip(state.output.len().saturating_sub(new_lines))
+                {
                     println!("{line}");
                 }
                 printed = state.output_sequence;
