@@ -40,7 +40,7 @@
   }
   function connectionLabel(entry) {
     if (!entry.connection) return entry.installed ? '已安装，尚未接入' : '未安装';
-    return ({configuration_changed:'配置已改变或不可用', configured_untested:'已配置，未测试', test_passed:'文本输出测试通过', test_failed:'文本输出测试失败'})[entry.connection.state] || '已配置，未测试';
+    return ({configuration_changed:'配置已改变或不可用', configured_untested:'已配置，未测试', test_passed:'接口文本测试通过', test_failed:'接口文本测试失败'})[entry.connection.state] || '已配置，未测试';
   }
   function stateBadge(entry) { return text('span', connectionLabel(entry), `tool-state ${entry.connection?.state || 'unconnected'}`); }
   function toolIcon(entry) {
@@ -105,7 +105,7 @@
     if (connection) {
       const notice = text('div', '', `notice ${connection.state === 'configuration_changed' ? 'warning' : connection.state === 'test_failed' ? 'error' : connection.state === 'test_passed' ? 'success' : ''}`);
       notice.append(text('h3', connectionLabel(entry)));
-      const note = connection.state === 'configuration_changed' ? '当前配置与接入记录不一致，测试已停用。请检查配置或重新接入。' : connection.state === 'test_passed' ? '仅验证一次完整文本输出；流式、工具调用与 Agent 运行表现请在工具中确认。' : connection.state === 'test_failed' ? '未通过文本输出测试。请检查权限、余额与模型可用性后重试。' : '配置已保存，尚未发起模型测试。可以先打开工具；需要时再确认费用并测试。';
+      const note = connection.state === 'configuration_changed' ? '当前配置与接入记录不一致，测试已停用。请检查配置或重新接入。' : connection.state === 'test_passed' ? window.TokenMarketConnectionTests.scope : connection.state === 'test_failed' ? `未通过接口文本测试。请检查权限、余额与模型可用性后重试。${window.TokenMarketConnectionTests.scope}` : '配置已保存，尚未发起模型测试。可以先打开工具；需要时再确认费用并测试。';
       notice.append(text('p', note)); detailRoot.append(notice);
     } else detailRoot.append(text('p', entry.installed ? '工具已安装，接入后即可使用 Token Market 模型。' : '先安装工具，再返回重新检测和接入。', 'notice'));
     detailRoot.append(actions(entry, true));
@@ -116,7 +116,7 @@
     } else models.append(text('p', '接入后会显示该连接的可用模型。'));
     left.append(models);
     if (connection?.testResult) {
-      const result = text('section', '', 'sheet'); result.append(text('h2', '最近一次文本测试'), detailRow('测试模型', connection.testResult.model), detailRow('测试时间', connection.testResult.testedAt), text('p', connection.testResult.detail)); left.append(result);
+      const result = text('section', '', 'sheet'); result.append(text('h2', '最近一次接口文本测试'), detailRow('测试模型', connection.testResult.model), detailRow('测试时间', connection.testResult.testedAt), text('p', connection.testResult.detail), text('p', window.TokenMarketConnectionTests.scope, 'test-history-scope')); left.append(result);
     }
     const guidance = text('section', '', 'sheet'); guidance.append(text('h2', '使用前提醒'), text('p', '配置完成后，请完全退出并重新打开已有工具会话。'));
     if (entry.id === 'openclaw') guidance.append(text('p', 'OpenClaw 需要重启 Gateway 或会话，已有模型白名单仍可能限制可选模型。'));

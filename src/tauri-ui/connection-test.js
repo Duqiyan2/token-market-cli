@@ -1,9 +1,11 @@
 /* Receives only the shared redacted connection summary. Native retains every credential. */
 (() => {
   const root = document.getElementById('tools-region');
+  const scope = '仅检查所选模型的一次非流式接口文本响应；未验证其他模型、流式、工具调用或 Agent 运行表现。';
   const dialog = document.createElement('dialog');
   dialog.className = 'connection-test-dialog';
-  dialog.innerHTML = '<h3>测试连接</h3><p class="test-context"></p><p>本次会向该连接的模型发送一次真实请求，可能产生少量调用费用。费用由此连接的计费空间承担。</p><p>仅验证一次完整文本输出；不验证流式或工具调用，也不会更改 Agent 配置。</p><label class="test-model-label">本次测试模型 <select class="test-model"></select></label><p class="test-feedback" role="status" aria-live="polite"></p><div class="tool-actions"><button class="test-cancel" type="button">取消</button><button class="primary test-confirm" type="button">确认费用并测试一次</button></div>';
+  dialog.innerHTML = '<h3>测试连接</h3><p class="test-context"></p><p>本次会向该连接的模型发送一次真实请求，可能产生少量调用费用。费用由此连接的计费空间承担。</p><p class="test-scope"></p><label class="test-model-label">本次测试模型 <select class="test-model"></select></label><p class="test-feedback" role="status" aria-live="polite"></p><div class="tool-actions"><button class="test-cancel" type="button">取消</button><button class="primary test-confirm" type="button">确认费用并测试一次</button></div>';
+  dialog.querySelector('.test-scope').textContent = `${scope}不会更改 Agent 配置。`;
   document.body.append(dialog);
   const selector = dialog.querySelector('.test-model');
   const confirm = dialog.querySelector('.test-confirm');
@@ -12,7 +14,7 @@
   let pending = null;
   let busy = false;
   let generation = 0;
-  window.TokenMarketConnectionTests = {get busy() { return busy; }};
+  window.TokenMarketConnectionTests = {scope, get busy() { return busy; }};
   const text = (tag, value) => { const element = document.createElement(tag); element.textContent = value; return element; };
   cancel.onclick = () => { if (!busy) { pending = null; dialog.close(); } };
   dialog.addEventListener('cancel', event => { if (busy) event.preventDefault(); else pending = null; });
@@ -41,13 +43,13 @@
     const current = generation;
     busy = true;
     confirm.disabled = true; cancel.disabled = true; selector.disabled = true;
-    feedback.textContent = '正在测试一次文本输出…';
+    feedback.textContent = '正在检查所选模型的一次接口文本响应…';
     window.dispatchEvent(new CustomEvent('tokenmarket-test-busy'));
     try {
       const result = await window.__TAURI__.core.invoke('test_tool_connection', {tool:entry.id,expectedKeyId:entry.connection.keyId,request:{confirmed:true,model:selector.value}});
       if (current !== generation) return;
       feedback.className = `test-feedback ${result.passed ? 'success' : 'error'}`;
-      feedback.textContent = `${result.passed ? '文本输出测试通过' : '文本输出测试失败'}：${result.detail}`;
+      feedback.textContent = `${result.passed ? '接口文本测试通过' : '接口文本测试失败'}：${result.detail}`;
       pending = null;
       confirm.textContent = '测试已完成';
     } catch (error) {
