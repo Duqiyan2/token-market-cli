@@ -1,5 +1,6 @@
 //! Explicit tool installation, independent of credentials and Tool Connections.
 mod native_cli;
+pub mod opencode;
 mod pi;
 pub mod recipes;
 use crate::{
@@ -81,6 +82,10 @@ pub trait InstallExecutor: Send + Sync {
         output: &mut dyn FnMut(String),
     ) -> Result<()>;
     fn version(&self, command: &Path) -> Result<String>;
+    /// Read application version metadata without launching the application.
+    fn application_version(&self, _application: &Path) -> Result<Option<String>> {
+        Ok(None)
+    }
 }
 pub struct NativeInstallExecutor;
 impl InstallExecutor for NativeInstallExecutor {
@@ -169,6 +174,40 @@ impl InstallExecutor for NativeInstallExecutor {
             .into_iter()
             .find(|line| !line.trim().is_empty())
             .context("无法读取已安装版本")
+    }
+    fn application_version(&self, application: &Path) -> Result<Option<String>> {
+        #[cfg(windows)]
+        {
+            let mut lines = vec![];
+            let script = format!("$v = [System.Diagnostics.FileVersionInfo]::GetVersionInfo('{}'); if ($v.ProductVersion) {{ Write-Output $v.ProductVersion }} else {{ Write-Output $v.FileVersion }}", application.to_string_lossy().replace('\'', "''"));
+            run_process(
+                "powershell.exe",
+                &[
+                    "-NoProfile".into(),
+                    "-NonInteractive".into(),
+                    "-Command".into(),
+                    script,
+                ],
+                &[],
+                &AtomicBool::new(false),
+                &mut |line| lines.push(line),
+                Duration::from_secs(15),
+            )?;
+            Ok(lines.into_iter().find(|line| !line.trim().is_empty()))
+        }
+        #[cfg(not(windows))]
+        {
+            let metadata = application.join("Contents/Info.plist");
+            if !metadata.exists() {
+                return Ok(None);
+            }
+            let plist = plist::Value::from_file(metadata)?;
+            Ok(plist
+                .as_dictionary()
+                .and_then(|properties| properties.get("CFBundleShortVersionString"))
+                .and_then(plist::Value::as_string)
+                .map(str::to_owned))
+        }
     }
 }
 
@@ -269,6 +308,16 @@ struct Job {
     status: InstallStatus,
     cancelled: Arc<AtomicBool>,
 }
+/// Explicitly release the OS lock even if a concurrent process probe briefly
+/// inherited a descriptor. Closing only this copy can leave that lock alive.
+pub struct InstallationGuard {
+    file: std::fs::File,
+}
+impl Drop for InstallationGuard {
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
+}
 #[derive(Clone)]
 pub struct InstallationManager {
     environment: InstallationEnvironment,
@@ -312,6 +361,33 @@ impl InstallationManager {
             .map(|path| self.executor.version(&path))
             .transpose()
     }
+    /// Held throughout an explicit Connect/Reconnect so installation cannot race
+    /// with configuration mutation. This is never part of read-only discovery.
+    pub fn connection_guard(&self, tool: ToolId) -> Result<InstallationGuard> {
+        let guard = installation_lock(&self.environment, tool)?;
+        if tool == ToolId::OpenCode {
+            let command_version = self.installed_version(tool).ok().flatten();
+            let application_version = ToolInventory::new(self.environment.clone())
+                .application_path(tool)
+                .and_then(|application| {
+                    self.executor
+                        .application_version(&application)
+                        .ok()
+                        .flatten()
+                });
+            // Unknown metadata does not prove incompatibility. Check both detected
+            // identities because the desktop prefers an application while CLI
+            // management can still use a command on PATH.
+            if let Some(version) = command_version
+                .into_iter()
+                .chain(application_version)
+                .find(|version| opencode::major_version(version).is_some_and(|major| major >= 2))
+            {
+                bail!("检测到 OpenCode 2 或更新主版本（{version}）；当前接入仅支持 OpenCode V1。请按官方说明选择兼容版本，未修改配置或自动升级/降级")
+            }
+        }
+        Ok(guard)
+    }
     pub fn status(&self, tool: ToolId) -> Option<InstallStatus> {
         self.jobs
             .lock()
@@ -329,17 +405,7 @@ impl InstallationManager {
     }
     pub fn start(&self, tool: ToolId) -> Result<InstallStatus> {
         let plan = recipes::plan(tool, &self.environment, &self.architecture)?;
-        let lock_directory = self.environment.home.join(".tokenmarket/install-locks");
-        std::fs::create_dir_all(&lock_directory)?;
-        let operation_lock = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(lock_directory.join(format!("{tool}.lock")))?;
-        operation_lock
-            .try_lock()
-            .map_err(|_| anyhow::anyhow!("该工具正在另一个客户端安装，请等待完成"))?;
+        let operation_lock = installation_lock(&self.environment, tool)?;
         let cancelled = Arc::new(AtomicBool::new(false));
         let status = InstallStatus {
             tool,
@@ -394,12 +460,10 @@ impl InstallationManager {
     fn install(&self, plan: &InstallPlan, cancelled: &AtomicBool) -> Result<()> {
         if let Some(path) = self.environment.command_path(&plan.command) {
             let version = self.executor.version(&path)?;
-            if !version
-                .split_whitespace()
-                .any(|part| part.trim_start_matches('v') == plan.version)
-            {
+            if !recipes::compatible_existing_version(plan.tool, &version, &plan.version) {
                 bail!("已安装版本 {version} 尚未验证兼容（当前支持 {}）；未自动升级，请按官方说明处理", plan.version)
             }
+            self.update(plan.tool, |state| state.version = Some(version));
             return Ok(());
         }
         // An independently installed GUI must not be overwritten by a CLI installer.
@@ -469,6 +533,23 @@ impl InstallationManager {
             action(&mut job.status);
         }
     }
+}
+
+fn installation_lock(
+    environment: &InstallationEnvironment,
+    tool: ToolId,
+) -> Result<InstallationGuard> {
+    let directory = environment.home.join(".tokenmarket/install-locks");
+    std::fs::create_dir_all(&directory)?;
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(directory.join(format!("{tool}.lock")))?;
+    file.try_lock()
+        .map_err(|_| anyhow::anyhow!("该工具正在安装或接入，请等待另一个客户端操作完成"))?;
+    Ok(InstallationGuard { file })
 }
 
 fn safe_output(line: &str) -> String {
