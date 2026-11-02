@@ -11,13 +11,14 @@ module.exports = async function openFixture(browser, options = {}) {
     const team = {id:'team',name:'团队空间',type:'TEAM',status:'ACTIVE',roleCode:'TEAM_MEMBER'};
     const fixture = window.__fixture = {calls:[],user,personal,team,current:personal,signedIn:options.signedIn !== false,pending:null,testPassed:true,conflicts:options.conflicts || false,inventoryError:options.inventoryError || false,workspaceError:options.workspaceError || false,events:{}};
     const connection = (id, state = 'configured_untested') => ({state,owner:{id:user.id,name:user.name},boundWorkspace:{id:personal.id,name:personal.name},models:[options.model || 'server-model'],keyId:'receipt-'+id,protocol:'OPENAI_CHAT_COMPLETIONS',testResult:null});
-    fixture.entries = [['claude-code','Claude Code'],['codex','Codex CLI'],['workbuddy','WorkBuddy'],['deepseek-harness','DeepSeek Harness'],['openclaw','OpenClaw'],['opencode','OpenCode'],['grok-build','Grok Build'],['hermes','Hermes']].map(([id,name],i) => ({id,name,installed:i<3,canConnect:i<3,connection:i<2?connection(id,i===0?'test_passed':options.changed?'configuration_changed':'configured_untested'):null}));
+    fixture.entries = [['claude-code','Claude Code'],['codex','Codex CLI'],['workbuddy','WorkBuddy'],['deepseek-harness','DeepSeek Harness'],['openclaw','OpenClaw'],['opencode','OpenCode'],['grok-build','Grok Build'],['hermes','Hermes'],['pi','Pi'],['oh-my-pi','Oh My Pi']].map(([id,name],i) => ({id,name,installed:i<3,canConnect:i<3,connection:i<2?connection(id,i===0?'test_passed':options.changed?'configuration_changed':'configured_untested'):null}));
     if (options.multi) fixture.entries[2].connection = {...connection('workbuddy'),models:['server-model-a','server-model-b']};
-    const installVersions = {'claude-code':'2.1.309',codex:'0.166.0',openclaw:'2026.10.9',opencode:'1.19.5','grok-build':'1.0.70',hermes:'0.22.5'};
+    const installVersions = {'claude-code':'2.1.309',codex:'0.166.0',workbuddy:'5.9.3','deepseek-harness':'0.2.1-rc.5',openclaw:'2026.10.9',opencode:'1.19.5','grok-build':'1.0.70',hermes:'0.22.5',pi:'1.4.0','oh-my-pi':'18.15.0'};
     fixture.entries.forEach(entry => {
       const supported=Boolean(installVersions[entry.id]) && options.unsupportedTool !== entry.id;
       entry.installation = {supported,reason:supported?null:'当前系统暂无兼容安装方案',version:installVersions[entry.id]||null};
       if (options.missingNativeCli && ['claude-code','codex'].includes(entry.id)) { entry.installed=false;entry.canConnect=false;entry.connection=null; }
+      if (options.missingGui && ['workbuddy','deepseek-harness'].includes(entry.id)) { entry.installed=false;entry.canConnect=false;entry.connection=null; }
     });
     fixture.installation = null;
     if (options.legacy) fixture.entries[3].connection = {state:'legacy',owner:null,boundWorkspace:null,keyId:null,protocol:null,models:['legacy-model']};
@@ -32,9 +33,9 @@ module.exports = async function openFixture(browser, options = {}) {
       if (options.credentialLost && ['connect_tool','reconnect_tool'].includes(command) && !args.recovery) throw {message:'本机保存的连接信息已丢失',recovery:{keyId:'missing-fixture',ownerId:user.id,workspaceId:fixture.current.id,ownerName:user.name,workspaceName:fixture.current.name}};
       if (args.recovery && (args.recovery.ownerId!==user.id || args.recovery.workspaceId!==fixture.current.id)) throw Error('账号或空间已改变');
       switch(command) {
-        case 'start_tool_installation': fixture.installation={tool:args.tool,stage:'dependencies',detail:'正在准备运行依赖',output:['准备工具运行依赖'],installed:false}; return clone(fixture.installation);
-        case 'tool_installation_status': if(fixture.installation.stage !== 'cancelled' && !options.installPending && !options.installFail){fixture.installation={...fixture.installation,stage:'succeeded',detail:'安装完成，请单独接入',installed:true};entry.installed=true;entry.canConnect=true;} if(options.installFail)fixture.installation={...fixture.installation,stage:'failed',detail:'依赖下载失败，请重试'}; return clone(fixture.installation);
-        case 'cancel_tool_installation': fixture.installation={...fixture.installation,stage:'cancelled',detail:'安装已取消，已准备的依赖保留'}; return null;
+        case 'start_tool_installation': fixture.installation={tool:args.tool,stage:options.guiInstall?'waiting_for_user':'dependencies',detail:options.guiInstall?'请完成原生安装器中的步骤；取消请在原生安装器中操作':'正在准备运行依赖',output:['准备工具运行依赖'],installed:false}; return clone(fixture.installation);
+        case 'tool_installation_status': if(fixture.installation.stage !== 'cancelled' && !options.installPending && !options.installFail && (!options.guiInstall || fixture.nativeInstalled)){fixture.installation={...fixture.installation,stage:'succeeded',detail:'安装完成，请单独接入',installed:true};entry.installed=true;entry.canConnect=true;} if(options.installFail)fixture.installation={...fixture.installation,stage:'failed',detail:'依赖下载失败，请重试'}; return clone(fixture.installation);
+        case 'cancel_tool_installation': fixture.installation={...fixture.installation,stage:'cancelled',detail:options.guiInstall?'已停止等待；请在原生安装器中取消安装':'安装已取消，已准备的依赖保留'}; return null;
         case 'desktop_login_status': case 'refresh_desktop_session': return clone(loginStatus());
         case 'desktop_workspace_context': if(fixture.workspaceError)throw Error('空间读取失败');return clone(workspace());
         case 'desktop_tool_inventory': if(fixture.inventoryError)throw Error('工具读取失败');if(fixture.deferInventory)return new Promise(resolve=>fixture.resolveInventory=()=>resolve(clone(fixture.entries)));return clone(fixture.entries);

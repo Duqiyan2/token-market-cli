@@ -23,6 +23,54 @@ test('Hermes installation and connection use its own identity without hidden pai
   }finally{await f.close();}
 });
 
+test('Oh My Pi installs and connects separately with its own tool identity', async () => {
+  const f=await openFixture(); try {
+    const p=f.page;
+    const row=p.locator('[data-tool="oh-my-pi"]');
+    await row.locator('img').evaluate(image => image.decode());
+    assert.equal(await row.locator('img').evaluate(image => image.naturalWidth > 0),true);
+    await row.locator('.tool-install').click();
+    await p.locator('.tool-install-status').filter({hasText:'安装完成'}).waitFor();
+    await p.locator('.tool-install-close').click();
+    assert.equal((await calls(p,'connect_tool')).length,0);
+    assert.equal((await calls(p,'test_tool_connection')).length,0);
+    await row.locator('.tool-connect').click();
+    await p.locator('.connect-confirm-dialog[open]').waitFor();
+    await p.locator('.connect-confirm').click();
+    await p.getByRole('heading',{name:'Oh My Pi 已接入'}).waitFor();
+    assert.deepEqual((await calls(p,'connect_tool'))[0].args,{tool:'oh-my-pi',recovery:null});
+    await p.locator('dialog[open] .close').click();
+    await detail(p,'oh-my-pi');
+    await p.locator('#tool-detail-region .tool-launch').click();
+    assert.equal((await calls(p,'launch_connected_tool'))[0].args.tool,'oh-my-pi');
+    assert.deepEqual(f.errors,[]);
+  } finally { await f.close(); }
+});
+
+test('Pi installs and connects separately with its own tool identity', async () => {
+  const f=await openFixture(); try {
+    const p=f.page;
+    const row=p.locator('[data-tool="pi"]');
+    await row.locator('img').evaluate(image => image.decode());
+    assert.equal(await row.locator('img').evaluate(image => image.naturalWidth > 0),true);
+    await row.locator('.tool-install').click();
+    await p.locator('.tool-install-status').filter({hasText:'安装完成'}).waitFor();
+    await p.locator('.tool-install-close').click();
+    assert.equal((await calls(p,'connect_tool')).length,0);
+    assert.equal((await calls(p,'test_tool_connection')).length,0);
+    await row.locator('.tool-connect').click();
+    await p.locator('.connect-confirm-dialog[open]').waitFor();
+    await p.locator('.connect-confirm').click();
+    await p.getByRole('heading',{name:'Pi 已接入'}).waitFor();
+    assert.deepEqual((await calls(p,'connect_tool'))[0].args,{tool:'pi',recovery:null});
+    await p.locator('dialog[open] .close').click();
+    await detail(p,'pi');
+    await p.locator('#tool-detail-region .tool-launch').click();
+    assert.equal((await calls(p,'launch_connected_tool'))[0].args.tool,'pi');
+    assert.deepEqual(f.errors,[]);
+  } finally { await f.close(); }
+});
+
 test('Grok Build installs and connects separately with its own tool identity', async () => {
   const f=await openFixture(); try {
     const p=f.page;
@@ -99,6 +147,31 @@ test('installation can be cancelled and unsupported installs explain their disab
   } finally { await f.close(); }
 });
 
+test('GUI installation waits for native completion and can stop waiting without cancelling the native installer', async () => {
+  const f=await openFixture({missingGui:true,guiInstall:true});try {
+    const p=f.page;
+    await p.locator('[data-tool="workbuddy"] .tool-install').click();
+    await p.locator('.tool-install-status').filter({hasText:'原生安装器'}).waitFor();
+    assert.equal((await p.locator('.tool-install-status').innerText()).split('请完成原生安装器中的步骤').length,2);
+    assert.equal(await p.locator('.tool-install-cancel').isVisible(),false);
+    assert.equal(await p.locator('.tool-install-stop-wait').isVisible(),true);
+    await p.locator('.tool-install-stop-wait').click();
+    await p.locator('.tool-install-status').filter({hasText:'已停止等待'}).waitFor();
+    assert.match(await p.locator('.tool-install-status').innerText(),/请在原生安装器中取消/);
+    assert.equal(await p.locator('.tool-install-retry').isVisible(),true);
+    await p.locator('.tool-install-close').click();
+    await p.locator('[data-tool="deepseek-harness"] .tool-install').click();
+    await p.locator('.tool-install-status').filter({hasText:'原生安装器'}).waitFor();
+    await p.locator('.tool-install-close').click();
+    await p.evaluate(()=>{window.__fixture.nativeInstalled=true;});
+    await p.locator('[data-tool="deepseek-harness"] .tool-connect').waitFor();
+    assert.equal((await calls(p,'cancel_tool_installation')).length,1);
+    assert.equal((await calls(p,'connect_tool')).length,0);
+    assert.equal((await calls(p,'test_tool_connection')).length,0);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
 test('OpenCode installation uses the shared flow and leaves connection as a separate action', async () => {
   const f=await openFixture(); try {
     const p=f.page;
@@ -128,12 +201,12 @@ test('installation failure preserves the error and offers a retry', async () => 
 
 test('real UI renders safe native summaries, searches, navigates and fits desktop/mobile', async () => {
   const f = await openFixture();try {
-    const p=f.page;assert.equal(await p.locator('.tool-row').count(),8);
+    const p=f.page;assert.equal(await p.locator('.tool-row').count(),10);
     assert.equal((await calls(p,'test_tool_connection')).length,0);
     assert.equal((await calls(p,'connect_tool')).length,0);
     await p.locator('.tools-search').fill('Codex');assert.equal(await p.locator('.tool-row').count(),1);
     await p.locator('.tools-search').fill('no-match');await p.getByRole('heading',{name:'没有匹配的工具'}).waitFor();
-    await p.getByRole('button',{name:'查看全部工具'}).click();assert.equal(await p.locator('.tool-row').count(),8);
+    await p.getByRole('button',{name:'查看全部工具'}).click();assert.equal(await p.locator('.tool-row').count(),10);
     await p.locator('[data-tool-filter="available"]').click();assert.equal(await p.locator('.tool-row').count(),1);
     await p.locator('[data-tool-filter="all"]').click();
     for(const width of [1440,900,375]) { await p.setViewportSize({width,height:width===1440?1000:760});assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);assert.equal(await p.locator('#signed-in').isVisible(),true); }

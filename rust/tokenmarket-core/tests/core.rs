@@ -16,7 +16,9 @@ fn registers_all_supported_tools() {
             "openclaw",
             "opencode",
             "grok-build",
-            "hermes"
+            "hermes",
+            "pi",
+            "oh-my-pi"
         ]
     );
 }
@@ -37,6 +39,8 @@ fn serializes_every_tool_with_the_server_contract_id() {
         ("opencode", "opencode"),
         ("grok-build", "grok-build"),
         ("hermes", "hermes"),
+        ("pi", "pi"),
+        ("oh-my-pi", "oh-my-pi"),
     ] {
         let tool = tool_id(input).unwrap();
         let value = serde_json::to_value(&tool).unwrap();

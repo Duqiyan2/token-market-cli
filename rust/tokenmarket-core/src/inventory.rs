@@ -194,6 +194,33 @@ impl ToolInventory {
             return crate::config::hermes_home(&self.environment.home, self.environment.platform)
                 .join("config.yaml");
         }
+        if tool == ToolId::OhMyPi {
+            return crate::connections::oh_my_pi::config_path(&self.environment.home);
+        }
+        if tool == ToolId::DeepSeekHarness
+            && std::env::var_os("DSH_ACTIVE_PROFILE").is_none()
+            && self.application_path(tool).is_none()
+            && self.environment.command_path("dsh")
+                == Some(
+                    self.environment
+                        .home
+                        .join(".tokenmarket/tools/deepseek-harness/bin/dsh"),
+                )
+        {
+            // The npm CLI cannot boot Electron's reserved desktop profile. Its
+            // home patch applies to web/headless and preserves retained profiles.
+            return std::env::var_os("DSH_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| self.environment.home.join(".dsh"))
+                .join("cordis.patch.yml");
+        }
+        if tool == ToolId::Pi {
+            return std::env::var_os("PI_CODING_AGENT_DIR")
+                .filter(|v| !v.to_string_lossy().trim().is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| self.environment.home.join(".pi/agent"))
+                .join("models.json");
+        }
         if tool == ToolId::GrokBuild {
             return std::env::var_os("GROK_HOME")
                 .filter(|v| !v.to_string_lossy().trim().is_empty())
@@ -257,6 +284,8 @@ impl ToolInventory {
             ToolId::OpenCode => &["opencode"],
             ToolId::GrokBuild => &["grok"],
             ToolId::Hermes => &["hermes"],
+            ToolId::Pi => &["pi"],
+            ToolId::OhMyPi => &["omp"],
         };
         commands
             .iter()
@@ -323,6 +352,8 @@ pub fn official_download_url(tool: ToolId) -> &'static str {
         ToolId::OpenCode => "https://opencode.ai/docs/",
         ToolId::GrokBuild => "https://github.com/xai-org/grok-build",
         ToolId::Hermes => "https://hermes-agent.nousresearch.com/docs/getting-started/installation",
+        ToolId::Pi => "https://pi.dev/",
+        ToolId::OhMyPi => "https://omp.sh/",
     }
 }
 
@@ -532,6 +563,8 @@ impl ToolInventory {
             ToolId::OpenCode => "opencode",
             ToolId::GrokBuild => "grok",
             ToolId::Hermes => "hermes",
+            ToolId::Pi => "pi",
+            ToolId::OhMyPi => "omp",
         };
         let target = self
             .environment

@@ -13,6 +13,8 @@ pub fn managed_command_directories(home: &Path) -> Vec<PathBuf> {
     vec![
         home.join(".local/bin"),
         home.join(".tokenmarket/tools/codex/bin"),
+        home.join(".tokenmarket/tools/deepseek-harness/bin"),
+        home.join(".tokenmarket/tools/deepseek-harness/runtime/bin"),
         home.join(".tokenmarket/tools/openclaw/bin"),
         home.join(".tokenmarket/tools/openclaw"),
         home.join(".tokenmarket/tools/openclaw/runtime"),
@@ -21,6 +23,9 @@ pub fn managed_command_directories(home: &Path) -> Vec<PathBuf> {
         home.join(".grok/bin"),
         home.join(".tokenmarket/tools/hermes/checkout/.hermes/bin"),
         crate::config::hermes_home(home, HostPlatform::Windows).join("bin"),
+        home.join(".tokenmarket/tools/oh-my-pi/bin"),
+        home.join(".tokenmarket/tools/pi/runtime"),
+        home.join(".tokenmarket/tools/pi/git/bin"),
     ]
 }
 pub fn availability(
@@ -63,11 +68,20 @@ pub fn plan(
     if tool == ToolId::Hermes {
         return super::hermes::plan(environment, architecture);
     }
+    if super::gui::is_gui(tool) {
+        return super::gui::plan(tool, environment, architecture);
+    }
     if tool == ToolId::OpenCode {
         return super::opencode::plan(environment, architecture);
     }
     if matches!(tool, ToolId::ClaudeCode | ToolId::Codex) {
         return super::native_cli::plan(tool, environment, architecture);
+    }
+    if tool == ToolId::OhMyPi {
+        return super::oh_my_pi::plan(environment, architecture);
+    }
+    if tool == ToolId::Pi {
+        return super::pi::plan(environment, architecture);
     }
     if tool == ToolId::GrokBuild {
         return grok_plan(environment, architecture);
