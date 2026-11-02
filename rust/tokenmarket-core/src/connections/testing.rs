@@ -186,7 +186,7 @@ impl ConnectionManager {
             .await;
         let (passed, detail) = match response {
             Err(_) => (false, "无法连接模型网关，请检查网络后手动重试".into()),
-            Ok(response) if !response.status().is_success() => (false, format!("模型请求失败（HTTP {}），请检查连接认证、计费空间权限、余额和模型可用性；认证失效时可清除连接后重新接入", response.status().as_u16())),
+            Ok(response) if !response.status().is_success() => (false, format!("模型请求失败（HTTP {}），请检查连接认证、计费空间权限、余额和模型可用性；认证失效时请先在平台检查 Key 状态，再重新接入", response.status().as_u16())),
             Ok(response) => {
                 let body: Option<Value> = response.json().await.ok();
                 let verified = body.as_ref().is_some_and(|body| body["error"].is_null() && if anthropic {
@@ -196,9 +196,12 @@ impl ConnectionManager {
                 } else {
                     body["choices"].as_array().is_some_and(|choices| choices.iter().any(|choice| choice["finish_reason"] == "stop" && choice["message"]["role"] == "assistant" && choice["message"]["content"].as_str().is_some_and(|text| !text.trim().is_empty())))
                 });
-                (verified, if verified { "已验证一次文本输出；未验证流式或工具调用" } else { "网关未返回有效的完整助手文本输出；请检查模型与已配置协议后手动重试" }.into())
+                (verified, if verified { "已收到一次完整助手文本输出" } else { "网关未返回有效的完整助手文本输出；请检查模型与已配置协议后手动重试" }.into())
             }
         };
+        let detail = format!(
+            "{detail}。本次仅检查模型 {model} 的一次非流式接口文本响应；未验证其他模型、流式、工具调用或 Agent 运行表现。"
+        );
         let result = ConnectionTestResult {
             model,
             protocol: record.protocol,

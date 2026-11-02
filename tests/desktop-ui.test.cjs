@@ -110,6 +110,27 @@ test('configuration drift disables testing until configuration is repaired', asy
     assert.equal((await calls(p,'test_tool_connection')).length,0);assert.deepEqual(f.errors,[]);
   }finally{await f.close();}
 });
+test('connection test outcomes and saved history identify selected-model protocol scope', async () => {
+  const f=await openFixture({multi:true});try {
+    const p=f.page;
+    await detail(p,'workbuddy');
+    for(const passed of [true,false]) {
+      await p.evaluate(passed=>{window.__fixture.testPassed=passed;},passed);
+      await p.locator('.tool-test').click();
+      assert.match(await p.locator('.test-scope').innerText(),/所选模型.*非流式接口文本响应/);
+      assert.match(await p.locator('.test-scope').innerText(),/其他模型、流式、工具调用或 Agent 运行表现/);
+      await p.locator('.test-model').selectOption('server-model-b');
+      await p.locator('.test-confirm').click();
+      await p.locator(`.test-feedback.${passed?'success':'error'}`).waitFor();
+      assert.match(await p.locator('.test-feedback').innerText(),passed?/接口文本测试通过/:/接口文本测试失败/);
+      await p.locator('.test-cancel').click();
+      assert.match(await p.locator('#tool-detail-region .notice').innerText(),/其他模型、流式、工具调用或 Agent 运行表现/);
+      assert.match(await p.locator('.test-history-scope').innerText(),/其他模型、流式、工具调用或 Agent 运行表现/);
+    }
+    assert.equal((await calls(p,'test_tool_connection')).length,2);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
 test('reconnect preserves native receipt and expected current ownership in command arguments', async () => {
   const f=await openFixture();try {
     const p=f.page;await switchTeam(p);await detail(p,'claude-code');await manage(p);await p.locator('#tool-detail-region .tool-connect').click();
