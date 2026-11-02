@@ -21,11 +21,14 @@ connection action. No environment variable or real configuration is mutated.
 Configuration locations continue to use the existing adapters and their explicit
 `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `WORKBUDDY_CONFIG_PATH`, `DSH_HOME`,
 `DSH_ACTIVE_PROFILE`, `OPENCLAW_CONFIG_PATH` and `OPENCODE_CONFIG` overrides.
+New adapters also respect `GROK_HOME`, `PI_CODING_AGENT_DIR`, and MiniMax
+`MINIMAX_DATA_DIR` / `MAVIS_DATA_DIR` (see [MiniMax profile rules](minimax-code.md)).
 Windows home discovery uses `USERPROFILE`.
 
 ## Installation evidence
 
-- Commands: `claude`, `codex`, `workbuddy`, `dsh`, `openclaw`, `opencode`.
+- Commands: `claude`, `codex`, `workbuddy`, `dsh`, `openclaw`, `opencode`, `grok`,
+  `pi`, `mcode`.
   Unix discovery requires an executable file, including a valid symlink target.
   Search includes PATH and common user/package-manager binary directories.
 - macOS desktop applications: WorkBuddy, DeepSeek Harness, OpenClaw and OpenCode

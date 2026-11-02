@@ -207,6 +207,9 @@ impl ToolInventory {
                 .unwrap_or_else(|| self.environment.home.join(".dsh"))
                 .join("cordis.patch.yml");
         }
+        if tool == ToolId::MiniMaxCode {
+            return crate::adapters::minimax_data_dir(&self.environment.home).join("config.yaml");
+        }
         if tool == ToolId::Pi {
             return std::env::var_os("PI_CODING_AGENT_DIR")
                 .filter(|v| !v.to_string_lossy().trim().is_empty())
@@ -277,6 +280,7 @@ impl ToolInventory {
             ToolId::OpenCode => &["opencode"],
             ToolId::GrokBuild => &["grok"],
             ToolId::Pi => &["pi"],
+            ToolId::MiniMaxCode => &["mcode"],
         };
         commands
             .iter()
@@ -343,6 +347,7 @@ pub fn official_download_url(tool: ToolId) -> &'static str {
         ToolId::OpenCode => "https://opencode.ai/docs/",
         ToolId::GrokBuild => "https://github.com/xai-org/grok-build",
         ToolId::Pi => "https://pi.dev/",
+        ToolId::MiniMaxCode => "https://github.com/MiniMax-AI/minimax-code/releases/tag/v0.7.2",
     }
 }
 
@@ -552,6 +557,7 @@ impl ToolInventory {
             ToolId::OpenCode => "opencode",
             ToolId::GrokBuild => "grok",
             ToolId::Pi => "pi",
+            ToolId::MiniMaxCode => "mcode",
         };
         let target = self
             .environment
@@ -589,7 +595,20 @@ impl ToolInventory {
                 args: ["/c", "start", "", "cmd", "/k", fixed]
                     .map(str::to_owned)
                     .to_vec(),
-                environment: vec![("PATH".into(), path)],
+                environment: {
+                    let mut values = vec![("PATH".into(), path)];
+                    if tool == ToolId::MiniMaxCode {
+                        values.push((
+                            "MINIMAX_DATA_DIR".into(),
+                            self.config_path(tool)
+                                .parent()
+                                .context("MiniMax Code 数据目录无效")?
+                                .to_string_lossy()
+                                .into_owned(),
+                        ));
+                    }
+                    values
+                },
                 wait_for_exit: false,
             });
         }
@@ -598,8 +617,22 @@ impl ToolInventory {
                 format!("'{}'", value.replace('\'', "'\"'\"'"))
             }
             let terminal = format!(
-                "env PATH={} {}{}",
+                "env PATH={} {}{}{}",
                 shell_quote(&path),
+                if tool == ToolId::MiniMaxCode {
+                    format!(
+                        "MINIMAX_DATA_DIR={} ",
+                        shell_quote(
+                            &self
+                                .config_path(tool)
+                                .parent()
+                                .context("MiniMax Code 数据目录无效")?
+                                .to_string_lossy()
+                        )
+                    )
+                } else {
+                    String::new()
+                },
                 shell_quote(&target.to_string_lossy()),
                 if tool == ToolId::OpenClaw { " tui" } else { "" }
             );

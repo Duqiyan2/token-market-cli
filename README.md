@@ -85,6 +85,7 @@ Choose a tool in the app, or use its ID in CLI commands:
 | OpenCode | `opencode` |
 | Grok Build | `grok-build` |
 | Pi | `pi` |
+| MiniMax Code | `minimax-code` |
 
 Claude Code and Codex use `glm-5.3` in production (`glm-5.2` in test builds). Other tools receive the compatible text-generation model catalogue.
 
@@ -97,6 +98,8 @@ to select an imported model. Existing defaults and other providers stay intact. 
 `auth.json` already has a `tokenmarket` credential, log out of that provider in Pi
 before connecting; Token Market leaves existing API keys and OAuth credentials alone.
 See [Pi integration](docs/pi.md) for paths and installation requirements.
+
+MiniMax Code uses the fixed official 0.7.2 release package and separate active data/profile configuration. See [MiniMax Code integration](docs/minimax-code.md).
 
 ## Manage connections
 

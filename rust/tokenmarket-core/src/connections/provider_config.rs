@@ -142,6 +142,7 @@ impl ProviderConfig {
         match tool {
             ToolId::GrokBuild => super::grok::validate(&value)?,
             ToolId::Pi => super::pi::validate(&value, path)?,
+            ToolId::MiniMaxCode => super::minimax::validate(&value)?,
             _ => bail!("此工具没有受支持的 provider 配置"),
         }
         Ok(Self {
@@ -160,6 +161,7 @@ impl ProviderConfig {
         match self.tool {
             ToolId::GrokBuild => super::grok::credential(&self.document.value, gateway),
             ToolId::Pi => super::pi::credential(&self.document.value, gateway),
+            ToolId::MiniMaxCode => super::minimax::credential(&self.document.value, gateway),
             _ => bail!("此工具没有受支持的 provider 配置"),
         }
     }
@@ -172,6 +174,7 @@ impl ProviderConfig {
     ) -> Result<PreparedConfiguration> {
         match self.tool {
             ToolId::GrokBuild => super::grok::apply(&mut self.document, gateway, key, models)?,
+            ToolId::MiniMaxCode => super::minimax::apply(&mut self.document, gateway, key, models)?,
             ToolId::Pi => {
                 super::pi::validate(&self.document.value, &self.document.path)?;
                 super::pi::apply(&mut self.document, gateway, key, models)?;

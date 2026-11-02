@@ -42,6 +42,8 @@ pub enum ToolId {
     OpenCode,
     GrokBuild,
     Pi,
+    #[serde(rename = "minimax-code")]
+    MiniMaxCode,
 }
 
 impl std::fmt::Display for ToolId {
@@ -55,6 +57,7 @@ impl std::fmt::Display for ToolId {
             ToolId::OpenCode => "opencode",
             ToolId::GrokBuild => "grok-build",
             ToolId::Pi => "pi",
+            ToolId::MiniMaxCode => "minimax-code",
         };
         f.write_str(value)
     }
@@ -109,6 +112,7 @@ enum PathKind {
     OpenCode,
     GrokBuild,
     Pi,
+    MiniMaxCode,
 }
 
 impl Adapter {
@@ -147,6 +151,7 @@ impl Adapter {
                 home.join(".config/opencode/opencode.json")
             }),
             PathKind::GrokBuild => env_path("GROK_HOME", || home.join(".grok")).join("config.toml"),
+            PathKind::MiniMaxCode => minimax_data_dir(&home).join("config.yaml"),
             PathKind::Pi => {
                 env_path("PI_CODING_AGENT_DIR", || home.join(".pi/agent")).join("models.json")
             }
@@ -159,6 +164,29 @@ impl Adapter {
 
     pub fn read_config(&self) -> Result<Option<ToolConfig>> {
         match self.id {
+            ToolId::MiniMaxCode => {
+                let Some(content) = read_file_if_exists(&self.config_path())? else {
+                    return Ok(None);
+                };
+                let value: Value =
+                    serde_yaml::from_str(&content).context("MiniMax Code 配置不是有效 YAML")?;
+                let provider = &value["custom_provider"]["tokenmarket"];
+                Ok(
+                    match (
+                        provider["options"]["baseURL"].as_str(),
+                        provider["options"]["apiKey"].as_str(),
+                        provider["models"].as_object().and_then(|m| m.keys().next()),
+                    ) {
+                        (Some(base), Some(key), Some(model)) => Some(ToolConfig {
+                            base_url: base.into(),
+                            api_key: key.into(),
+                            model: model.into(),
+                            context_window_tokens: None,
+                        }),
+                        _ => None,
+                    },
+                )
+            }
             ToolId::Pi => {
                 let value = read_json_if_exists(&self.config_path())?;
                 let provider = &value["providers"]["tokenmarket"];
@@ -387,6 +415,7 @@ impl Adapter {
         let backup_path = create_backup(&config_path)?;
 
         match self.id {
+            ToolId::MiniMaxCode => bail!("请使用共享客户端接入流程配置 MiniMax Code"),
             ToolId::Pi => bail!("请使用共享客户端接入流程配置 Pi"),
             ToolId::GrokBuild => bail!("请使用共享客户端接入流程配置 Grok Build"),
             ToolId::ClaudeCode => {
@@ -637,7 +666,53 @@ pub fn adapters() -> Vec<Adapter> {
             requires_restart: false,
             path_kind: PathKind::Pi,
         },
+        Adapter {
+            id: ToolId::MiniMaxCode,
+            name: "MiniMax Code",
+            protocol: Protocol::OpenAiCompatible,
+            requires_restart: true,
+            path_kind: PathKind::MiniMaxCode,
+        },
     ]
+}
+
+/// MiniMax's data/profile location is independent of MCODE_INSTALL_DIR.
+/// Explicit CLI profiles can be managed by exporting their data directory;
+/// only the upstream opt-in legacy runtime environment has profile semantics.
+pub(crate) fn minimax_data_dir(home: &Path) -> PathBuf {
+    let nonempty = |name: &str| {
+        std::env::var(name)
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .map(|v| v.trim().to_owned())
+    };
+    if let Some(path) = nonempty("MINIMAX_DATA_DIR").or_else(|| nonempty("MAVIS_DATA_DIR")) {
+        return path.into();
+    }
+    let legacy = std::env::var("__MAVIS_ALLOW_LEGACY_RUNTIME_ENV")
+        .ok()
+        .as_deref()
+        == Some("1");
+    if legacy {
+        if let Some(path) = nonempty("__MAVIS_RUNTIME_DATA_DIR") {
+            return path.into();
+        }
+    }
+    let profile = if legacy {
+        nonempty("__MAVIS_RUNTIME_PROFILE")
+    } else {
+        None
+    };
+    let suffix = profile.map(|p| format!("-{p}")).unwrap_or_default();
+    let primary = home.join(format!(".minimax{suffix}"));
+    let previous = home.join(format!(".mavis{suffix}"));
+    // Do not migrate or merge data while discovering configuration. An explicit
+    // launch binding keeps a retained legacy root effective without a rename.
+    if !primary.exists() && previous.is_dir() {
+        previous
+    } else {
+        primary
+    }
 }
 
 pub fn get_adapter(id: ToolId) -> Adapter {

@@ -46,7 +46,7 @@
   function stateBadge(entry) { return text('span', connectionLabel(entry), `tool-state ${entry.connection?.state || 'unconnected'}`); }
   function toolIcon(entry) {
     const icon = text('div', '', 'tool-icon'); const image = document.createElement('img');
-    image.src = `assets/tools/${entry.id}.${({'workbuddy':'svg',openclaw:'svg',codex:'ico','deepseek-harness':'ico','grok-build':'svg',pi:'svg'})[entry.id] || 'png'}`;
+    image.src = `assets/tools/${entry.id}.${({'workbuddy':'svg',openclaw:'svg',codex:'ico','deepseek-harness':'ico','grok-build':'svg',pi:'svg','minimax-code':'svg'})[entry.id] || 'png'}`;
     image.alt = ''; icon.append(image); return icon;
   }
   function actionButton(label, className, action, disabled = false) {
@@ -321,7 +321,7 @@
     runConnect(pending.tool);
   };
   window.addEventListener('current-workspace-changed', () => { pendingConnect = null; if (connectDialog.open) connectDialog.close(); });
-  const supportedConnections = {'claude-code':'Claude Code', codex:'Codex CLI', 'deepseek-harness':'DeepSeek Harness',workbuddy:'WorkBuddy',openclaw:'OpenClaw',opencode:'OpenCode','grok-build':'Grok Build',pi:'Pi'};
+  const supportedConnections = {'claude-code':'Claude Code', codex:'Codex CLI', 'deepseek-harness':'DeepSeek Harness',workbuddy:'WorkBuddy',openclaw:'OpenClaw',opencode:'OpenCode','grok-build':'Grok Build',pi:'Pi','minimax-code':'MiniMax Code'};
   let launchTool = 'claude-code';
   const dialog = document.createElement('dialog');
   dialog.innerHTML = '<h3></h3><p class="restart-notice"></p><p>模型测试由你另行发起，可能产生少量费用。</p><div class="tool-actions"><button class="primary launch">打开终端运行 Claude Code</button><button class="close">完成</button></div><p class="launch-error" role="status"></p>';
@@ -373,6 +373,7 @@
         openclaw:'请重启 OpenClaw Gateway 并重新打开会话。原有模型白名单或 agent 专属配置仍可能限制可选模型，请在 OpenClaw 中检查。',
         opencode:'请退出并重新启动 OpenCode，在模型列表中选择导入模型。项目或运行时的配置覆盖仍按 OpenCode 自身规则生效。',
         pi:'在 Pi 中打开 /model 选择 Token Market 模型；已有默认模型保持不变。',
+        'minimax-code':'请重新启动 MiniMax Code，在 /model 中选择 Token Market 模型。已有默认模型会保留；接入不会自动测试或切换模型。',
         'grok-build':'请重新启动 Grok Build，通过 /model 选择 Token Market 模型。已有默认模型与其他登录信息会保留。',
       };
       dialog.querySelector('.restart-notice').textContent = `${modelNotice} ${guidance[tool] || `现有 ${name} 会话需要退出后重新启动，新终端将读取接入配置。`}`;

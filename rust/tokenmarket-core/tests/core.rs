@@ -16,7 +16,8 @@ fn registers_all_supported_tools() {
             "openclaw",
             "opencode",
             "grok-build",
-            "pi"
+            "pi",
+            "minimax-code"
         ]
     );
 }
@@ -37,6 +38,7 @@ fn serializes_every_tool_with_the_server_contract_id() {
         ("opencode", "opencode"),
         ("grok-build", "grok-build"),
         ("pi", "pi"),
+        ("minimax-code", "minimax-code"),
     ] {
         let tool = tool_id(input).unwrap();
         let value = serde_json::to_value(&tool).unwrap();
