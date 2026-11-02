@@ -26,6 +26,8 @@ struct Cli {
 enum Commands {
     /// Install a supported tool without connecting it or running a paid test
     Install { tool: String },
+    /// Run an installed tool in this terminal, including private installations
+    Run { tool: String },
     /// Sign in once for both CLI and desktop; no tool Key is issued
     Login {
         #[arg(long)]
@@ -107,6 +109,9 @@ async fn run() -> Result<()> {
                     if state.stage != tokenmarket_core::installation::InstallStage::Succeeded {
                         bail!("安装未完成")
                     }
+                    if ToolInventory::current().terminal_launch_plan(tool).is_ok() {
+                        println!("运行：tokenmarket run {tool}");
+                    }
                     break;
                 }
                 tokio::select! {
@@ -116,6 +121,18 @@ async fn run() -> Result<()> {
                         manager.cancel(tool)?;
                     }
                 }
+            }
+        }
+        Commands::Run { tool } => {
+            let tool = tool_id(&tool)?;
+            let plan = ToolInventory::current().terminal_launch_plan(tool)?;
+            let status = std::process::Command::new(&plan.program)
+                .args(&plan.args)
+                .envs(plan.environment)
+                .status()
+                .context("无法启动工具，请重新检测安装")?;
+            if !status.success() {
+                bail!("工具已退出（{status}），请检查工具输出");
             }
         }
         Commands::Login { no_browser } => {
@@ -246,6 +263,13 @@ async fn run() -> Result<()> {
                         "未安装"
                     }
                 );
+                if entry.installed
+                    && ToolInventory::current()
+                        .terminal_launch_plan(entry.id)
+                        .is_ok()
+                {
+                    print!(" · 运行：tokenmarket run {}", entry.id);
+                }
                 if let Some(connection) = entry.connection {
                     println!(" · {}", connection.state);
                     if let (Some(owner), Some(space)) =

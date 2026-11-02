@@ -119,6 +119,7 @@ for every imported model. See [Kimi Code integration](docs/kimi-code.md).
 | Action | Desktop | CLI |
 | --- | --- | --- |
 | Install a missing tool (unreleased) | **安装**, then complete any native steps | `tokenmarket install <tool>` from a source build |
+| Run in the current terminal (unreleased) | **Open Tool** | `tokenmarket run <tool>` from a source build |
 | Refresh installation status | Automatic refresh or **重新检测** | `tokenmarket status [tool]` |
 | View ownership, models and status | Open tool details | `tokenmarket status [tool]` |
 | Update a connection or change its billing workspace | Switch workspace, then **重新接入** | `tokenmarket reconnect <tool>` |
@@ -128,7 +129,7 @@ for every imported model. See [Kimi Code integration](docs/kimi-code.md).
 
 Connecting and reconnecting configure tools without sending model requests. **Testing sends one potentially billable model request.** For tools with several saved models, specify one with `--model <id>`.
 
-Installation also sends no model requests and does not connect automatically. Existing compatible installations are reused without automatic upgrades. GUI installers own their cancellation; **停止等待** only stops the client's monitoring. See [GUI installation](docs/gui-installation.md) for WorkBuddy and Harness behavior.
+Installation also sends no model requests and does not connect automatically. The source CLI prints `tokenmarket run <tool>` for terminal installations, including private prefixes; this foreground action preserves the shell’s persistent PATH. An interrupted client-owned installation is repaired by retrying Install, including after restarting the client. Existing compatible installations are reused without automatic upgrades. GUI installers own their cancellation; **停止等待** only stops the client's monitoring. See [GUI installation](docs/gui-installation.md) for WorkBuddy and Harness behavior.
 
 Reconnecting asks for confirmation when the account or billing workspace changes. Disconnecting restores the fields managed by the connection and asks how to handle later edits. Signing out preserves tool configurations and saved credentials.
 

@@ -585,31 +585,15 @@ pub struct ToolLaunchPlan {
     pub wait_for_exit: bool,
 }
 impl ToolInventory {
-    /// Resolve against this fresh installation snapshot, including registry PATH and nvm.
-    pub fn launch_plan(&self, tool: ToolId) -> Result<ToolLaunchPlan> {
+    /// Foreground terminal/SSH launch. No shell lookup or persistent PATH changes
+    /// are required for a private wrapper; execution remains an explicit action.
+    pub fn terminal_launch_plan(&self, tool: ToolId) -> Result<ToolLaunchPlan> {
         self.require_installed(tool)?;
-        if let Some(path) = self.application_path(tool) {
-            return match self.environment.platform {
-                HostPlatform::MacOs => Ok(ToolLaunchPlan {
-                    program: "open".into(),
-                    args: vec!["-a".into(), path.to_string_lossy().into()],
-                    environment: vec![],
-                    wait_for_exit: true,
-                }),
-                HostPlatform::Windows => Ok(ToolLaunchPlan {
-                    program: path.to_string_lossy().into(),
-                    args: vec![],
-                    environment: vec![],
-                    wait_for_exit: false,
-                }),
-                HostPlatform::Unix => bail!("请从系统应用入口打开工具"),
-            };
-        }
         let command = tool.command();
         let target = self
             .environment
             .command_path(command)
-            .context("工具启动文件已移除，请重新检测")?;
+            .context("未检测到命令行启动文件，请从系统应用入口打开此工具")?;
         let mut directories = vec![target.parent().context("工具启动目录无效")?.to_path_buf()];
         directories.extend(
             self.environment
@@ -629,68 +613,113 @@ impl ToolInventory {
             .map(|p| p.to_string_lossy())
             .collect::<Vec<_>>()
             .join(delimiter);
-        if self.environment.platform == HostPlatform::Windows {
-            // Only fixed command names enter cmd text. Discovered paths stay in the child
-            // environment, so spaces, ampersands and .cmd launchers need no shell interpolation.
-            let fixed = if tool == ToolId::OpenClaw {
-                "openclaw tui"
-            } else {
-                command
-            };
-            let mut launch_environment = vec![("PATH".into(), path)];
-            if tool == ToolId::KimiCode
-                && std::env::var_os("KIMI_SHELL_PATH").is_none_or(|v| v.is_empty())
-            {
-                if let Some(bash) = crate::installation::portable_git::bash_path(&self.environment)
-                {
-                    launch_environment
-                        .push(("KIMI_SHELL_PATH".into(), bash.to_string_lossy().into()));
-                }
-            }
-            if tool == ToolId::MiniMaxCode {
-                launch_environment.push((
-                    "MINIMAX_DATA_DIR".into(),
-                    self.config_path(tool)
-                        .parent()
-                        .context("MiniMax Code 数据目录无效")?
-                        .to_string_lossy()
-                        .into_owned(),
+        let mut environment = vec![("PATH".into(), path)];
+        if tool == ToolId::MiniMaxCode {
+            environment.push((
+                "MINIMAX_DATA_DIR".into(),
+                self.config_path(tool)
+                    .parent()
+                    .context("MiniMax Code 数据目录无效")?
+                    .to_string_lossy()
+                    .into_owned(),
+            ));
+        }
+        if tool == ToolId::KimiCode
+            && self.environment.platform == HostPlatform::Windows
+            && std::env::var_os("KIMI_SHELL_PATH").is_none_or(|v| v.is_empty())
+        {
+            if let Some(bash) = crate::installation::portable_git::bash_path(&self.environment) {
+                environment.push((
+                    "KIMI_SHELL_PATH".into(),
+                    bash.to_string_lossy().into_owned(),
                 ));
             }
+        }
+        if self.environment.platform == HostPlatform::Windows {
+            // CMD/BAT need cmd.exe. Only the fixed catalogue command enters cmd
+            // text; discovered paths (including &, spaces and Unicode) stay in PATH.
+            return Ok(ToolLaunchPlan {
+                program: "cmd.exe".into(),
+                args: vec![
+                    "/d".into(),
+                    "/c".into(),
+                    if tool == ToolId::OpenClaw {
+                        "openclaw tui".into()
+                    } else {
+                        command.into()
+                    },
+                ],
+                environment,
+                wait_for_exit: true,
+            });
+        }
+        Ok(ToolLaunchPlan {
+            program: target.to_string_lossy().into_owned(),
+            args: if tool == ToolId::OpenClaw {
+                vec!["tui".into()]
+            } else {
+                vec![]
+            },
+            environment,
+            wait_for_exit: true,
+        })
+    }
+    /// Desktop discovery and foreground CLI launch share the executable/env plan.
+    pub fn launch_plan(&self, tool: ToolId) -> Result<ToolLaunchPlan> {
+        self.require_installed(tool)?;
+        if let Some(path) = self.application_path(tool) {
+            return match self.environment.platform {
+                HostPlatform::MacOs => Ok(ToolLaunchPlan {
+                    program: "open".into(),
+                    args: vec!["-a".into(), path.to_string_lossy().into()],
+                    environment: vec![],
+                    wait_for_exit: true,
+                }),
+                HostPlatform::Windows => Ok(ToolLaunchPlan {
+                    program: path.to_string_lossy().into(),
+                    args: vec![],
+                    environment: vec![],
+                    wait_for_exit: false,
+                }),
+                HostPlatform::Unix => bail!("请从系统应用入口打开工具"),
+            };
+        }
+        let foreground = self.terminal_launch_plan(tool)?;
+        if self.environment.platform == HostPlatform::Windows {
             return Ok(ToolLaunchPlan {
                 program: "cmd".into(),
-                args: ["/c", "start", "", "cmd", "/k", fixed]
-                    .map(str::to_owned)
-                    .to_vec(),
-                environment: launch_environment,
+                args: [
+                    "/c",
+                    "start",
+                    "",
+                    "cmd",
+                    "/k",
+                    foreground.args.last().unwrap(),
+                ]
+                .map(str::to_owned)
+                .to_vec(),
+                environment: foreground.environment,
                 wait_for_exit: false,
             });
         }
         if self.environment.platform == HostPlatform::MacOs {
-            fn shell_quote(value: &str) -> String {
+            fn quote(value: &str) -> String {
                 format!("'{}'", value.replace('\'', "'\"'\"'"))
             }
-            let terminal = format!(
-                "env PATH={} {}{}{}",
-                shell_quote(&path),
-                if tool == ToolId::MiniMaxCode {
-                    format!(
-                        "MINIMAX_DATA_DIR={} ",
-                        shell_quote(
-                            &self
-                                .config_path(tool)
-                                .parent()
-                                .context("MiniMax Code 数据目录无效")?
-                                .to_string_lossy()
-                        )
-                    )
-                } else {
-                    String::new()
-                },
-                shell_quote(&target.to_string_lossy()),
-                if tool == ToolId::OpenClaw { " tui" } else { "" }
-            );
-            let script = terminal.replace('\\', "\\\\").replace('"', "\\\"");
+            let variables = foreground
+                .environment
+                .iter()
+                .map(|(k, v)| format!("{k}={}", quote(v)))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let args = foreground
+                .args
+                .iter()
+                .map(|v| quote(v))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let terminal = format!("env {variables} {} {args}", quote(&foreground.program));
+            let script = terminal.replace('\\', "\\\\").replace('\"', "\\\"");
             return Ok(ToolLaunchPlan {
                 program: "osascript".into(),
                 args: vec![
@@ -703,6 +732,6 @@ impl ToolInventory {
                 wait_for_exit: true,
             });
         }
-        bail!("请打开终端运行工具")
+        Ok(foreground)
     }
 }
