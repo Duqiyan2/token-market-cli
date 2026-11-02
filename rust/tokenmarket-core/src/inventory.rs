@@ -197,6 +197,10 @@ impl ToolInventory {
                 .unwrap_or_else(|| self.environment.home.join(".kimi-code"))
                 .join("config.toml");
         }
+        if tool == ToolId::Hermes {
+            return crate::config::hermes_home(&self.environment.home, self.environment.platform)
+                .join("config.yaml");
+        }
         if tool == ToolId::OhMyPi {
             return crate::connections::oh_my_pi::config_path(&self.environment.home);
         }
@@ -216,6 +220,9 @@ impl ToolInventory {
                 .map(PathBuf::from)
                 .unwrap_or_else(|| self.environment.home.join(".dsh"))
                 .join("cordis.patch.yml");
+        }
+        if tool == ToolId::MiniMaxCode {
+            return crate::adapters::minimax_data_dir(&self.environment.home).join("config.yaml");
         }
         if tool == ToolId::Pi {
             return std::env::var_os("PI_CODING_AGENT_DIR")
@@ -286,7 +293,9 @@ impl ToolInventory {
             ToolId::OpenClaw => &["openclaw"],
             ToolId::OpenCode => &["opencode"],
             ToolId::GrokBuild => &["grok"],
+            ToolId::Hermes => &["hermes"],
             ToolId::Pi => &["pi"],
+            ToolId::MiniMaxCode => &["mcode"],
             ToolId::OhMyPi => &["omp"],
             ToolId::KimiCode => &["kimi"],
         };
@@ -354,7 +363,9 @@ pub fn official_download_url(tool: ToolId) -> &'static str {
         ToolId::OpenClaw => "https://docs.openclaw.ai/install",
         ToolId::OpenCode => "https://opencode.ai/docs/",
         ToolId::GrokBuild => "https://github.com/xai-org/grok-build",
+        ToolId::Hermes => "https://hermes-agent.nousresearch.com/docs/getting-started/installation",
         ToolId::Pi => "https://pi.dev/",
+        ToolId::MiniMaxCode => "https://github.com/MiniMax-AI/minimax-code/releases/tag/v0.7.2",
         ToolId::OhMyPi => "https://omp.sh/",
         ToolId::KimiCode => "https://github.com/MoonshotAI/kimi-code",
     }
@@ -565,7 +576,9 @@ impl ToolInventory {
             ToolId::OpenClaw => "openclaw",
             ToolId::OpenCode => "opencode",
             ToolId::GrokBuild => "grok",
+            ToolId::Hermes => "hermes",
             ToolId::Pi => "pi",
+            ToolId::MiniMaxCode => "mcode",
             ToolId::OhMyPi => "omp",
             ToolId::KimiCode => "kimi",
         };
@@ -610,6 +623,16 @@ impl ToolInventory {
                         .push(("KIMI_SHELL_PATH".into(), bash.to_string_lossy().into()));
                 }
             }
+            if tool == ToolId::MiniMaxCode {
+                launch_environment.push((
+                    "MINIMAX_DATA_DIR".into(),
+                    self.config_path(tool)
+                        .parent()
+                        .context("MiniMax Code 数据目录无效")?
+                        .to_string_lossy()
+                        .into_owned(),
+                ));
+            }
             return Ok(ToolLaunchPlan {
                 program: "cmd".into(),
                 args: ["/c", "start", "", "cmd", "/k", fixed]
@@ -624,8 +647,22 @@ impl ToolInventory {
                 format!("'{}'", value.replace('\'', "'\"'\"'"))
             }
             let terminal = format!(
-                "env PATH={} {}{}",
+                "env PATH={} {}{}{}",
                 shell_quote(&path),
+                if tool == ToolId::MiniMaxCode {
+                    format!(
+                        "MINIMAX_DATA_DIR={} ",
+                        shell_quote(
+                            &self
+                                .config_path(tool)
+                                .parent()
+                                .context("MiniMax Code 数据目录无效")?
+                                .to_string_lossy()
+                        )
+                    )
+                } else {
+                    String::new()
+                },
                 shell_quote(&target.to_string_lossy()),
                 if tool == ToolId::OpenClaw { " tui" } else { "" }
             );

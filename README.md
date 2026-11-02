@@ -84,7 +84,9 @@ Choose a tool in the app, or use its ID in CLI commands:
 | OpenClaw | `openclaw` |
 | OpenCode | `opencode` |
 | Grok Build | `grok-build` |
+| Hermes | `hermes` |
 | Pi | `pi` |
+| MiniMax Code | `minimax-code` |
 | Oh My Pi | `oh-my-pi` |
 | Kimi Code | `kimi-code` |
 
@@ -99,6 +101,8 @@ to select an imported model. Existing defaults and other providers stay intact. 
 `auth.json` already has a `tokenmarket` credential, log out of that provider in Pi
 before connecting; Token Market leaves existing API keys and OAuth credentials alone.
 See [Pi integration](docs/pi.md) for paths and installation requirements.
+
+MiniMax Code uses the fixed official 0.7.2 release package and separate active data/profile configuration. See [MiniMax Code integration](docs/minimax-code.md).
 
 Oh My Pi is installed separately with **安装** or `tokenmarket install oh-my-pi`.
 It uses the active OMP profile and `models.yml`/`models.yaml`; model roles and

@@ -4,8 +4,10 @@ mod issuance;
 pub use issuance::CredentialLoss;
 mod grok;
 mod harness;
+mod hermes;
 mod jsonc;
 mod kimi;
+mod minimax;
 mod model_plan;
 mod multi_model;
 pub(crate) mod oh_my_pi;
@@ -421,7 +423,9 @@ impl ConnectionManager {
                 | ToolId::OpenClaw
                 | ToolId::OpenCode
                 | ToolId::GrokBuild
+                | ToolId::Hermes
                 | ToolId::Pi
+                | ToolId::MiniMaxCode
                 | ToolId::OhMyPi
                 | ToolId::KimiCode
         ) {

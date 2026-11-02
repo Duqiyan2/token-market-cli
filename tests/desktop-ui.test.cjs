@@ -37,6 +37,52 @@ test('Kimi Code installs and connects separately with its own tool identity', as
   } finally { await f.close(); }
 });
 
+test('Hermes installation and connection use its own identity without hidden paid tests', async () => {
+  const f=await openFixture();try {
+    const p=f.page;const row=p.locator('[data-tool="hermes"]');assert.equal(await row.count(),1);
+    await row.locator('img').evaluate(image=>image.decode());
+    await row.locator('.tool-install').click();await p.locator('.tool-install-status').filter({hasText:'安装完成'}).waitFor();await p.locator('.tool-install-close').click();
+    assert.equal((await calls(p,'connect_tool')).length,0);assert.equal((await calls(p,'test_tool_connection')).length,0);
+    await row.locator('.tool-connect').click();await p.locator('.connect-confirm-dialog[open]').waitFor();await p.locator('.connect-confirm').click();await p.getByRole('heading',{name:'Hermes 已接入'}).waitFor();assert.deepEqual((await calls(p,'connect_tool'))[0].args,{tool:'hermes',recovery:null});await p.locator('dialog[open] .close').click();await detail(p,'hermes');assert.match(await p.locator('#tool-detail-region').innerText(),/Hermes/);assert.equal((await calls(p,'test_tool_connection')).length,0);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('MiniMax Code installs and connects separately with its own tool identity', async () => {
+  const f=await openFixture(); try {
+    const p=f.page;
+    const row=p.locator('[data-tool="minimax-code"]');
+    assert.equal(await row.count(),1);
+    await row.locator('img').evaluate(image => image.decode());
+    assert.equal(await row.locator('img').evaluate(image => image.naturalWidth > 0),true);
+    await row.locator('.tool-install').click();
+    await p.locator('.tool-install-status').filter({hasText:'安装完成'}).waitFor();
+    await p.locator('.tool-install-close').click();
+    assert.equal((await calls(p,'connect_tool')).length,0);
+    assert.equal((await calls(p,'test_tool_connection')).length,0);
+    await row.locator('.tool-connect').click();
+    await p.locator('.connect-confirm-dialog[open]').waitFor();
+    await p.locator('.connect-confirm').click();
+    await p.getByRole('heading',{name:'MiniMax Code 已接入'}).waitFor();
+    assert.deepEqual((await calls(p,'connect_tool'))[0].args,{tool:'minimax-code',recovery:null});
+    await p.locator('dialog[open] .close').click();
+    await detail(p,'minimax-code');
+    await p.locator('#tool-detail-region .tool-launch').click();
+    assert.equal((await calls(p,'launch_connected_tool'))[0].args.tool,'minimax-code');
+    await p.locator('.tool-test').click();
+    assert.equal((await calls(p,'test_tool_connection')).length,0);
+    assert.equal(await p.locator('.test-confirm').isDisabled(),true);
+    await p.locator('.test-model').selectOption('server-model');
+    await p.locator('.test-confirm').click();await p.locator('.test-feedback.success').waitFor();
+    assert.deepEqual((await calls(p,'test_tool_connection'))[0].args,{tool:'minimax-code',expectedKeyId:'receipt-minimax-code',request:{confirmed:true,model:'server-model'}});
+    await p.locator('.test-cancel').click();
+    await manage(p);await p.locator('.tool-disconnect').click();
+    await p.locator('.disconnect-confirm-dialog').getByRole('button',{name:'确认取消接入'}).click();
+    await p.getByRole('heading',{name:'取消接入完成'}).waitFor();
+    assert.equal((await calls(p,'disconnect_tool'))[0].args.tool,'minimax-code');
+    assert.deepEqual(f.errors,[]);
+  } finally { await f.close(); }
+});
+
 test('Oh My Pi installs and connects separately with its own tool identity', async () => {
   const f=await openFixture(); try {
     const p=f.page;
@@ -215,12 +261,12 @@ test('installation failure preserves the error and offers a retry', async () => 
 
 test('real UI renders safe native summaries, searches, navigates and fits desktop/mobile', async () => {
   const f = await openFixture();try {
-    const p=f.page;assert.equal(await p.locator('.tool-row').count(),10);
+    const p=f.page;assert.equal(await p.locator('.tool-row').count(),12);
     assert.equal((await calls(p,'test_tool_connection')).length,0);
     assert.equal((await calls(p,'connect_tool')).length,0);
     await p.locator('.tools-search').fill('Codex');assert.equal(await p.locator('.tool-row').count(),1);
     await p.locator('.tools-search').fill('no-match');await p.getByRole('heading',{name:'没有匹配的工具'}).waitFor();
-    await p.getByRole('button',{name:'查看全部工具'}).click();assert.equal(await p.locator('.tool-row').count(),10);
+    await p.getByRole('button',{name:'查看全部工具'}).click();assert.equal(await p.locator('.tool-row').count(),12);
     await p.locator('[data-tool-filter="available"]').click();assert.equal(await p.locator('.tool-row').count(),1);
     await p.locator('[data-tool-filter="all"]').click();
     for(const width of [1440,900,375]) { await p.setViewportSize({width,height:width===1440?1000:760});assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);assert.equal(await p.locator('#signed-in').isVisible(),true); }
