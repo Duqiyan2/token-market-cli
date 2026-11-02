@@ -1,10 +1,12 @@
 //! Explicit tool installation, independent of credentials and Tool Connections.
 mod gui;
 mod harness_cli;
+mod kimi;
 mod native_cli;
 mod oh_my_pi;
 pub mod opencode;
 mod pi;
+pub(crate) mod portable_git;
 pub mod recipes;
 use crate::{
     inventory::{InstallationEnvironment, ToolInventory},
@@ -385,6 +387,16 @@ impl InstallationManager {
     /// with configuration mutation. This is never part of read-only discovery.
     pub fn connection_guard(&self, tool: ToolId) -> Result<InstallationGuard> {
         let guard = installation_lock(&self.environment, tool)?;
+        if tool == ToolId::KimiCode {
+            if let Some(version) = self
+                .installed_version(tool)
+                .ok()
+                .flatten()
+                .filter(|version| kimi::is_legacy_version(version))
+            {
+                bail!("检测到 Kimi 旧主版本（{version}）；当前接入适配新版 Kimi Code 2.x。请按官方说明手动选择兼容版本，未修改配置或自动迁移/升级")
+            }
+        }
         if tool == ToolId::OpenCode {
             let command_version = self.installed_version(tool).ok().flatten();
             let application_version = ToolInventory::new(self.environment.clone())

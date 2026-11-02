@@ -13,6 +13,30 @@ async function detail(page,id) { await page.locator(`[data-tool="${id}"] .tool-d
 async function switchTeam(page) { await page.locator('.workspace-switch').click();await page.locator('dialog[open] [data-workspace-id="team"]').click();await page.locator('.workspace-switch').filter({hasText:'团队空间'}).waitFor(); }
 async function manage(page) { await page.locator('.tool-menu summary').click(); }
 
+test('Kimi Code installs and connects separately with its own tool identity', async () => {
+  const f=await openFixture(); try {
+    const p=f.page;
+    const row=p.locator('[data-tool="kimi-code"]');
+    await row.locator('img').evaluate(image => image.decode());
+    assert.equal(await row.locator('img').evaluate(image => image.naturalWidth > 0),true);
+    await row.locator('.tool-install').click();
+    await p.locator('.tool-install-status').filter({hasText:'安装完成'}).waitFor();
+    await p.locator('.tool-install-close').click();
+    assert.equal((await calls(p,'connect_tool')).length,0);
+    assert.equal((await calls(p,'test_tool_connection')).length,0);
+    await row.locator('.tool-connect').click();
+    await p.locator('.connect-confirm-dialog[open]').waitFor();
+    await p.locator('.connect-confirm').click();
+    await p.getByRole('heading',{name:'Kimi Code 已接入'}).waitFor();
+    assert.deepEqual((await calls(p,'connect_tool'))[0].args,{tool:'kimi-code',recovery:null});
+    await p.locator('dialog[open] .close').click();
+    await detail(p,'kimi-code');
+    await p.locator('#tool-detail-region .tool-launch').click();
+    assert.equal((await calls(p,'launch_connected_tool'))[0].args.tool,'kimi-code');
+    assert.deepEqual(f.errors,[]);
+  } finally { await f.close(); }
+});
+
 test('Oh My Pi installs and connects separately with its own tool identity', async () => {
   const f=await openFixture(); try {
     const p=f.page;
@@ -191,12 +215,12 @@ test('installation failure preserves the error and offers a retry', async () => 
 
 test('real UI renders safe native summaries, searches, navigates and fits desktop/mobile', async () => {
   const f = await openFixture();try {
-    const p=f.page;assert.equal(await p.locator('.tool-row').count(),9);
+    const p=f.page;assert.equal(await p.locator('.tool-row').count(),10);
     assert.equal((await calls(p,'test_tool_connection')).length,0);
     assert.equal((await calls(p,'connect_tool')).length,0);
     await p.locator('.tools-search').fill('Codex');assert.equal(await p.locator('.tool-row').count(),1);
     await p.locator('.tools-search').fill('no-match');await p.getByRole('heading',{name:'没有匹配的工具'}).waitFor();
-    await p.getByRole('button',{name:'查看全部工具'}).click();assert.equal(await p.locator('.tool-row').count(),9);
+    await p.getByRole('button',{name:'查看全部工具'}).click();assert.equal(await p.locator('.tool-row').count(),10);
     await p.locator('[data-tool-filter="available"]').click();assert.equal(await p.locator('.tool-row').count(),1);
     await p.locator('[data-tool-filter="all"]').click();
     for(const width of [1440,900,375]) { await p.setViewportSize({width,height:width===1440?1000:760});assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);assert.equal(await p.locator('#signed-in').isVisible(),true); }

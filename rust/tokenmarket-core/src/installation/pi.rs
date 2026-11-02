@@ -64,46 +64,7 @@ pub(super) fn plan(
         if windows { "zip" } else { "tar.gz" }
     );
     let archive = installers.join(&asset);
-    let mut steps = vec![];
-    // Native Windows uses Bash for the default tool and ! commands. A portable,
-    // private official Git distribution supplies it without admin or global PATH changes.
-    let git = environment.home.join(".tokenmarket/tools/pi/git");
-    let bash_available = environment.has_command("bash")
-        || git.join("bin/bash.exe").is_file()
-        || environment
-            .application_directories
-            .iter()
-            .any(|p| p.join("Git/bin/bash.exe").is_file());
-    if windows && !bash_available {
-        let (asset, sha) = if arch == "arm64" {
-            (
-                "PortableGit-2.56.0.4-arm64.7z.exe",
-                "044110f9d951858452ddb5e4b5415ea0f2b5b2598e794d6fec77fe28b9aa8cc0",
-            )
-        } else {
-            (
-                "PortableGit-2.56.0.4-64-bit.7z.exe",
-                "b1f3e52216e2ed6882d1bebfd4d3fdf319bec40d2edbbf9fd26ec4fd3fce7ed1",
-            )
-        };
-        let package = installers.join(asset);
-        steps.push(download(format!("https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.4/{asset}"),package.clone()));
-        let script=format!("$ErrorActionPreference='Stop'; if ((Get-FileHash -Algorithm SHA256 -LiteralPath '{}').Hash.ToLowerInvariant() -ne '{}') {{ throw 'Git for Windows checksum mismatch' }}; & '{}' '-y' '-o{}'; if ($LASTEXITCODE -ne 0) {{ exit $LASTEXITCODE }}; if (-not (Test-Path -LiteralPath '{}')) {{ throw 'Git Bash dependency was not installed' }}",ps(&package),sha,ps(&package),ps(&git),ps(&git.join("bin/bash.exe")));
-        steps.push(InstallStep {
-            stage: InstallStage::Dependencies,
-            program: "powershell.exe".into(),
-            args: vec![
-                "-NoProfile".into(),
-                "-NonInteractive".into(),
-                "-ExecutionPolicy".into(),
-                "Bypass".into(),
-                "-Command".into(),
-                script,
-            ],
-            environment: vec![],
-            download: None,
-        });
-    }
+    let mut steps = super::portable_git::steps(environment, architecture, "pi")?;
     steps.push(download(
         format!("https://github.com/earendil-works/pi/releases/download/v{VERSION}/{asset}"),
         archive.clone(),

@@ -69,7 +69,10 @@ impl ConfigDocument {
             .map(str::to_owned))
     }
     pub fn parse(tool: ToolId, before: &Option<Vec<u8>>, path: &Path) -> Result<Self> {
-        if matches!(tool, ToolId::GrokBuild | ToolId::Pi | ToolId::OhMyPi) {
+        if matches!(
+            tool,
+            ToolId::GrokBuild | ToolId::Pi | ToolId::OhMyPi | ToolId::KimiCode
+        ) {
             return Ok(Self::Provider(ProviderConfig::parse(tool, before, path)?));
         }
         if tool == ToolId::OpenCode

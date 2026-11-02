@@ -5,6 +5,7 @@ pub use issuance::CredentialLoss;
 mod grok;
 mod harness;
 mod jsonc;
+mod kimi;
 mod model_plan;
 mod multi_model;
 pub(crate) mod oh_my_pi;
@@ -422,6 +423,7 @@ impl ConnectionManager {
                 | ToolId::GrokBuild
                 | ToolId::Pi
                 | ToolId::OhMyPi
+                | ToolId::KimiCode
         ) {
             bail!("此工具的桌面接入尚未开放")
         }

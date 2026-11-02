@@ -141,6 +141,7 @@ impl ProviderConfig {
         }
         match tool {
             ToolId::GrokBuild => super::grok::validate(&value)?,
+            ToolId::KimiCode => super::kimi::validate(&value, path)?,
             ToolId::Pi => super::pi::validate(&value, path)?,
             ToolId::OhMyPi => super::oh_my_pi::validate(&value, path)?,
             _ => bail!("此工具没有受支持的 provider 配置"),
@@ -160,6 +161,7 @@ impl ProviderConfig {
     pub fn credential(&self, gateway: &str) -> Result<Option<String>> {
         match self.tool {
             ToolId::GrokBuild => super::grok::credential(&self.document.value, gateway),
+            ToolId::KimiCode => super::kimi::credential(&self.document.value, gateway),
             ToolId::Pi => super::pi::credential(&self.document.value, gateway),
             ToolId::OhMyPi => super::oh_my_pi::credential(&self.document.value, gateway),
             _ => bail!("此工具没有受支持的 provider 配置"),
@@ -174,6 +176,10 @@ impl ProviderConfig {
     ) -> Result<PreparedConfiguration> {
         match self.tool {
             ToolId::GrokBuild => super::grok::apply(&mut self.document, gateway, key, models)?,
+            ToolId::KimiCode => {
+                super::kimi::validate(&self.document.value, &self.document.path)?;
+                super::kimi::apply(&mut self.document, gateway, key, models)?;
+            }
             ToolId::OhMyPi => {
                 super::oh_my_pi::validate(&self.document.value, &self.document.path)?;
                 super::oh_my_pi::apply(&mut self.document, gateway, key, models)?;

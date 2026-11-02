@@ -43,6 +43,7 @@ pub enum ToolId {
     GrokBuild,
     Pi,
     OhMyPi,
+    KimiCode,
 }
 
 impl std::fmt::Display for ToolId {
@@ -57,6 +58,7 @@ impl std::fmt::Display for ToolId {
             ToolId::GrokBuild => "grok-build",
             ToolId::Pi => "pi",
             ToolId::OhMyPi => "oh-my-pi",
+            ToolId::KimiCode => "kimi-code",
         };
         f.write_str(value)
     }
@@ -112,6 +114,7 @@ enum PathKind {
     GrokBuild,
     Pi,
     OhMyPi,
+    KimiCode,
 }
 
 impl Adapter {
@@ -150,6 +153,9 @@ impl Adapter {
                 home.join(".config/opencode/opencode.json")
             }),
             PathKind::GrokBuild => env_path("GROK_HOME", || home.join(".grok")).join("config.toml"),
+            PathKind::KimiCode => {
+                env_path("KIMI_CODE_HOME", || home.join(".kimi-code")).join("config.toml")
+            }
             PathKind::OhMyPi => crate::connections::oh_my_pi::config_path(&home),
             PathKind::Pi => {
                 env_path("PI_CODING_AGENT_DIR", || home.join(".pi/agent")).join("models.json")
@@ -163,6 +169,7 @@ impl Adapter {
 
     pub fn read_config(&self) -> Result<Option<ToolConfig>> {
         match self.id {
+            ToolId::KimiCode => bail!("请使用共享客户端连接状态查看 Kimi Code 配置"),
             ToolId::OhMyPi => bail!("请使用共享客户端连接状态查看 Oh My Pi 配置"),
             ToolId::Pi => {
                 let value = read_json_if_exists(&self.config_path())?;
@@ -392,6 +399,7 @@ impl Adapter {
         let backup_path = create_backup(&config_path)?;
 
         match self.id {
+            ToolId::KimiCode => bail!("请使用共享客户端接入流程配置 Kimi Code"),
             ToolId::OhMyPi => bail!("请使用共享客户端接入流程配置 Oh My Pi"),
             ToolId::Pi => bail!("请使用共享客户端接入流程配置 Pi"),
             ToolId::GrokBuild => bail!("请使用共享客户端接入流程配置 Grok Build"),
@@ -649,6 +657,13 @@ pub fn adapters() -> Vec<Adapter> {
             protocol: Protocol::OpenAiCompatible,
             requires_restart: false,
             path_kind: PathKind::OhMyPi,
+        },
+        Adapter {
+            id: ToolId::KimiCode,
+            name: "Kimi Code",
+            protocol: Protocol::OpenAiCompatible,
+            requires_restart: false,
+            path_kind: PathKind::KimiCode,
         },
     ]
 }
