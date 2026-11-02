@@ -11,9 +11,9 @@ module.exports = async function openFixture(browser, options = {}) {
     const team = {id:'team',name:'团队空间',type:'TEAM',status:'ACTIVE',roleCode:'TEAM_MEMBER'};
     const fixture = window.__fixture = {calls:[],user,personal,team,current:personal,signedIn:options.signedIn !== false,pending:null,testPassed:true,conflicts:options.conflicts || false,inventoryError:options.inventoryError || false,workspaceError:options.workspaceError || false,events:{}};
     const connection = (id, state = 'configured_untested') => ({state,owner:{id:user.id,name:user.name},boundWorkspace:{id:personal.id,name:personal.name},models:[options.model || 'server-model'],keyId:'receipt-'+id,protocol:'OPENAI_CHAT_COMPLETIONS',testResult:null});
-    fixture.entries = [['claude-code','Claude Code'],['codex','Codex CLI'],['workbuddy','WorkBuddy'],['deepseek-harness','DeepSeek Harness'],['openclaw','OpenClaw'],['opencode','OpenCode'],['grok-build','Grok Build']].map(([id,name],i) => ({id,name,installed:i<3,canConnect:i<3,connection:i<2?connection(id,i===0?'test_passed':options.changed?'configuration_changed':'configured_untested'):null}));
+    fixture.entries = [['claude-code','Claude Code'],['codex','Codex CLI'],['workbuddy','WorkBuddy'],['deepseek-harness','DeepSeek Harness'],['openclaw','OpenClaw'],['opencode','OpenCode'],['grok-build','Grok Build'],['pi','Pi']].map(([id,name],i) => ({id,name,installed:i<3,canConnect:i<3,connection:i<2?connection(id,i===0?'test_passed':options.changed?'configuration_changed':'configured_untested'):null}));
     if (options.multi) fixture.entries[2].connection = {...connection('workbuddy'),models:['server-model-a','server-model-b']};
-    const installVersions = {'claude-code':'2.1.309',codex:'0.166.0',workbuddy:'5.9.3','deepseek-harness':'0.2.1-rc.5',openclaw:'2026.10.9',opencode:'1.19.5','grok-build':'1.0.70'};
+    const installVersions = {'claude-code':'2.1.309',codex:'0.166.0',workbuddy:'5.9.3','deepseek-harness':'0.2.1-rc.5',openclaw:'2026.10.9',opencode:'1.19.5','grok-build':'1.0.70',pi:'1.4.0'};
     fixture.entries.forEach(entry => {
       const supported=Boolean(installVersions[entry.id]) && options.unsupportedTool !== entry.id;
       entry.installation = {supported,reason:supported?null:'当前系统暂无兼容安装方案',version:installVersions[entry.id]||null};

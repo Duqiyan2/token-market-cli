@@ -41,6 +41,7 @@ pub enum ToolId {
     #[serde(rename = "opencode")]
     OpenCode,
     GrokBuild,
+    Pi,
 }
 
 impl std::fmt::Display for ToolId {
@@ -53,6 +54,7 @@ impl std::fmt::Display for ToolId {
             ToolId::OpenClaw => "openclaw",
             ToolId::OpenCode => "opencode",
             ToolId::GrokBuild => "grok-build",
+            ToolId::Pi => "pi",
         };
         f.write_str(value)
     }
@@ -106,6 +108,7 @@ enum PathKind {
     OpenClaw,
     OpenCode,
     GrokBuild,
+    Pi,
 }
 
 impl Adapter {
@@ -144,6 +147,9 @@ impl Adapter {
                 home.join(".config/opencode/opencode.json")
             }),
             PathKind::GrokBuild => env_path("GROK_HOME", || home.join(".grok")).join("config.toml"),
+            PathKind::Pi => {
+                env_path("PI_CODING_AGENT_DIR", || home.join(".pi/agent")).join("models.json")
+            }
         }
     }
 
@@ -153,6 +159,28 @@ impl Adapter {
 
     pub fn read_config(&self) -> Result<Option<ToolConfig>> {
         match self.id {
+            ToolId::Pi => {
+                let value = read_json_if_exists(&self.config_path())?;
+                let provider = &value["providers"]["tokenmarket"];
+                Ok(
+                    match (
+                        provider["baseUrl"].as_str(),
+                        provider["apiKey"].as_str(),
+                        provider["models"]
+                            .as_array()
+                            .and_then(|rows| rows.first())
+                            .and_then(|row| row["id"].as_str()),
+                    ) {
+                        (Some(base), Some(key), Some(model)) => Some(ToolConfig {
+                            base_url: base.into(),
+                            api_key: key.into(),
+                            model: model.into(),
+                            context_window_tokens: None,
+                        }),
+                        _ => None,
+                    },
+                )
+            }
             ToolId::GrokBuild => {
                 let Some(content) = read_file_if_exists(&self.config_path())? else {
                     return Ok(None);
@@ -359,6 +387,7 @@ impl Adapter {
         let backup_path = create_backup(&config_path)?;
 
         match self.id {
+            ToolId::Pi => bail!("请使用共享客户端接入流程配置 Pi"),
             ToolId::GrokBuild => bail!("请使用共享客户端接入流程配置 Grok Build"),
             ToolId::ClaudeCode => {
                 let mut current = read_json_if_exists(&config_path)?;
@@ -600,6 +629,13 @@ pub fn adapters() -> Vec<Adapter> {
             protocol: Protocol::OpenAiCompatible,
             requires_restart: true,
             path_kind: PathKind::GrokBuild,
+        },
+        Adapter {
+            id: ToolId::Pi,
+            name: "Pi",
+            protocol: Protocol::OpenAiCompatible,
+            requires_restart: false,
+            path_kind: PathKind::Pi,
         },
     ]
 }

@@ -3,6 +3,7 @@ mod gui;
 mod harness_cli;
 mod native_cli;
 pub mod opencode;
+mod pi;
 pub mod recipes;
 use crate::{
     inventory::{InstallationEnvironment, ToolInventory},
