@@ -406,6 +406,7 @@ impl ConnectionManager {
             .try_lock()
             .map_err(|_| anyhow::anyhow!("接入正在进行，请稍候"))?;
         inventory.require_installed(tool)?;
+        let _installation_guard = inventory.connection_guard(tool)?;
         if !matches!(
             tool,
             ToolId::ClaudeCode

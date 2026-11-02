@@ -13,6 +13,7 @@ pub fn managed_command_directories(home: &Path) -> Vec<PathBuf> {
         home.join(".tokenmarket/tools/openclaw/bin"),
         home.join(".tokenmarket/tools/openclaw"),
         home.join(".tokenmarket/tools/openclaw/runtime"),
+        home.join(".tokenmarket/tools/opencode/bin"),
     ]
 }
 pub fn availability(
@@ -33,11 +34,22 @@ pub fn availability(
         },
     }
 }
+pub fn compatible_existing_version(tool: ToolId, actual: &str, target: &str) -> bool {
+    if tool == ToolId::OpenCode {
+        return super::opencode::compatible_existing_version(actual);
+    }
+    actual
+        .split_whitespace()
+        .any(|part| part.trim_start_matches('v') == target)
+}
 pub fn plan(
     tool: ToolId,
     environment: &InstallationEnvironment,
     architecture: &str,
 ) -> Result<InstallPlan> {
+    if tool == ToolId::OpenCode {
+        return super::opencode::plan(environment, architecture);
+    }
     if tool != ToolId::OpenClaw {
         bail!("该工具的自动安装流程尚未配置，请查看官方安装说明")
     }

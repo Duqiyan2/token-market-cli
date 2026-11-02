@@ -30,7 +30,7 @@ test('OpenClaw installs with progress and refreshes without implicitly connectin
 });
 
 test('installation can be cancelled and unsupported installs explain their disabled action', async () => {
-  const f=await openFixture({installPending:true}); try {
+  const f=await openFixture({installPending:true,unsupportedTool:'opencode'}); try {
     const p=f.page;
     const unsupported=p.locator('[data-tool="opencode"] .tool-install');
     assert.equal(await unsupported.isDisabled(),true);
@@ -43,6 +43,20 @@ test('installation can be cancelled and unsupported installs explain their disab
     assert.equal((await calls(p,'cancel_tool_installation')).length,1);
     assert.equal((await calls(p,'connect_tool')).length,0);
     assert.equal((await calls(p,'test_tool_connection')).length,0);
+    assert.deepEqual(f.errors,[]);
+  } finally { await f.close(); }
+});
+
+test('OpenCode installation uses the shared flow and leaves connection as a separate action', async () => {
+  const f=await openFixture(); try {
+    const p=f.page;
+    await p.locator('[data-tool="opencode"] .tool-install').click();
+    await p.locator('.tool-install-status').filter({hasText:'安装完成'}).waitFor();
+    assert.deepEqual((await calls(p,'start_tool_installation'))[0].args,{tool:'opencode'});
+    assert.equal((await calls(p,'connect_tool')).length,0);
+    assert.equal((await calls(p,'test_tool_connection')).length,0);
+    await p.locator('.tool-install-close').click();
+    await p.locator('[data-tool="opencode"] .tool-connect').waitFor();
     assert.deepEqual(f.errors,[]);
   } finally { await f.close(); }
 });
