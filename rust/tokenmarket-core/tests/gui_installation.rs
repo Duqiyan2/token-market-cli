@@ -280,6 +280,33 @@ fn windows_native_handoff_waits_for_real_application_and_keeps_paths_as_data() {
     }
 }
 
+#[cfg(windows)]
+#[test]
+fn native_windows_application_metadata_handles_literal_paths_and_rejects_read_errors() {
+    use tokenmarket_core::installation::NativeInstallExecutor;
+
+    let root = tempfile::tempdir().unwrap();
+    let directory = root.path().join("User ' & home");
+    std::fs::create_dir_all(&directory).unwrap();
+    let missing = directory.join("missing.exe");
+    assert!(NativeInstallExecutor.application_version(&missing).is_err());
+
+    // Copy an OS-supplied PE rather than running any installed Agent or installer.
+    let original = PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+        .join("System32/WindowsPowerShell/v1.0/powershell.exe");
+    let expected = NativeInstallExecutor
+        .application_version(&original)
+        .unwrap()
+        .expect("the OS PowerShell executable has version metadata");
+    assert!(expected.starts_with(|c: char| c.is_ascii_digit()));
+    let copied = directory.join("application.exe");
+    std::fs::copy(original, &copied).unwrap();
+    assert_eq!(
+        NativeInstallExecutor.application_version(&copied).unwrap(),
+        Some(expected)
+    );
+}
+
 #[test]
 fn unavailable_workbuddy_platforms_offer_accurate_official_alternatives() {
     let root = tempfile::tempdir().unwrap();

@@ -644,18 +644,26 @@ fn minimax_native_verifier_rejects_a_corrupt_package_before_node_preparation_or_
     }
     let root = tempfile::tempdir().unwrap();
     let tool = tool_id("minimax-code").unwrap();
+    // Execute the host's verifier: Windows must exercise PowerShell, not /bin/sh.
+    let platform = if cfg!(windows) {
+        HostPlatform::Windows
+    } else {
+        HostPlatform::MacOs
+    };
     let manager = InstallationManager::new(
-        environment(root.path(), HostPlatform::MacOs),
-        "aarch64".into(),
+        environment(root.path(), platform),
+        std::env::consts::ARCH.into(),
         std::sync::Arc::new(Corrupt),
     );
     manager.start(tool).unwrap();
     let s = finished(&manager, tool);
     assert_eq!(s.stage, InstallStage::Failed);
-    assert!(s
-        .output
-        .iter()
-        .any(|s| s.contains("SHA256 verification failed")));
+    assert!(
+        s.output
+            .iter()
+            .any(|s| s.contains("SHA256 verification failed")),
+        "{s:?}"
+    );
     assert!(!root
         .path()
         .join(".tokenmarket/tools/minimax-code/runtime")
