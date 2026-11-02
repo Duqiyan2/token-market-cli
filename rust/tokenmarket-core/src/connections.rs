@@ -179,6 +179,14 @@ pub struct ConnectionManager {
     private: private_storage::PrivateStorage,
     client_login: Option<crate::desktop::DesktopLogin>,
 }
+/// Release the completed operation even if a concurrently spawned version probe
+/// briefly inherited its descriptor before exec (as with InstallationGuard).
+struct OperationLock(fs::File);
+impl Drop for OperationLock {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
+}
 impl ConnectionManager {
     pub fn current() -> Self {
         Self::new(
@@ -243,7 +251,7 @@ impl ConnectionManager {
         }
     }
     /// OS file lock also serializes distinct manager instances/processes on this device.
-    fn operation_lock(&self) -> Result<fs::File> {
+    fn operation_lock(&self) -> Result<OperationLock> {
         fs::create_dir_all(&self.directory)?;
         let file = fs::OpenOptions::new()
             .read(true)
@@ -253,7 +261,7 @@ impl ConnectionManager {
             .open(self.directory.join("operation.lock"))?;
         file.try_lock()
             .map_err(|_| anyhow::anyhow!("工具操作正在进行，请稍候"))?;
-        Ok(file)
+        Ok(OperationLock(file))
     }
     fn saved_keys(&self) -> Result<Vec<SavedKey>> {
         let path = self.directory.join("keys.json");
