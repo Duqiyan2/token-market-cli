@@ -20,7 +20,7 @@ fn missing_tools_offer_official_downloads_and_refuse_connection_even_with_leftov
     std::fs::create_dir_all(root.path().join("Applications/WorkBuddy.app")).unwrap();
     let inventory = ToolInventory::new(environment(root.path(), HostPlatform::MacOs));
     let entries = inventory.list().unwrap();
-    assert_eq!(entries.len(), 7);
+    assert_eq!(entries.len(), 8);
     assert_eq!(
         entries.iter().map(|e| e.name).collect::<Vec<_>>(),
         [
@@ -30,7 +30,8 @@ fn missing_tools_offer_official_downloads_and_refuse_connection_even_with_leftov
             "DeepSeek Harness",
             "OpenClaw",
             "OpenCode",
-            "Grok Build"
+            "Grok Build",
+            "Pi"
         ]
     );
     assert!(entries.iter().all(|e| !e.installed && !e.can_connect));
@@ -68,6 +69,7 @@ fn command_installation_is_freshly_detected_and_removed_without_running_the_tool
         (ToolId::OpenClaw, "openclaw"),
         (ToolId::OpenCode, "opencode"),
         (ToolId::GrokBuild, "grok"),
+        (ToolId::Pi, "pi"),
     ] {
         assert!(inventory.require_installed(tool).is_err());
         let binary = root.path().join("bin").join(command);

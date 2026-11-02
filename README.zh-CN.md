@@ -76,12 +76,18 @@ tokenmarket workspace <workspace-id>
 | OpenClaw | `openclaw` |
 | OpenCode | `opencode` |
 | Grok Build | `grok-build` |
+| Pi | `pi` |
 
 Claude Code、Codex 在正式环境使用 `glm-5.3`，测试包使用 `glm-5.2`。其他工具会配置兼容的文本生成模型目录。
 
 Grok Build 可在应用中点击 **安装**，或运行 `tokenmarket install grok-build`。
 安装完成后由你另行接入和测试。接入后重新启动 Grok，通过 `/model` 选择导入的
 Token Market 模型，原有默认模型保持不变。
+
+Pi 可点击 **安装**，或运行 `tokenmarket install pi`。接入后在 Pi 的 `/model`
+中选择导入的模型，保留原有默认设置和其他 provider。若 `auth.json` 已保存
+`tokenmarket` 凭据，请先在 Pi 中退出该 provider 后再接入；Token Market 不覆盖
+原 API Key 或 OAuth 信息。详见 [Pi 接入说明](docs/pi.md)。
 
 ## 管理连接
 

@@ -19,6 +19,8 @@ pub fn managed_command_directories(home: &Path) -> Vec<PathBuf> {
         home.join(".tokenmarket/tools/opencode/bin"),
         home.join(".tokenmarket/tools/grok-build/bin"),
         home.join(".grok/bin"),
+        home.join(".tokenmarket/tools/pi/runtime"),
+        home.join(".tokenmarket/tools/pi/git/bin"),
     ]
 }
 pub fn availability(
@@ -57,6 +59,9 @@ pub fn plan(
     }
     if matches!(tool, ToolId::ClaudeCode | ToolId::Codex) {
         return super::native_cli::plan(tool, environment, architecture);
+    }
+    if tool == ToolId::Pi {
+        return super::pi::plan(environment, architecture);
     }
     if tool == ToolId::GrokBuild {
         return grok_plan(environment, architecture);

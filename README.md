@@ -76,12 +76,19 @@ Choose a tool in the app, or use its ID in CLI commands:
 | OpenClaw | `openclaw` |
 | OpenCode | `opencode` |
 | Grok Build | `grok-build` |
+| Pi | `pi` |
 
 Claude Code and Codex use `glm-5.3` in production (`glm-5.2` in test builds). Other tools receive the compatible text-generation model catalogue.
 
 Grok Build can be installed with **安装** in the app or `tokenmarket install grok-build`.
 Installation does not connect or test a model. After connecting, restart Grok and
 use `/model` to select an imported Token Market model; the existing default stays unchanged.
+
+Pi can be installed with **安装** or `tokenmarket install pi`. Open `/model` in Pi
+to select an imported model. Existing defaults and other providers stay intact. If
+`auth.json` already has a `tokenmarket` credential, log out of that provider in Pi
+before connecting; Token Market leaves existing API keys and OAuth credentials alone.
+See [Pi integration](docs/pi.md) for paths and installation requirements.
 
 ## Manage connections
 

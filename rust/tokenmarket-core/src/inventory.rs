@@ -190,6 +190,13 @@ impl ToolInventory {
     }
     /// Desktop discovery and desktop writes share this path. Terminal CLI paths are unchanged.
     pub fn config_path(&self, tool: ToolId) -> PathBuf {
+        if tool == ToolId::Pi {
+            return std::env::var_os("PI_CODING_AGENT_DIR")
+                .filter(|v| !v.to_string_lossy().trim().is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| self.environment.home.join(".pi/agent"))
+                .join("models.json");
+        }
         if tool == ToolId::GrokBuild {
             return std::env::var_os("GROK_HOME")
                 .filter(|v| !v.to_string_lossy().trim().is_empty())
@@ -252,6 +259,7 @@ impl ToolInventory {
             ToolId::OpenClaw => &["openclaw"],
             ToolId::OpenCode => &["opencode"],
             ToolId::GrokBuild => &["grok"],
+            ToolId::Pi => &["pi"],
         };
         commands
             .iter()
@@ -317,6 +325,7 @@ pub fn official_download_url(tool: ToolId) -> &'static str {
         ToolId::OpenClaw => "https://docs.openclaw.ai/install",
         ToolId::OpenCode => "https://opencode.ai/docs/",
         ToolId::GrokBuild => "https://github.com/xai-org/grok-build",
+        ToolId::Pi => "https://pi.dev/",
     }
 }
 
@@ -525,6 +534,7 @@ impl ToolInventory {
             ToolId::OpenClaw => "openclaw",
             ToolId::OpenCode => "opencode",
             ToolId::GrokBuild => "grok",
+            ToolId::Pi => "pi",
         };
         let target = self
             .environment
