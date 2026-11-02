@@ -94,6 +94,7 @@ test('GUI installation waits for native completion and can stop waiting without 
     const p=f.page;
     await p.locator('[data-tool="workbuddy"] .tool-install').click();
     await p.locator('.tool-install-status').filter({hasText:'原生安装器'}).waitFor();
+    assert.equal((await p.locator('.tool-install-status').innerText()).split('请完成原生安装器中的步骤').length,2);
     assert.equal(await p.locator('.tool-install-cancel').isVisible(),false);
     assert.equal(await p.locator('.tool-install-stop-wait').isVisible(),true);
     await p.locator('.tool-install-stop-wait').click();

@@ -61,7 +61,7 @@
   const installStages = {preparing:'正在准备安装',downloading:'正在下载安装程序',dependencies:'正在准备运行依赖',installing:'正在安装',waiting_for_user:'请完成原生安装器中的步骤',detecting:'正在检测实际安装',succeeded:'安装完成',failed:'安装未完成',cancelled:'安装已取消'};
   function renderInstallation(state) {
     const label = installStages[state.stage] || '正在安装';
-    installDialog.querySelector('.tool-install-status').textContent = !state.detail || state.detail === label ? label : `${label}：${state.detail}`;
+    installDialog.querySelector('.tool-install-status').textContent = !state.detail ? label : state.detail.startsWith(label) ? state.detail : `${label}：${state.detail}`;
     const output = installDialog.querySelector('.tool-install-output'); output.textContent = (state.output || []).join('\n'); output.scrollTop = output.scrollHeight;
     const terminal = installTerminal(state);
     installDialog.querySelector('.tool-install-cancel').hidden = terminal || state.stage === 'waiting_for_user';

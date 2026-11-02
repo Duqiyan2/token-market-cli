@@ -296,6 +296,62 @@ fn unavailable_workbuddy_platforms_offer_accurate_official_alternatives() {
     assert!(executor.steps.lock().unwrap().is_empty());
 }
 
+#[cfg(target_os = "macos")]
+struct CorruptArchiveInstaller {
+    handoffs: std::sync::atomic::AtomicUsize,
+}
+#[cfg(target_os = "macos")]
+impl InstallExecutor for CorruptArchiveInstaller {
+    fn execute(
+        &self,
+        step: &InstallStep,
+        cancelled: &AtomicBool,
+        output: &mut dyn FnMut(String),
+    ) -> Result<()> {
+        if let Some((_, path)) = &step.download {
+            std::fs::create_dir_all(path.parent().unwrap())?;
+            std::fs::write(path, "corrupted fixture archive")?;
+            return Ok(());
+        }
+        if step.stage == InstallStage::WaitingForUser {
+            self.handoffs.fetch_add(1, Ordering::SeqCst);
+            return Ok(());
+        }
+        tokenmarket_core::installation::NativeInstallExecutor.execute(step, cancelled, output)
+    }
+    fn version(&self, _: &Path) -> Result<String> {
+        panic!("no tool was installed")
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_corrupted_harness_archive_is_rejected_before_extraction_or_native_handoff() {
+    let root = tempfile::tempdir().unwrap();
+    let executor = Arc::new(CorruptArchiveInstaller {
+        handoffs: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let manager = InstallationManager::new(
+        environment(root.path(), HostPlatform::MacOs),
+        "aarch64".into(),
+        executor.clone(),
+    );
+    manager.start(ToolId::DeepSeekHarness).unwrap();
+    let done = until(&manager, ToolId::DeepSeekHarness, |state| {
+        state.stage.is_terminal()
+    });
+    assert_eq!(done.stage, InstallStage::Failed);
+    assert!(done
+        .output
+        .iter()
+        .any(|line| line.contains("SHA512 verification failed")));
+    assert_eq!(executor.handoffs.load(Ordering::SeqCst), 0);
+    assert!(!root
+        .path()
+        .join(".tokenmarket/installers/deepseek-harness/0.2.1-rc.5/unpacked")
+        .exists());
+}
+
 #[test]
 fn harness_approved_rc_is_verified_and_detected_without_registering_or_running_dsh() {
     let root = tempfile::tempdir().unwrap();
