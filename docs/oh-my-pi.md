@@ -38,6 +38,7 @@ missing broker tokens, disabled Token Market providers, competing auth headers,
 issuance. A broker-backed gateway server can deliberately ignore local models;
 Token Market launches ordinary `omp`, not `auth-gateway serve`. Runtime CLI
 `--api-key`, `--profile` and `--config` overlays belong to that explicit invocation.
+Existing explicit context caps are checked before publishing catalogue metadata.
 Key commands are never executed by Token Market; a leading `!` secret or conflicting
 same-name environment variable cannot be silently written as a literal Key.
 

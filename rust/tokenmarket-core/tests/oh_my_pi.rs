@@ -773,3 +773,25 @@ async fn oh_my_pi_disconnect_preserves_a_user_cleared_valid_yaml_document() {
     );
     assert_eq!(std::fs::read(&path).unwrap(), b"");
 }
+
+#[tokio::test]
+async fn oh_my_pi_preserves_config_when_catalogue_limits_conflict_with_an_existing_model_cap() {
+    let root = tempfile::tempdir().unwrap();
+    let tool = tool_id("oh-my-pi").unwrap();
+    executable(&root.path().join("bin/omp"));
+    let inventory = ToolInventory::new(environment(root.path(), HostPlatform::MacOs));
+    let path = inventory.config_path(tool);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let original="providers:\n  tokenmarket:\n    models:\n      - id: vendor/zeta~1\n        contextWindow: 32768\n        maxContextWindow: 32768\n";
+    std::fs::write(&path, original).unwrap();
+    let (url, server) = platform(vec![catalogue()], 2).await;
+    let manager = support::manager(root.path().join("state"), url.clone(), url);
+    let error = manager
+        .connect(context(), tool, &inventory, path.clone())
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("maxContextWindow"));
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+    assert!(manager.list().unwrap().is_empty());
+    server.await.unwrap();
+}

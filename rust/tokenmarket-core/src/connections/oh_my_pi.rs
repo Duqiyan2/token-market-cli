@@ -221,6 +221,10 @@ pub(super) fn validate(value: &Value, path: &Path) -> Result<()> {
                 bail!("Oh My Pi 模型列表存在重复 ID")
             };
             reject_auth_headers(row)?;
+            validate_model_limits(
+                row,
+                provider.get("modelOverrides").and_then(|rows| rows.get(id)),
+            )?;
         }
     }
     if let Some(overrides) = provider.get("modelOverrides") {
@@ -315,6 +319,42 @@ pub(super) fn apply(
             id,
             metadata.as_object().unwrap(),
         )?;
+    }
+    let provider = &document.value["providers"]["tokenmarket"];
+    for row in provider["models"].as_array().into_iter().flatten() {
+        validate_model_limits(
+            row,
+            row["id"]
+                .as_str()
+                .and_then(|id| provider["modelOverrides"].get(id)),
+        )?;
+    }
+    Ok(())
+}
+fn validate_model_limits(row: &Value, overrides: Option<&Value>) -> Result<()> {
+    let effective = |field: &str| {
+        overrides
+            .and_then(|value| value.get(field))
+            .or_else(|| row.get(field))
+    };
+    for field in ["contextWindow", "maxTokens"] {
+        if effective(field)
+            .is_some_and(|value| value.as_f64().is_none_or(|n| !n.is_finite() || n <= 0.0))
+        {
+            bail!("Oh My Pi {field} 必须是正数，原配置已保留")
+        }
+    }
+    if let Some(cap) = effective("maxContextWindow") {
+        let cap = cap
+            .as_u64()
+            .filter(|cap| *cap > 0 && *cap <= 9007199254740991)
+            .context("Oh My Pi maxContextWindow 必须是正安全整数")?;
+        if effective("contextWindow")
+            .and_then(Value::as_f64)
+            .is_some_and(|context| context > cap as f64)
+        {
+            bail!("Oh My Pi maxContextWindow 小于导入的 contextWindow，请先确认模型上限，原配置已保留")
+        }
     }
     Ok(())
 }
