@@ -106,4 +106,6 @@ jobs:
           gh("release", "upload", tag, "--repo", repo, "--clobber", *map(str, installers))
           assets = json.loads(gh("release", "view", tag, "--repo", repo, "--json", "assets"))["assets"]
           for installer in installers:
-              assert any(a["name"] == installer.name and a["size"] == installer.stat().st_size for a in assets), "Uploaded asset not found: " + installer.name
+              # GitHub normalizes spaces in uploaded asset filenames to dots.
+              asset_name = installer.name.replace(" ", ".")
+              assert any(a["name"] == asset_name and a["size"] == installer.stat().st_size for a in assets), "Uploaded asset not found: " + asset_name
