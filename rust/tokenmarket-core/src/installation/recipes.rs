@@ -13,6 +13,8 @@ pub fn managed_command_directories(home: &Path) -> Vec<PathBuf> {
     vec![
         home.join(".local/bin"),
         home.join(".tokenmarket/tools/codex/bin"),
+        home.join(".tokenmarket/tools/deepseek-harness/bin"),
+        home.join(".tokenmarket/tools/deepseek-harness/runtime/bin"),
         home.join(".tokenmarket/tools/openclaw/bin"),
         home.join(".tokenmarket/tools/openclaw"),
         home.join(".tokenmarket/tools/openclaw/runtime"),
@@ -43,6 +45,9 @@ pub fn plan(
     environment: &InstallationEnvironment,
     architecture: &str,
 ) -> Result<InstallPlan> {
+    if super::gui::is_gui(tool) {
+        return super::gui::plan(tool, environment, architecture);
+    }
     if matches!(tool, ToolId::ClaudeCode | ToolId::Codex) {
         return super::native_cli::plan(tool, environment, architecture);
     }

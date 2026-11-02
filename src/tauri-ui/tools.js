@@ -54,7 +54,7 @@
   }
   const installDialog = document.createElement('dialog');
   installDialog.className = 'tool-install-dialog';
-  installDialog.innerHTML = '<h3></h3><p class="tool-install-status" role="status" aria-live="polite"></p><pre class="tool-install-output"></pre><div class="tool-actions"><button type="button" class="tool-install-cancel">取消安装</button><button type="button" class="tool-install-retry" hidden>重试安装</button><button type="button" class="tool-install-close" hidden>关闭</button></div>';
+  installDialog.innerHTML = '<h3></h3><p class="tool-install-status" role="status" aria-live="polite"></p><pre class="tool-install-output"></pre><div class="tool-actions"><button type="button" class="tool-install-cancel">取消安装</button><button type="button" class="tool-install-stop-wait" title="仅停止客户端等待，取消安装请在原生安装器中操作" hidden>停止等待</button><button type="button" class="tool-install-retry" hidden>重试安装</button><button type="button" class="tool-install-close" hidden>关闭</button></div>';
   document.body.append(installDialog);
   let installationTool = null;
   const installTerminal = state => ['succeeded','failed','cancelled'].includes(state?.stage);
@@ -65,6 +65,7 @@
     const output = installDialog.querySelector('.tool-install-output'); output.textContent = (state.output || []).join('\n'); output.scrollTop = output.scrollHeight;
     const terminal = installTerminal(state);
     installDialog.querySelector('.tool-install-cancel').hidden = terminal || state.stage === 'waiting_for_user';
+    installDialog.querySelector('.tool-install-stop-wait').hidden = state.stage !== 'waiting_for_user';
     installDialog.querySelector('.tool-install-retry').hidden = !['failed','cancelled'].includes(state.stage);
     installDialog.querySelector('.tool-install-close').hidden = !terminal && state.stage !== 'waiting_for_user';
   }
@@ -88,6 +89,7 @@
   installDialog.querySelector('.tool-install-close').onclick = () => installDialog.close();
   installDialog.querySelector('.tool-install-retry').onclick = () => { if (installationTool) void install(installationTool); };
   installDialog.querySelector('.tool-install-cancel').onclick = async () => { if (!installationTool) return; try { await invoke('cancel_tool_installation', {tool:installationTool.id}); } catch (error) { feedback(String(error),true); } };
+  installDialog.querySelector('.tool-install-stop-wait').onclick = installDialog.querySelector('.tool-install-cancel').onclick;
   installDialog.addEventListener('cancel', event => { if (installing) event.preventDefault(); });
   async function launch(entry) {
     const current = generation;
