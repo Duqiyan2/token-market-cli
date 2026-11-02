@@ -15,15 +15,9 @@ pub(super) fn plan(
     environment: &InstallationEnvironment,
     architecture: &str,
 ) -> Result<InstallPlan> {
-    let (target,sha)=match (environment.platform,architecture) {
-        (HostPlatform::MacOs,"aarch64")=>("darwin-arm64","89c682593d76cd44233fa53b1563264e7de9cbb189cad169135c5b4fadfbc0a7"),
-        (HostPlatform::MacOs,"x86_64")=>("darwin-x64","d132557e7ee2b85af08b0c8c34338e65c6430f2238d01f727728ef42dc83b035"),
-        (HostPlatform::Unix,"aarch64")=>("linux-arm64","33c37be234ba8bee041961047b19160f4d7d0f164e8e246f78bdd10feff148b3"),
-        (HostPlatform::Unix,"x86_64")=>("linux-x64","eb6728e77c576a35162c122c45ccadf224d89ff00abc8dae46cc2897c6002d7c"),
-        (HostPlatform::Windows,"aarch64")=>("win-arm64","a0c807319fede24c4a0d8f84564c82a619bd313b16b10c007c383c2609e99171"),
-        (HostPlatform::Windows,"x86_64")=>("win-x64","d2046d28c2c3dcd211ac5145c0bf30e2047ef9dfb306693c8c6e2eccd8b95fa5"),
-        _=>bail!("MiniMax Code 官方 Node/原生依赖安装方案未支持当前架构 {architecture}；请查看官方安装说明"),
-    };
+    let asset = super::node::asset(environment.platform, architecture)?;
+    let target = asset.target;
+    let sha = asset.sha256;
     if environment.platform == HostPlatform::Unix && cfg!(target_env = "musl") {
         bail!("MiniMax Code 官方一键安装不支持 Alpine/musl；请在受支持的 glibc Linux 环境安装")
     }
@@ -33,14 +27,8 @@ pub(super) fn plan(
         .home
         .join(".tokenmarket/installers/minimax-code");
     let package = downloads.join("minimax-code-0.7.2.tar.gz");
-    let node_archive = downloads.join(format!(
-        "node-v24.22.1-{target}.{}",
-        if windows { "zip" } else { "tar.gz" }
-    ));
-    let node_url = format!(
-        "https://nodejs.org/dist/v24.22.1/node-v24.22.1-{target}.{}",
-        if windows { "zip" } else { "tar.gz" }
-    );
+    let node_archive = downloads.join(&asset.filename);
+    let node_url = asset.url;
     let path = environment
         .command_directories
         .iter()
@@ -64,19 +52,20 @@ $node=(Get-Command node.exe -ErrorAction SilentlyContinue).Source
 if (-not (Usable-Node $node)) {{
  $node='{node}'
  if (-not (Usable-Node $node)) {{
-  Write-Output 'Preparing private Node.js 24.22.1 runtime'
+  Write-Output 'Preparing private Node.js {node_version} runtime'
   & curl.exe --fail --location --silent --show-error --proto '=https' --proto-redir '=https' --connect-timeout 30 --max-time 300 --output '{archive}' '{url}'
   if ($LASTEXITCODE -ne 0) {{ throw 'Node.js download failed' }}
   if ((Get-FileHash -Algorithm SHA256 -LiteralPath '{archive}').Hash.ToLowerInvariant() -ne '{sha}') {{ throw 'Node.js SHA256 verification failed' }}
   New-Item -ItemType Directory -Force -Path '{runtime}' | Out-Null
   Expand-Archive -LiteralPath '{archive}' -DestinationPath '{staging}' -Force
-  Copy-Item -Path '{staging}/node-v24.22.1-{target}/*' -Destination '{runtime}' -Recurse -Force
+  Copy-Item -Path '{staging}/node-v{node_version}-{target}/*' -Destination '{runtime}' -Recurse -Force
   if (-not (Usable-Node $node)) {{ throw 'Private Node.js runtime was not installed' }}
  }}
 }}
 New-Item -ItemType Directory -Force -Path '{prefix}' | Out-Null
 Set-Content -LiteralPath '{node_path}' -Value $node -Encoding UTF8
 "#,
+            node_version = super::node::VERSION,
             package = ps(&package),
             node = ps(&runtime.join("node.exe")),
             archive = ps(&node_archive),
@@ -137,26 +126,14 @@ Write-Output 'MiniMax Code installed; connect separately'
         }
     } else {
         let prepare = r#"set -eu
-prefix=$1; package=$2; package_sha=$3; archive=$4; url=$5; node_sha=$6
+prefix=$1; package=$2; package_sha=$3; archive=$4; origin=$5; checksum=$6
 verify() { if command -v sha256sum >/dev/null 2>&1; then actual=$(sha256sum "$1"); else actual=$(shasum -a 256 "$1"); fi; actual=${actual%% *}; [ "$actual" = "$2" ] || { echo 'MiniMax Code/Node.js SHA256 verification failed' >&2; exit 1; }; }
 verify "$package" "$package_sha"
 if [ -f /etc/alpine-release ] || ldd --version 2>&1 | grep -qi musl; then echo 'MiniMax Code official installer does not support Alpine/musl' >&2; exit 1; fi
-usable() { [ -n "$1" ] && [ -x "$1" ] && [ -x "$(dirname "$1")/npm" ] && "$1" -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit((a===22 && b>=19)||(a===24 && b>=2)||a===25||a===26?0:1)'; }
-node=$(command -v node || true)
-if ! usable "$node"; then
- node="$prefix/runtime/bin/node"
- if ! usable "$node"; then
-  echo 'Preparing private Node.js 24.22.1 runtime'
-  mkdir -p "$(dirname "$archive")" "$prefix/runtime"
-  curl --fail --location --silent --show-error --proto '=https' --proto-redir '=https' --connect-timeout 30 --max-time 300 --output "$archive" "$url"
-  verify "$archive" "$node_sha"
-  tar -xzf "$archive" --strip-components=1 -C "$prefix/runtime"
-  usable "$node" || { echo 'Private Node.js runtime was not installed' >&2; exit 1; }
- fi
-fi
+__NODE_PREPARE__
 mkdir -p "$prefix"
 printf '%s\n' "$node" > "$prefix/node-path"
-"#;
+"#.replace("__NODE_PREPARE__",&super::node::posix_prepare("const [a,b]=process.versions.node.split(\".\").map(Number);process.exit((a===22 && b>=19)||(a===24 && b>=2)||a===25||a===26?0:1)"));
         steps.push(InstallStep {
             stage: InstallStage::Dependencies,
             program: "/bin/sh".into(),

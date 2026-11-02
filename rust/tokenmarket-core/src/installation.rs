@@ -6,6 +6,7 @@ mod hermes;
 mod kimi;
 mod minimax;
 mod native_cli;
+mod node;
 mod oh_my_pi;
 pub mod opencode;
 mod pi;
