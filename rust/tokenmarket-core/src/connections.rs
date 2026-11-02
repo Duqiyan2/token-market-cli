@@ -7,6 +7,7 @@ mod harness;
 mod jsonc;
 mod model_plan;
 mod multi_model;
+pub(crate) mod oh_my_pi;
 mod pi;
 mod private_storage;
 mod provider_config;
@@ -420,6 +421,7 @@ impl ConnectionManager {
                 | ToolId::OpenCode
                 | ToolId::GrokBuild
                 | ToolId::Pi
+                | ToolId::OhMyPi
         ) {
             bail!("此工具的桌面接入尚未开放")
         }

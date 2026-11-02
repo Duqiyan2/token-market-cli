@@ -1,5 +1,6 @@
 //! Explicit tool installation, independent of credentials and Tool Connections.
 mod native_cli;
+mod oh_my_pi;
 pub mod opencode;
 mod pi;
 pub mod recipes;

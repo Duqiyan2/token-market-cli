@@ -77,6 +77,7 @@ tokenmarket workspace <workspace-id>
 | OpenCode | `opencode` |
 | Grok Build | `grok-build` |
 | Pi | `pi` |
+| Oh My Pi | `oh-my-pi` |
 
 Claude Code、Codex 在正式环境使用 `glm-5.3`，测试包使用 `glm-5.2`。其他工具会配置兼容的文本生成模型目录。
 
@@ -88,6 +89,10 @@ Pi 可点击 **安装**，或运行 `tokenmarket install pi`。接入后在 Pi �
 中选择导入的模型，保留原有默认设置和其他 provider。若 `auth.json` 已保存
 `tokenmarket` 凭据，请先在 Pi 中退出该 provider 后再接入；Token Market 不覆盖
 原 API Key 或 OAuth 信息。详见 [Pi 接入说明](docs/pi.md)。
+
+Oh My Pi 可独立点击 **安装**，或运行 `tokenmarket install oh-my-pi`。接入使用
+当前 OMP profile 的 `models.yml`/`models.yaml`，保留模型角色和已有认证。
+在 `/model` 中选择 Token Market 模型。详见 [Oh My Pi 接入说明](docs/oh-my-pi.md)。
 
 ## 管理连接
 
