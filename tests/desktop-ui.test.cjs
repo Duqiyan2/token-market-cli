@@ -137,6 +137,31 @@ test('installation can be cancelled and unsupported installs explain their disab
   } finally { await f.close(); }
 });
 
+test('GUI installation waits for native completion and can stop waiting without cancelling the native installer', async () => {
+  const f=await openFixture({missingGui:true,guiInstall:true});try {
+    const p=f.page;
+    await p.locator('[data-tool="workbuddy"] .tool-install').click();
+    await p.locator('.tool-install-status').filter({hasText:'原生安装器'}).waitFor();
+    assert.equal((await p.locator('.tool-install-status').innerText()).split('请完成原生安装器中的步骤').length,2);
+    assert.equal(await p.locator('.tool-install-cancel').isVisible(),false);
+    assert.equal(await p.locator('.tool-install-stop-wait').isVisible(),true);
+    await p.locator('.tool-install-stop-wait').click();
+    await p.locator('.tool-install-status').filter({hasText:'已停止等待'}).waitFor();
+    assert.match(await p.locator('.tool-install-status').innerText(),/请在原生安装器中取消/);
+    assert.equal(await p.locator('.tool-install-retry').isVisible(),true);
+    await p.locator('.tool-install-close').click();
+    await p.locator('[data-tool="deepseek-harness"] .tool-install').click();
+    await p.locator('.tool-install-status').filter({hasText:'原生安装器'}).waitFor();
+    await p.locator('.tool-install-close').click();
+    await p.evaluate(()=>{window.__fixture.nativeInstalled=true;});
+    await p.locator('[data-tool="deepseek-harness"] .tool-connect').waitFor();
+    assert.equal((await calls(p,'cancel_tool_installation')).length,1);
+    assert.equal((await calls(p,'connect_tool')).length,0);
+    assert.equal((await calls(p,'test_tool_connection')).length,0);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
 test('OpenCode installation uses the shared flow and leaves connection as a separate action', async () => {
   const f=await openFixture(); try {
     const p=f.page;

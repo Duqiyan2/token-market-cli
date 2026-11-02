@@ -1,4 +1,6 @@
 //! Explicit tool installation, independent of credentials and Tool Connections.
+mod gui;
+mod harness_cli;
 mod native_cli;
 mod oh_my_pi;
 pub mod opencode;
@@ -86,6 +88,14 @@ pub trait InstallExecutor: Send + Sync {
     /// Read application version metadata without launching the application.
     fn application_version(&self, _application: &Path) -> Result<Option<String>> {
         Ok(None)
+    }
+    /// Retain full product versions when numeric OS metadata omits a prerelease.
+    fn tool_application_version(&self, tool: ToolId, application: &Path) -> Result<String> {
+        if tool == ToolId::DeepSeekHarness {
+            return gui::harness_application_version(application);
+        }
+        self.application_version(application)?
+            .context("无法读取应用版本元数据")
     }
 }
 pub struct NativeInstallExecutor;
@@ -357,6 +367,15 @@ impl InstallationManager {
     /// before configuration mutation; the installer pin is not that whole range.
     pub fn installed_version(&self, tool: ToolId) -> Result<Option<String>> {
         let plan = recipes::plan(tool, &self.environment, &self.architecture)?;
+        if gui::is_gui(tool) {
+            if let Some(path) = ToolInventory::new(self.environment.clone()).application_path(tool)
+            {
+                return self
+                    .executor
+                    .tool_application_version(tool, &path)
+                    .map(Some);
+            }
+        }
         self.environment
             .command_path(&plan.command)
             .map(|path| self.executor.version(&path))
@@ -459,6 +478,17 @@ impl InstallationManager {
         Ok(status)
     }
     fn install(&self, plan: &InstallPlan, cancelled: &AtomicBool) -> Result<()> {
+        if gui::is_gui(plan.tool) {
+            if let Some(path) =
+                ToolInventory::new(self.environment.clone()).application_path(plan.tool)
+            {
+                let version = self.executor.tool_application_version(plan.tool, &path)?;
+                if !gui::matches_version(plan.tool, &version, &plan.version) {
+                    bail!("已安装应用版本 {version} 尚未验证兼容（当前支持 {}）；未自动升级，请按官方说明处理", plan.version)
+                }
+                return Ok(());
+            }
+        }
         if let Some(path) = self.environment.command_path(&plan.command) {
             let version = self.executor.version(&path)?;
             if !recipes::compatible_existing_version(plan.tool, &version, &plan.version) {
@@ -484,9 +514,21 @@ impl InstallationManager {
                 } else {
                     step.stage
                 };
-                state.detail = "安装进行中，可查看输出".into();
+                state.detail = if step.stage == InstallStage::WaitingForUser {
+                    gui::instructions(plan.tool, self.environment.platform).into()
+                } else {
+                    "安装进行中，可查看输出".into()
+                };
             });
-            self.executor.execute(step, cancelled, &mut |line| {
+            // Native GUI installers own their own cancellation. Stopping this
+            // client's waiting must not terminate a detached installer process.
+            let native_handoff = AtomicBool::new(false);
+            let cancellation = if step.stage == InstallStage::WaitingForUser {
+                &native_handoff
+            } else {
+                cancelled
+            };
+            self.executor.execute(step, cancellation, &mut |line| {
                 self.update(plan.tool, |state| {
                     if let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) {
                         if value["name"] == "openclaw" {
@@ -505,6 +547,13 @@ impl InstallationManager {
                     }
                 });
             })?;
+        }
+        if plan
+            .steps
+            .iter()
+            .any(|step| step.stage == InstallStage::WaitingForUser)
+        {
+            return self.wait_for_application(plan, cancelled);
         }
         if cancelled.load(Ordering::SeqCst) {
             bail!("安装已取消；已准备的依赖保留")
@@ -528,6 +577,28 @@ impl InstallationManager {
             )
         }
         Ok(())
+    }
+    fn wait_for_application(&self, plan: &InstallPlan, cancelled: &AtomicBool) -> Result<()> {
+        let deadline = Instant::now() + Duration::from_secs(1800);
+        loop {
+            if cancelled.load(Ordering::SeqCst) {
+                bail!("已停止等待；请在原生安装器中取消安装。已下载文件与已完成安装保留，可重新检测后重试")
+            }
+            if let Some(path) =
+                ToolInventory::new(self.environment.clone()).application_path(plan.tool)
+            {
+                if let Ok(version) = self.executor.tool_application_version(plan.tool, &path) {
+                    if !gui::matches_version(plan.tool, &version, &plan.version) {
+                        bail!("检测到应用版本 {version} 与已验证版本 {} 不匹配；未自动升级，请检查安装来源", plan.version)
+                    }
+                    return Ok(());
+                }
+            }
+            if Instant::now() >= deadline {
+                bail!("尚未检测到完整应用安装；请完成原生安装器步骤后重新检测或重试")
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
     }
     fn update(&self, tool: ToolId, action: impl FnOnce(&mut InstallStatus)) {
         if let Some(job) = self.jobs.lock().unwrap().get_mut(&tool.to_string()) {

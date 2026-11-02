@@ -193,6 +193,23 @@ impl ToolInventory {
         if tool == ToolId::OhMyPi {
             return crate::connections::oh_my_pi::config_path(&self.environment.home);
         }
+        if tool == ToolId::DeepSeekHarness
+            && std::env::var_os("DSH_ACTIVE_PROFILE").is_none()
+            && self.application_path(tool).is_none()
+            && self.environment.command_path("dsh")
+                == Some(
+                    self.environment
+                        .home
+                        .join(".tokenmarket/tools/deepseek-harness/bin/dsh"),
+                )
+        {
+            // The npm CLI cannot boot Electron's reserved desktop profile. Its
+            // home patch applies to web/headless and preserves retained profiles.
+            return std::env::var_os("DSH_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| self.environment.home.join(".dsh"))
+                .join("cordis.patch.yml");
+        }
         if tool == ToolId::Pi {
             return std::env::var_os("PI_CODING_AGENT_DIR")
                 .filter(|v| !v.to_string_lossy().trim().is_empty())
