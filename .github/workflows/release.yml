@@ -5,6 +5,11 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to build"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -23,6 +28,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -49,14 +56,54 @@ jobs:
           cargo test --manifest-path rust/tokenmarket-cli/Cargo.toml --all-targets
           cargo check --manifest-path src-tauri/Cargo.toml
 
-      - name: Build and release with Tauri
+      - name: Build desktop installers
         uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: src-tauri
-          tagName: ${{ github.ref_name }}
-          releaseName: "Token Market ${{ github.ref_name }}"
-          releaseDraft: false
-          prerelease: false
           args: ${{ matrix.args }}
+
+      - name: Preserve desktop installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ runner.os }}
+          path: |
+            src-tauri/target/**/bundle/dmg/*.dmg
+            src-tauri/target/**/bundle/msi/*.msi
+            src-tauri/target/**/bundle/nsis/*.exe
+          if-no-files-found: error
+
+      - name: Upload and verify release assets
+        shell: python
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          import json, os, pathlib, subprocess, tarfile
+
+          def gh(*args):
+              return subprocess.check_output(["gh", *args], text=True)
+
+          # Resolve renamed/transferred repositories before making upload requests.
+          repo = gh("api", "repos/" + os.environ["GITHUB_REPOSITORY"], "--jq", ".full_name").strip()
+          tag = os.environ["RELEASE_TAG"]
+          assert tag.startswith("v"), "Desktop release must use a version tag"
+          macos = os.environ["RUNNER_OS"] == "macOS"
+          bundle = pathlib.Path("src-tauri/target") / ("aarch64-apple-darwin/release/bundle" if macos else "release/bundle")
+          suffixes = [".dmg"] if macos else [".msi", ".exe"]
+          installers = [p for p in bundle.rglob("*") if p.is_file() and p.suffix in suffixes]
+          for suffix in suffixes:
+              assert any(p.suffix == suffix for p in installers), "Missing installer: " + suffix
+          if macos:
+              app, = bundle.glob("macos/*.app")
+              archive = app.with_suffix(".app.tar.gz")
+              with tarfile.open(archive, "w:gz") as output:
+                  output.add(app, arcname=app.name)
+              installers.append(archive)
+          if subprocess.run(["gh", "release", "view", tag, "--repo", repo], stdout=subprocess.DEVNULL).returncode:
+              created = subprocess.run(["gh", "release", "create", tag, "--repo", repo, "--verify-tag", "--title", "Token Market " + tag, "--notes", "Desktop installers and CLI share this version."])
+              if created.returncode:
+                  gh("release", "view", tag, "--repo", repo)
+          gh("release", "upload", tag, "--repo", repo, "--clobber", *map(str, installers))
+          assets = json.loads(gh("release", "view", tag, "--repo", repo, "--json", "assets"))["assets"]
+          for installer in installers:
+              assert any(a["name"] == installer.name and a["size"] == installer.stat().st_size for a in assets), "Uploaded asset not found: " + installer.name
