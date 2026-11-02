@@ -85,9 +85,6 @@ jobs:
     name: Desktop DOM/IPC fixtures
     runs-on: ubuntu-22.04
     timeout-minutes: 10
-    env:
-      NODE_PATH: ${{ runner.temp }}/tokenmarket-ui-runtime/node_modules
-      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/tokenmarket-ui-browsers
     steps:
       - name: Checkout validation revision
         uses: actions/checkout@v4
@@ -106,7 +103,12 @@ jobs:
         run: npm install --prefix "$RUNNER_TEMP/tokenmarket-ui-runtime" --no-save --package-lock=false --ignore-scripts playwright@1.61.0
 
       - name: Install matching Chromium and OS libraries
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/tokenmarket-ui-browsers
         run: node "$RUNNER_TEMP/tokenmarket-ui-runtime/node_modules/playwright/cli.js" install --with-deps chromium
 
       - name: Test desktop DOM and native IPC contracts
+        env:
+          NODE_PATH: ${{ runner.temp }}/tokenmarket-ui-runtime/node_modules
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/tokenmarket-ui-browsers
         run: node --test --test-reporter=tap tests/desktop-ui.test.cjs
