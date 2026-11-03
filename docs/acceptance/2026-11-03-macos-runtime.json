@@ -1,0 +1,313 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-03",
+  "platform": {
+    "os": "macOS",
+    "version": "27.0",
+    "architecture": "arm64"
+  },
+  "model": "glm-5.3",
+  "client_source_revision": "e0578090d40237c39ca4907d96cb7d90d8576a3a",
+  "tools": [
+    {
+      "tool": "claude-code",
+      "version": "2.1.309 (Claude Code)",
+      "passed": true,
+      "native_action": "Read",
+      "call_result_link_verified": true,
+      "exact_nonce_in_result_and_final_verified": true,
+      "normal_completion_verified": true,
+      "streaming": {
+        "evidence": "actual_upstream_sse",
+        "main_generation_stream_count": 2,
+        "sse_data_frames": [
+          16,
+          27
+        ],
+        "text_delta_frames": [
+          3,
+          20
+        ],
+        "tool_delta_frames": [
+          6,
+          0
+        ]
+      },
+      "call_result_association": "native Read tool_use_id matched the completed result"
+    },
+    {
+      "tool": "codex",
+      "version": "codex-cli 0.166.0",
+      "passed": true,
+      "native_action": "exec_command",
+      "call_result_link_verified": true,
+      "exact_nonce_in_result_and_final_verified": true,
+      "normal_completion_verified": true,
+      "streaming": {
+        "evidence": "actual_upstream_sse",
+        "main_generation_stream_count": 2,
+        "sse_data_frames": [
+          23,
+          14
+        ],
+        "text_delta_frames": [
+          3,
+          6
+        ],
+        "tool_delta_frames": [
+          9,
+          0
+        ]
+      },
+      "call_result_association": "same exec_command item completed with exit 0 before final item"
+    },
+    {
+      "tool": "workbuddy",
+      "version": "5.9.3",
+      "passed": true,
+      "native_action": "Read",
+      "call_result_link_verified": true,
+      "exact_nonce_in_result_and_final_verified": true,
+      "normal_completion_verified": true,
+      "streaming": {
+        "evidence": "native_gui_chunks",
+        "distinct_native_gui_chunk_timestamp_count": 2
+      },
+      "call_result_association": "native Read callId matched the completed result and GUI conversation"
+    },
+    {
+      "tool": "deepseek-harness",
+      "version": "0.2.1-rc.5",
+      "passed": true,
+      "native_action": "read",
+      "call_result_link_verified": true,
+      "exact_nonce_in_result_and_final_verified": true,
+      "normal_completion_verified": true,
+      "streaming": {
+        "evidence": "actual_upstream_sse",
+        "main_generation_stream_count": 2,
+        "sse_data_frames": [
+          13,
+          36
+        ],
+        "text_delta_frames": [
+          3,
+          33
+        ],
+        "tool_delta_frames": [
+          7,
+          0
+        ]
+      },
+      "call_result_association": "native read callId matched the completed result"
+    },
+    {
+      "tool": "openclaw",
+      "version": "OpenClaw 2026.10.9 (8b18b55)",
+      "passed": true,
+      "native_action": "read",
+      "call_result_link_verified": true,
+      "exact_nonce_in_result_and_final_verified": true,
+      "normal_completion_verified": true,
+      "streaming": {
+        "evidence": "actual_upstream_sse",
+        "main_generation_stream_count": 2,
+        "sse_data_frames": [
+          9,
+          12
+        ],
+        "text_delta_frames": [
+          2,
+          9
+        ],
+        "tool_delta_frames": [
+          4,
+          0
+        ]
+      },
+      "call_result_association": "native read toolCallId matched result with isError=false"
+    },
+    {
+      "tool": "opencode",
+      "version": "1.19.5",
+      "passed": true,
+      "native_action": "read",
+      "call_result_link_verified": true,
+      "exact_nonce_in_result_and_final_verified": true,
+      "normal_completion_verified": true,
+      "streaming": {
+        "evidence": "actual_upstream_sse",
+        "main_generation_stream_count": 2,
+        "sse_data_frames": [
+          41,
+          9
+        ],
+        "text_delta_frames": [
+          31,
+          6
+        ],
+        "tool_delta_frames": [
+          7,
+          0
+        ]
+      },
+      "call_result_association": "native read call ID matched the completed result"
+    },
+    {
+      "tool": "grok-build",
+      "version": "grok 1.0.70 (f50904eaee6c)",
+      "passed": true,
+      "native_action": "read_file",
+      "call_result_link_verified": true,
+      "exact_nonce_in_result_and_final_verified": true,
+      "normal_completion_verified": true,
+      "streaming": {
+        "evidence": "actual_upstream_sse",
+        "main_generation_stream_count": 2,
+        "sse_data_frames": [
+          32,
+          27
+        ],
+        "text_delta_frames": [
+          24,
+          24
+        ],
+        "tool_delta_frames": [
+          5,
+          0
+        ]
+      },
+      "call_result_association": "read_file tool_use_id matched result with is_error=false"
+    },
+    {
+      "tool": "hermes",
+      "version": "Hermes Agent v0.22.5 (2026.9.24) · stable · local bf0203a794a0",
+      "passed": true,
+      "native_action": "read_file",
+      "call_result_link_verified": true,
+      "exact_nonce_in_result_and_final_verified": true,
+      "normal_completion_verified": true,
+      "streaming": {
+        "evidence": "actual_upstream_sse",
+        "main_generation_stream_count": 2,
+        "sse_data_frames": [
+          25,
+          44
+        ],
+        "text_delta_frames": [
+          17,
+          41
+        ],
+        "tool_delta_frames": [
+          5,
+          0
+        ]
+      },
+      "call_result_association": "read_file tool_call_id matched result with is_error=false"
+    },
+    {
+      "tool": "pi",
+      "version": "1.4.0",
+      "passed": true,
+      "native_action": "read",
+      "call_result_link_verified": true,
+      "exact_nonce_in_result_and_final_verified": true,
+      "normal_completion_verified": true,
+      "streaming": {
+        "evidence": "actual_upstream_sse",
+        "main_generation_stream_count": 2,
+        "sse_data_frames": [
+          10,
+          12
+        ],
+        "text_delta_frames": [
+          3,
+          9
+        ],
+        "tool_delta_frames": [
+          4,
+          0
+        ]
+      },
+      "call_result_association": "native read toolCallId matched result with isError=false"
+    },
+    {
+      "tool": "minimax-code",
+      "version": "0.7.2",
+      "passed": true,
+      "native_action": "read",
+      "call_result_link_verified": true,
+      "exact_nonce_in_result_and_final_verified": true,
+      "normal_completion_verified": true,
+      "streaming": {
+        "evidence": "actual_upstream_sse",
+        "main_generation_stream_count": 2,
+        "sse_data_frames": [
+          28,
+          25
+        ],
+        "text_delta_frames": [
+          21,
+          22
+        ],
+        "tool_delta_frames": [
+          4,
+          0
+        ]
+      },
+      "call_result_association": "same native read ID linked input to completed output"
+    },
+    {
+      "tool": "kimi-code",
+      "version": "2.4.1",
+      "passed": true,
+      "native_action": "Read",
+      "call_result_link_verified": true,
+      "exact_nonce_in_result_and_final_verified": true,
+      "normal_completion_verified": true,
+      "streaming": {
+        "evidence": "actual_upstream_sse",
+        "main_generation_stream_count": 2,
+        "sse_data_frames": [
+          31,
+          45
+        ],
+        "text_delta_frames": [
+          24,
+          42
+        ],
+        "tool_delta_frames": [
+          4,
+          0
+        ]
+      },
+      "call_result_association": "native Read tool_call_id matched the completed result"
+    },
+    {
+      "tool": "oh-my-pi",
+      "version": "omp/18.15.0",
+      "passed": true,
+      "native_action": "read",
+      "call_result_link_verified": true,
+      "exact_nonce_in_result_and_final_verified": true,
+      "normal_completion_verified": true,
+      "streaming": {
+        "evidence": "actual_upstream_sse",
+        "main_generation_stream_count": 2,
+        "sse_data_frames": [
+          17,
+          22
+        ],
+        "text_delta_frames": [
+          7,
+          19
+        ],
+        "tool_delta_frames": [
+          7,
+          0
+        ]
+      },
+      "call_result_association": "native read toolCallId matched result with isError=false"
+    }
+  ]
+}
