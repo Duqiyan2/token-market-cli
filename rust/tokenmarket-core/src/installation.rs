@@ -312,7 +312,9 @@ fn run_process(
             #[cfg(unix)]
             {
                 let _ = Command::new("/bin/kill")
-                    .args(["-TERM", &format!("-{}", child.id())])
+                    // procps versions can parse an unseparated negative PGID
+                    // as options and signal our own group instead.
+                    .args(["-TERM", "--", &format!("-{}", child.id())])
                     .status();
             }
             #[cfg(windows)]
