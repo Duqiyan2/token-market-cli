@@ -9,9 +9,9 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--web-origin', default='https://test.tokensapi.cn')
-parser.add_argument('--console-api', default='https://console-api-test.tokensapi.cn')
-parser.add_argument('--gateway', default='https://api-test.tokensapi.cn')
+parser.add_argument('--web-origin', required=True)
+parser.add_argument('--console-api', required=True)
+parser.add_argument('--model-api', required=True)
 parser.add_argument('--auth-create', action='store_true', help='Create one anonymous, short-lived authorization request')
 args = parser.parse_args()
 failed = False
@@ -35,15 +35,15 @@ def request(label, url, data=None, expected=(200,)):
     return status, content_type, body
 
 
-for origin in (args.web_origin, args.console_api, args.gateway):
+for origin in (args.web_origin, args.console_api, args.model_api):
     parsed = urlparse(origin)
     if parsed.scheme != 'https' or not parsed.netloc or parsed.path not in ('', '/') or parsed.query or parsed.fragment:
         parser.error('Origins must be HTTPS origins without paths or query parameters')
 
-request('WebAPI status', args.console_api.rstrip('/') + '/api/status')
+request('Account API status', args.console_api.rstrip('/') + '/api/status')
 for path in ('authorize', 'console', 'recharge'):
     request('Web page ' + path, args.web_origin.rstrip('/') + '/desktop/' + path)
-request('Gateway reachability (no key)', args.gateway.rstrip('/') + '/v1/models', expected=(200, 401, 403))
+request('Model API reachability (no key)', args.model_api.rstrip('/') + '/v1/models', expected=(200, 401, 403))
 if args.auth_create:
     body = json.dumps({'state': secrets.token_urlsafe(32), 'code_challenge': secrets.token_urlsafe(32), 'code_challenge_method': 'S256'}).encode()
     result = request('Desktop authorization create', args.console_api.rstrip('/') + '/api/desktop/auth/sessions', body)

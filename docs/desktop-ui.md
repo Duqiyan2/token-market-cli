@@ -1,6 +1,6 @@
 # Lightweight desktop UI
 
-The production frontend in `src/tauri-ui` now uses the approved lightweight desktop design. It contains tool cards, account/workspace management, connection details, browser-login states and help. `shell.js` handles navigation, `app.js` retains desktop-login orchestration, and the existing workspace/tool/test modules invoke the native commands. Inventory uses redacted native summaries; model names come from the saved native catalogue.
+The desktop frontend in `src/tauri-ui` now uses the approved lightweight desktop design. It contains tool cards, account/workspace management, connection details, browser-login states and help. `shell.js` handles navigation, `app.js` retains desktop-login orchestration, and the existing workspace/tool/test modules invoke the native commands. Inventory uses redacted native summaries; model names come from the saved native catalogue.
 
 Agent details show configured models, connection ownership, test results and usage guidance. Configuration contents and the former protocol-only access-information block are omitted. Credentials and restoration receipts remain on the native side.
 
@@ -20,10 +20,11 @@ The UI checks cover navigation/search, fresh connection confirmation, actual cat
 
 ## Native bundle
 
-The existing `scripts/build-test-desktop.sh --bundles app -- --offline --locked` produces the test-environment `.app`; the normal release workflow consumes the same frontend assets. `TAURI_CLI_JS` can point to an existing Tauri JS CLI when `cargo tauri` is unavailable. Packaging is compilation evidence; live login and paid-model acceptance require separate testing.
+Run `scripts/build-local-desktop.sh --bundles app -- --offline --locked` to build
+an application from the same frontend assets. `TAURI_CLI_JS` can point to an
+installed Tauri JS CLI when `cargo tauri` is unavailable. For paired CLI/desktop
+signing, see [macOS local signing](macos-local-signing.md).
 
-## Local acceptance (2026-10-29)
-
-Nine browser IPC-regression tests passed. The five primary views were rendered at 1440×1000, 900×760 and 375×760 with no JavaScript errors, broken images, horizontal overflow or readable-text contrast failures. Screenshots and raw visual facts are under `design-demos/screenshots/integrated-*` and `design-demos/integrated-ui-validation.json`.
-
-The final `Token Market Test.app` was rebuilt offline from the current workspace and locally ad-hoc signed; `codesign --verify --deep --strict` passed. It was then opened as a native app: the previous login session restored, and real account/workspace/balance and local tool summaries appeared in the new layout. No connect, disconnect or paid-test action was triggered during native observation. This is local test-build acceptance, not a new production deployment, installer release or paid-model validation.
+Packaging verifies compilation. Installed login, browser return, OS credential
+access and model requests require separate native verification. Browser fixture
+screenshots and visual checks are in `design-demos/`.

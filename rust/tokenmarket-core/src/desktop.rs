@@ -1,4 +1,4 @@
-//! Desktop account login. The legacy CLI tool/key authorization lives in `auth`.
+//! Shared client account login and local session persistence.
 use crate::auth::create_pkce;
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
@@ -126,8 +126,8 @@ impl DesktopCredentialStore for CachedDesktopCredentials {
     }
 }
 
-/// Production persistence: macOS Keychain / Windows Credential Store, with no plaintext fallback.
-/// Credentials are scoped to the configured platform, so test and production logins never overlap.
+/// Native persistence: macOS Keychain / Windows Credential Store, with no plaintext fallback.
+/// Credentials are scoped to the configured service address.
 pub struct NativeDesktopCredentials {
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     service: &'static str,
@@ -313,7 +313,7 @@ impl DesktopClient {
         // Never surface authentication response bodies, even on failures.
         if !status.is_success() {
             if status.as_u16() == 404 {
-                bail!("登录服务接口不可用（HTTP 404），请检查服务部署或地址");
+                bail!("登录接口不可用（HTTP 404），请检查地址或联系支持");
             }
             if status.is_server_error() {
                 bail!("登录服务暂时不可用（HTTP {}），请稍后重试", status.as_u16());

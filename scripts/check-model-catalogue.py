@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check a redacted /v1/models response captured using a test workspace Key."""
+"""Check a redacted /v1/models response captured using a workspace Key."""
 import argparse
 import json
 import sys
@@ -7,7 +7,7 @@ from pathlib import Path
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('file', type=Path, help='Path to the JSON response body; do not include the API Key')
-parser.add_argument('--model', default='glm-5.3', help='Required model ID (use glm-5.2 for the test desktop build)')
+parser.add_argument('--model', default='glm-5.3', help='Required text-generation model ID')
 args = parser.parse_args()
 try:
     payload = json.loads(args.file.read_text(encoding='utf-8'))

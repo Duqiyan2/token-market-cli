@@ -34,7 +34,7 @@ Configuration belongs to the **data directory**, separate from
   changing the active root requires disconnecting its retained connection first.
 
 Connect writes `custom_provider.tokenmarket` with explicit
-`api: openai-completions`, `options.authMode: api-key`, gateway `/v1` URL and the
+`api: openai-completions`, `options.authMode: api-key`, model API `/v1` URL and the
 scoped saved key. It imports the complete Key-visible text-generation catalogue
 as model maps. Available context/output metadata uses the tagged `limit.context`
 and `limit.output` fields. Each leaf has its own restoration receipt; unrelated
@@ -43,7 +43,7 @@ models, nested unknown values, `defaultModel` and `defaultModelVariant` survive.
 Select a model inside MiniMax Code's `/model` after connecting.
 
 Existing OAuth/managed-login, disabled providers, competing authorization headers
-or independent model credentials produce an actionable refusal. Matching-gateway
+or independent model credentials produce an actionable refusal. Matching-address
 literal key recovery never evaluates environment or command syntax. Connect and
 Install do not invoke `provider --use`, onboarding, a model or a default change.
 Reconnect reuses the saved key; Disconnect restores owned fields and preserves

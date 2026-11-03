@@ -144,7 +144,7 @@ impl DesktopWorkspace {
         if !saved {
             bail!("默认空间未保存，请重试");
         }
-        // A read of the selected context preserves server object permission checks.
+        // Validate the requested context before displaying it.
         let path = format!("/api/client/workspaces/context?workspaceId={}", id(target)?);
         let context: ContextResponse = self
             .request(session, reqwest::Method::GET, &path, Some(target), None)

@@ -11,7 +11,7 @@ Configuration follows the upstream
 [custom-model contract](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/11-custom-models.md):
 the effective `GROK_HOME` (default `~/.grok`) contains `config.toml`, with a
 `model` table per namespaced Token Market model. Each managed entry sets the
-actual model ID, display name, Chat Completions backend, gateway and per-model
+actual model ID, display name, Chat Completions backend, API base URL and per-model
 API key. Advertised context/output limits are copied when present. The existing
 `models.default`, other model tables, preferences and comments are retained.
 

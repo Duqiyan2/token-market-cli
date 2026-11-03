@@ -24,7 +24,7 @@ ignores the agent-directory override. `PI_PROFILE` is consulted only if
 An existing legacy `models.json` requires OMP's own migration before connecting.
 
 Connect imports the Key-visible TEXT_GENERATION catalogue under
-`providers.tokenmarket`, using the gateway `/v1`, `api: openai-completions`,
+`providers.tokenmarket`, using the model API `/v1`, `api: openai-completions`,
 `auth: apiKey` and Bearer authentication. It tracks individual ID-selected model
 fields, preserving other models, unknown fields and array order. Default roles
 in `config.yml`/`config.yaml` and existing authentication databases are untouched.

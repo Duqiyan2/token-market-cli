@@ -1,4 +1,4 @@
-//! Desktop multi-model imports. Legacy terminal adapters retain their existing behavior.
+//! Multi-model configuration imports for shared client connections.
 use super::{configuration::PreparedConfiguration, FieldReceipt};
 use crate::ToolId;
 use anyhow::{bail, Context, Result};

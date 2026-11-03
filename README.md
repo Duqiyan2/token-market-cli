@@ -2,78 +2,78 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-Connect local AI agent tools to Token Market from the desktop app or terminal. Both share your sign-in, current workspace and tool connections, so you can switch between them.
+Connect local AI agent tools to Token Market from the desktop app or command line. Manage tool installation, model configuration and connection status in one place.
 
-**Version 1.0.0** · [Desktop download](https://github.com/FitBBC/token-market-cli/releases/tag/v1.0.0) · [npm package](https://www.npmjs.com/package/tokenmarket)
+[Download desktop app](https://github.com/FitBBC/token-market-cli/releases/latest) · [Get the CLI](https://www.npmjs.com/package/tokenmarket) · [Report an issue](https://github.com/FitBBC/token-market-cli/issues)
 
-Version 1.0.0 includes integrated tool installation and the tool integrations below. See [release acceptance](docs/release-readiness.md) for verified platforms and remaining checks.
+## Installation
 
-## Install
+You need a Token Market account. Use the desktop app and CLI independently or together on the same machine; both share your sign-in and current workspace.
 
-Have a Token Market account. The downloads below install the published Token Market client.
+### Desktop app
 
-### Desktop
-
-Download an installer from [Releases](https://github.com/FitBBC/token-market-cli/releases/tag/v1.0.0):
+Download the installer for your system from [Releases](https://github.com/FitBBC/token-market-cli/releases/latest):
 
 | System | Installation |
 | --- | --- |
-| macOS, Apple Silicon | Open the `.dmg` and drag **Token Market** into **Applications**. |
-| Windows x64 | Run the `x64-setup.exe` installer. |
+| macOS · Apple Silicon | Open the `.dmg` and drag **Token Market** into **Applications**. |
+| Windows · x64 | Run the `.exe` or `.msi` installer. |
 
 ### CLI
 
 Requires **Node.js 20+**. Supports macOS arm64/x64, Windows x64 and Linux x64/arm64 with glibc 2.35+.
 
 ```bash
-npm install -g tokenmarket@1.0.0
+npm install -g tokenmarket
 tokenmarket --version
 ```
 
 Or run without a global installation:
 
 ```bash
-npx --yes tokenmarket@1.0.0 login
+npx --yes tokenmarket login
 ```
 
-The npm package includes all five native binaries; the launcher selects the one for your system.
-
-## Connect your first tool
-
-The installation steps below use the 1.0.0 desktop app or CLI.
+## Quick start
 
 ### In the desktop app
 
 1. Open Token Market and click **使用浏览器登录** (Sign in with browser).
-2. Finish signing in, then click **Open Application** to return to the app.
+2. Complete sign-in in your browser, then click **Open Application** to return to the app.
 3. Confirm the current workspace. New connections use this workspace for billing.
-4. If the tool is missing, click **安装** (Install). Follow any native installer steps; the client automatically detects completion. A disabled button explains an unavailable installation method.
-5. Click **接入** (Connect) separately after installation.
+4. Choose a tool. If it is missing, click **安装** (Install) and follow the prompts.
+5. After installation, click **接入** (Connect).
 6. Reopen the tool and select the Token Market model as prompted.
 
 ### In the terminal
 
-Use the CLI installed above.
+For example, to connect Claude Code:
 
 ```bash
 tokenmarket login
 tokenmarket workspace
 tokenmarket install claude-code
 tokenmarket connect claude-code
-tokenmarket status
+tokenmarket status claude-code
 ```
 
-To switch workspaces, use an ID shown by `workspace`:
+Skip `install` if the tool is already installed. Reopen the tool after connecting. You can also launch terminal tools with:
 
 ```bash
-tokenmarket workspace <workspace-id>
+tokenmarket run claude-code
 ```
 
-CLI and desktop share sign-in on the same machine and environment. Signing in through either lets you manage connections from both. Switching the current workspace affects new connections; existing tools keep their bound billing workspace.
+**Installation, connection and reconnection do not automatically send model requests.** To check a model connection, click **测试** (Test) in the app or run:
+
+```bash
+tokenmarket test claude-code
+```
+
+Testing sends one potentially billable model request and asks for confirmation before proceeding.
 
 ## Supported tools
 
-Choose a tool in the app, or use its ID in CLI commands:
+Select a tool in the app, or use its ID in CLI commands. Available tools and installation methods depend on the client you are using.
 
 | Tool | CLI ID |
 | --- | --- |
@@ -92,116 +92,86 @@ Choose a tool in the app, or use its ID in CLI commands:
 | Baidu DuMate Personal | `dumate` |
 | Baidu DuMate Enterprise | `dumate-enterprise` |
 
-Claude Code and Codex use `glm-5.3` in production (`glm-5.2` in test builds). DuMate Personal configures one model; other tools receive the compatible text-generation model catalogue.
+### Connection tips
 
-DuMate Personal support targets official **1.0.89**. Sign in to DuMate Personal,
-fully quit it, then connect with a source build using `tokenmarket connect dumate`
-or the desktop action. Reopen DuMate to apply the configuration. Disconnect also
-requires quitting DuMate and restores the original custom provider. The platform
-must register the `dumate` tool ID before live connection. See [DuMate notes](docs/dumate.md).
-
-DuMate Enterprise is a separate connection (`tokenmarket connect dumate-enterprise`).
-Sign in to the enterprise account and fully quit DuMate first. Both administrator
-permissions (custom models and model selection) must be enabled; Token Market
-checks them with the current DuMate session against that enterprise origin. Models
-are imported without a paid probe. Keep DuMate fully closed and explicitly test a selected model in Token Market
-(`tokenmarket test dumate-enterprise --model <id>`). The real result is persisted
-for that model. Reopen DuMate and choose a passing model in the conversation. The platform must register the
-`dumate-enterprise` tool ID. See [enterprise notes](docs/dumate-enterprise.md).
-
-Grok Build can be installed with **安装** in the app or `tokenmarket install grok-build`.
-Installation does not connect or test a model. After connecting, restart Grok and
-use `/model` to select an imported Token Market model; the existing default stays unchanged.
-
-Pi can be installed with **安装** or `tokenmarket install pi`. Open `/model` in Pi
-to select an imported model. Existing defaults and other providers stay intact. If
-`auth.json` already has a `tokenmarket` credential, log out of that provider in Pi
-before connecting; Token Market leaves existing API keys and OAuth credentials alone.
-See [Pi integration](docs/pi.md) for paths and installation requirements.
-
-MiniMax Code uses the fixed official 0.7.2 release package and separate active data/profile configuration. See [MiniMax Code integration](docs/minimax-code.md).
-
-Oh My Pi is installed separately with **安装** or `tokenmarket install oh-my-pi`.
-It uses the active OMP profile and `models.yml`/`models.yaml`; model roles and
-existing authentication stay intact. Open `/model` to choose a Token Market model.
-See [Oh My Pi integration](docs/oh-my-pi.md) for profiles, runtime libraries and conflicts.
-
-Kimi Code uses the official TypeScript **2.4.1** native release: **安装** or
-`tokenmarket install kimi-code`. Windows Git Bash is prepared or reused. Connect
-preserves existing defaults and Thinking settings and requires a real context limit
-for every imported model. See [Kimi Code integration](docs/kimi-code.md).
+- **Model selection**: Claude Code and Codex use the client's designated default model. DuMate Personal configures one model at a time. Other tools import compatible text-generation models; follow the tool's prompts to select one after connecting.
+- **Grok Build, Pi and Oh My Pi**: Use `/model` to select a Token Market model after connecting. If Pi already has a saved `tokenmarket` credential, log out of that provider in Pi before connecting.
+- **DuMate Personal**: Sign in to DuMate first, then fully quit it before connecting or disconnecting. Reopen it when done.
+- **DuMate Enterprise**: An administrator must enable custom models and model selection. Fully quit DuMate before connecting. Keep it closed while selecting and confirming a model test in Token Market, then reopen DuMate and select a passing model in the conversation.
 
 ## Manage connections
 
 | Action | Desktop | CLI |
 | --- | --- | --- |
-| Install a missing tool | **安装**, then complete any native steps | `tokenmarket install <tool>` |
-| Run in the current terminal | **Open Tool** | `tokenmarket run <tool>` |
-| Refresh installation status | Automatic refresh or **重新检测** | `tokenmarket status [tool]` |
-| View ownership, models and status | Open tool details | `tokenmarket status [tool]` |
-| Update a connection or change its billing workspace | Switch workspace, then **重新接入** | `tokenmarket reconnect <tool>` |
-| Restore managed configuration | **取消接入** | `tokenmarket disconnect <tool>` |
-| Test a model request | **测试**, choose a model and confirm | `tokenmarket test <tool> [--model <id>]` |
-| Sign out of shared management | Account menu → **退出登录** | `tokenmarket logout` |
+| Install a tool | **安装** (Install) | `tokenmarket install <tool>` |
+| Launch a terminal tool | **打开工具** (Open Tool) | `tokenmarket run <tool>` |
+| View installation and connection status | **重新检测** (Refresh) or tool details | `tokenmarket status [tool]` |
+| Update a connection | **重新接入** (Reconnect) | `tokenmarket reconnect <tool>` |
+| Restore configuration from before connection | **取消接入** (Disconnect) | `tokenmarket disconnect <tool>` |
+| Test a selected model | **测试** (Test), then choose a model | `tokenmarket test <tool> --model <id>` |
+| Sign out | Account menu → **退出登录** (Sign out) | `tokenmarket logout` |
 
-Connecting and reconnecting configure tools without sending model requests. **Testing sends one potentially billable model request.** For tools with several saved models, specify one with `--model <id>`.
+Replace `<tool>` with an ID from the table above. Omit the tool ID from `status` to list all tools. For tools with several configured models, specify the model to test with `--model <id>`.
 
-Installation also sends no model requests and does not connect automatically. The source CLI prints `tokenmarket run <tool>` for terminal installations, including private prefixes; this foreground action preserves the shell’s persistent PATH. An interrupted client-owned installation is repaired by retrying Install, including after restarting the client. Existing compatible installations are reused without automatic upgrades. GUI installers own their cancellation; **停止等待** only stops the client's monitoring. See [GUI installation](docs/gui-installation.md) for WorkBuddy and Harness behavior.
+Installation and connection are separate steps. Existing compatible installations are reused. If installation is interrupted, click **安装** (Install) again or retry the command. Cancel graphical installers in their own window; **停止等待** (Stop waiting) only stops Token Market from monitoring progress.
 
-Reconnecting asks for confirmation when the account or billing workspace changes. Disconnecting restores the fields managed by the connection and asks how to handle later edits. Signing out preserves tool configurations and saved credentials.
+### Switch workspaces
+
+List available workspaces, then switch using a workspace ID:
+
+```bash
+tokenmarket workspace
+tokenmarket workspace <workspace-id>
+```
+
+Switching the current workspace affects new connections. Existing tools keep their bound billing workspace. To change an existing tool's billing workspace, switch first, then run `tokenmarket reconnect <tool>`. Account or billing workspace changes require confirmation.
+
+### Disconnect and sign out
+
+Disconnecting restores the configuration fields managed by the connection. If you edited them after connecting, you can choose to keep your changes or restore the original values. Signing out preserves tool configurations and saved credentials. Use **取消接入** (Disconnect) to restore a tool's original configuration.
 
 ### SSH and noninteractive use
 
-For a machine without a browser:
+On a machine without a browser, run:
 
 ```bash
 tokenmarket login --no-browser
 ```
 
-Open the displayed URL on another device. The terminal waits for confirmation; the browser does not receive tool Keys or long-lived client credentials.
+Open the displayed authorization URL on another device and complete sign-in. The terminal waits for confirmation.
 
-Noninteractive commands require explicit choices when applicable:
+For noninteractive commands, supply explicit options when needed:
 
 | Situation | Option |
 | --- | --- |
-| Confirm a reconnect changes account or workspace | `--confirm-rebind` |
-| Recover after every local credential copy is lost | `--confirm-recovery` |
-| Keep later edits during disconnect | `--conflicts keep-current` |
-| Restore original values during disconnect | `--conflicts restore-original` |
+| Confirm an account or workspace change during reconnection | `--confirm-rebind` |
+| Recover a connection after all local credential copies are lost | `--confirm-recovery` |
+| Keep manual edits during disconnection | `--conflicts keep-current` |
+| Restore original values during disconnection | `--conflicts restore-original` |
 
-Use `tokenmarket <command> --help` for command options.
-
-## Credentials and recovery
-
-CLI and desktop reuse credentials for the same environment, account, workspace, device and tool. Saved Keys, connection records and restoration backups are encrypted. macOS and Windows use the system credential store; Linux prefers Secret Service and falls back to a passphrase-encrypted vault when unavailable. A locked or unreadable store returns an error.
-
-Reconnect validates the saved credential. Deleted or reset credentials can be replaced; disabled or expired credentials require action in the platform. Balance, network and permission errors do not create replacement Keys. If every local copy is lost, recovery asks you to confirm the affected connection and retires its old credential after the replacement configuration succeeds.
+Run `tokenmarket --help` or `tokenmarket <command> --help` for command details.
 
 ## Troubleshooting
 
 | Symptom | What to do |
 | --- | --- |
-| Installed tool is missing | Click **重新检测**, or make sure the tool is available in your terminal and reopen the terminal. |
-| Tool still uses old settings | Fully quit and reopen it. Restart the OpenClaw Gateway/session; check OpenCode project settings for overrides. |
-| App reports changed configuration or disables testing | Follow the prompts to repair or reconnect, then test again. |
-| npm reports a missing bundled binary | Reinstall with `npm install -g tokenmarket@1.0.0`. |
-| Need to restore settings | Use **取消接入** or `disconnect`. Encrypted restoration records are under `~/.tokenmarket/desktop-connections/`. |
+| An installed tool is missing | Click **重新检测** (Refresh). For CLI use, check that the tool runs from your terminal and reopen the terminal if needed. |
+| A tool still uses old settings | Fully quit and reopen it. Also restart the OpenClaw session; check OpenCode project settings for overrides. |
+| Configuration is marked as changed or testing is unavailable | Follow the prompts to repair or reconnect, then test again. |
+| npm reports a missing bundled binary | Reinstall with `npm install -g tokenmarket`. |
+| Credentials are invalid or unreadable | Follow the client prompts to sign in again or check credential status in Token Market. Unlock the system credential store if needed. |
+| You need to restore original settings | Click **取消接入** (Disconnect) or run `tokenmarket disconnect <tool>`. |
 
 ### macOS blocks the first launch
 
-The release is not signed and notarized with an Apple Developer ID. After verifying that the installer came from this repository's Releases, run:
+The installer uses ad-hoc signing and is not signed and notarized with an Apple Developer ID. After verifying that the installer came from this repository's Releases, run:
 
 ```bash
 xattr -cr "/Applications/Token Market.app"
 ```
 
-Then reopen the app. For internal builds and shared keychain signing, see the [macOS test signing guide](docs/macos-local-test-signing.md).
+Then reopen the app.
 
-## Development and release
+## Feedback
 
-- [CLI packaging and npm release](docs/cli-npm-release.md)
-- [Desktop management](docs/desktop-management.md) and [browser sign-in](docs/desktop-login.md)
-- [Tool inventory and configuration](docs/tool-inventory.md)
-- [Shared credential lifecycle](docs/adr/0004-shared-client-key-lifecycle.md)
-
-CLI and desktop use the same `rust/tokenmarket-core` and version number. Release tags `cli-v1.0.0` and `v1.0.0` point to the same commit and trigger their respective builds.
+Report problems through [GitHub Issues](https://github.com/FitBBC/token-market-cli/issues). Include your operating system, Token Market version, tool name and steps to reproduce. Remove API keys, sign-in credentials and other sensitive information before sharing screenshots or logs.

@@ -1,39 +1,11 @@
-# ADR 0002 — CLI Workspace Selection and OpenClaw Scope
+# Explicit workspace selection and OpenClaw scope
 
-> Client login, CLI and Key lifecycle rules are superseded by accepted ADR 0004. Historical behavior below is retained for context.
+The client displays its Current Workspace before establishing a Tool Connection.
+A connection retains its Bound Workspace when the current selection changes.
+Changing an existing connection's account or billing workspace requires explicit
+Reconnect confirmation; workspace selection alone never edits tool configuration.
 
-Date: 2026-10-27
-
-## Status
-Accepted
-
-2026-10-30: [ADR 0004](0004-shared-client-key-lifecycle.md), awaiting final design
-confirmation, replaces per-setup CLI authorization with the shared client login
-and workspace model. The legacy consent page will be removed. The OpenClaw/qclaw
-product-scope decision is unchanged.
-
-The desktop application's workspace-selection decision is superseded by
-[ADR 0003](0003-desktop-session-and-workspace-binding.md). The terminal CLI flow
-and the OpenClaw/qclaw scope decisions are not changed by that desktop decision.
-
-## Context
-ADR 0001 chose to bind the CLI API key to the user's default personal workspace to simplify the first release. The platform already models workspaces as an authorization and billing boundary, and users may have access to more than one workspace. A key silently created in an inferred workspace could therefore charge the wrong account or expose the wrong model policy.
-
-The original investigation also mentioned a possible `.qclaw` configuration path. OpenClaw and qclaw are separate products. Supporting qclaw would expand the product scope and require independently verified configuration behavior.
-
-## Decision
-- The CLI authorization page will let the logged-in user choose the workspace for the CLI API key.
-- The CLI setup session will record the selected workspace.
-- The API key will be created for exactly that workspace.
-- The first release supports only the domestic environment.
-- OpenClaw is supported.
-- qclaw is not supported and will not be detected, configured, or documented by this CLI.
-- OpenClaw configuration must use OpenClaw's own configuration discovery mechanism, with `OPENCLAW_CONFIG_PATH` and the official `~/.openclaw/openclaw.json` default path as the supported paths.
-
-## Consequences
-- Users can avoid creating a CLI key in the wrong workspace.
-- Setup session persistence must include `workspace_id`.
-- The authorization confirmation page must show the selected workspace before consent.
-- API key metadata remains workspace-bound and auditable.
-- No engineering time will be spent validating qclaw.
-- Any qclaw installation encountered on a user's machine is ignored.
+OpenClaw is a supported Tool; qclaw is a separate product and is not detected or
+configured. OpenClaw configuration discovery honors `OPENCLAW_CONFIG_PATH` and
+uses `~/.openclaw/openclaw.json` by default. Treating another product's directory
+as an OpenClaw installation could modify unrelated user settings.

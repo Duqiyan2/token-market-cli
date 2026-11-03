@@ -1,24 +1,24 @@
-# macOS 内测包共享钥匙串签名
+# macOS 本地构建与共享钥匙串签名
 
-CLI 和桌面是同一个 Token Market Client 的两个入口。macOS 内测包使用
+CLI 和桌面是同一个 Token Market Client 的两个入口。macOS 本地构建使用
 **固定自签名证书、相同的 designated requirement（DR）**，让两端都满足
 新建钥匙串记录的可信程序规则。无需 Apple Developer 账号，凭证仍存放在
 系统钥匙串，工具 Key、连接和恢复记录继续使用原有加密存储。
 
-这个方案只用于内部测试，不提供 Developer ID、公证或 Gatekeeper 信任。
+这个方案用于本地构建，不提供 Developer ID、公证或 Gatekeeper 信任。
 下载后首次打开应用的系统信任提示与钥匙串访问弹窗是两类不同问题。
 
-## 构建 macOS ARM 测试包
+## 构建 macOS ARM 客户端
 
 ```bash
-bash scripts/build-test-clients.sh
+bash scripts/build-local-clients.sh
 ```
 
 需要 Rust、Python 3、Xcode Command Line Tools 及 Tauri CLI。如果没有安装
 `cargo tauri`，可以通过 `TAURI_CLI_JS` 指向已安装的 `@tauri-apps/cli/tauri.js`。
-可传第一个参数指定空的输出目录。此脚本先构建测试环境 CLI 和 App，再做
+可传第一个参数指定空的输出目录。此脚本先构建 CLI 和 App，再做
 钥匙串互读测试、签名校验，最后生成 CLI、App、DMG 和签名摘要。
-单独的 `build-test-desktop.sh` 是底层构建步骤；要交付共享签名测试包，使用
+单独的 `build-local-desktop.sh` 是底层构建步骤；要交付共享签名包，使用
 这里的成对构建入口。
 
 默认身份保存在构建机器的
@@ -36,28 +36,28 @@ DMG 或其他交付包。丢失后重新生成证书会改变签名身份。
 
 共享 DR 同时检查证书指纹，并且只接受以下两个签名标识：
 
-- `cn.tokenmarket.setup.test`：桌面测试 App。
-- `cn.tokenmarket.setup.cli.test`：CLI 测试二进制。
+- `cn.tokenmarket.setup.test`：本地桌面 App。
+- `cn.tokenmarket.setup.cli.test`：本地 CLI 二进制。
 
 这不是“允许所有应用访问”。临时签名程序、其他证书签名程序，以及同一
 证书签名但标识不同的程序不满足规则。两端声明相同的 DR，且使用同一张
 长期保留的证书；仅更改文件名、目录或重新编译不会改变这套身份。
-测试和生产的会话仍按平台 URL 隔离，签名不改变凭证、Key、权限和计费协议。
+登录凭据按配置地址独立保存，签名不改变连接行为。
 
-打包只接受测试 App 标识，保留原签名中的 entitlements、flags、runtime，
+打包只接受文档列出的本地 App 标识，保留原签名中的 entitlements、flags、runtime，
 不添加共享访问组权限，不需要 provisioning profile。生成的签名摘要记录
 公开证书指纹、共享规则和 CLI/DMG SHA-256，不包含私钥或任何登录凭证。
 
 ## 已构建产物重新签名
 
-如果两个产物已是同一次测试环境源码构建，可直接复制、重新签名和制作 DMG。
+如果两个产物已是同一次源码构建，可直接复制、重新签名和制作 DMG。
 原始产物保持不变，输出目录必须为空：
 
 ```bash
 python3 scripts/macos-local-signing.py init
 python3 scripts/macos-local-signing.py smoke
 python3 scripts/macos-local-signing.py package \
-  --app 'src-tauri/target/release/bundle/macos/Token Market Test.app' \
+  --app 'src-tauri/target/release/bundle/macos/Token Market Local.app' \
   --cli rust/tokenmarket-cli/target/release/tokenmarket \
   --output dist/local-signed-clients
 ```
@@ -77,7 +77,7 @@ python3 scripts/macos-local-signing.py package \
 桌面登录后 CLI 复用、CLI 登录后桌面复用，以及更新后再次访问。
 
 **旧临时签名包创建的钥匙串记录保留原 ACL，新签名不能绕过其授权。**
-升级时可能仍出现一次迁移授权；CLI 和桌面可能各需授权一次。不会静默
+访问这些记录时可能仍出现一次授权；CLI 和桌面可能各需授权一次。不会静默
 删除旧会话、加密主密钥、工具 Key 或恢复记录来掩盖弹窗，也不会重发 Key。
 全新记录由这套共享签名身份创建后，两端正常互读不需要该授权弹窗。
 

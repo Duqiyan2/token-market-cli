@@ -91,8 +91,8 @@ fn denied_operations_never_create_a_successful_cache_entry() {
 
 #[test]
 fn separate_platform_stores_do_not_share_cached_credentials() {
-    let test = CachedDesktopCredentials::new(Arc::new(Store::default()));
-    let production = CachedDesktopCredentials::new(Arc::new(Store::default()));
-    test.write("test-only").unwrap();
-    assert!(production.read().unwrap().is_none());
+    let first = CachedDesktopCredentials::new(Arc::new(Store::default()));
+    let second = CachedDesktopCredentials::new(Arc::new(Store::default()));
+    first.write("fixture-only").unwrap();
+    assert!(second.read().unwrap().is_none());
 }

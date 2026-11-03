@@ -680,7 +680,7 @@ async fn enterprise_permissions_fail_closed_before_issuance_and_explicit_test() 
     permission_task.abort();
 }
 
-async fn environment_switch_fixture() -> (
+async fn origin_switch_fixture() -> (
     tempfile::TempDir,
     ToolInventory,
     PathBuf,
@@ -693,22 +693,22 @@ async fn environment_switch_fixture() -> (
     let root = tempfile::tempdir().unwrap();
     let inventory = fixture(root.path());
     let path = inventory.config_path(ToolId::DuMate);
-    let mut test_catalogue = catalogue();
-    test_catalogue["data"][1]["id"] = json!("glm-5.2");
-    let (test_url, _, test_task) = server(test_catalogue).await;
-    let mut production_catalogue = catalogue();
-    production_catalogue["data"]
+    let mut first_catalogue = catalogue();
+    first_catalogue["data"][1]["id"] = json!("glm-5.2");
+    let (first_url, _, first_task) = server(first_catalogue).await;
+    let mut second_catalogue = catalogue();
+    second_catalogue["data"]
         .as_array_mut()
         .unwrap()
         .push(json!({
             "id":"glm-5.2", "model_types":["TEXT_GENERATION"],
             "context_window_tokens":128000, "max_output_tokens":32000
         }));
-    let (production_url, _, production_task) = server(production_catalogue).await;
+    let (second_url, _, second_task) = server(second_catalogue).await;
     let directory = root.path().join("state");
-    let test_manager = support::manager(directory.clone(), test_url.clone(), test_url);
-    let production_manager = support::manager(directory, production_url.clone(), production_url);
-    let connected = test_manager
+    let first_manager = support::manager(directory.clone(), first_url.clone(), first_url);
+    let second_manager = support::manager(directory, second_url.clone(), second_url);
+    let connected = first_manager
         .connect(context(), ToolId::DuMate, &inventory, path.clone())
         .await
         .unwrap();
@@ -717,24 +717,24 @@ async fn environment_switch_fixture() -> (
         root,
         inventory,
         path,
-        test_manager,
-        production_manager,
+        first_manager,
+        second_manager,
         connected.key_id,
-        test_task,
-        production_task,
+        first_task,
+        second_task,
     )
 }
 
 #[tokio::test]
 async fn other_environment_connection_is_identified_and_cannot_be_tested() {
-    let (_root, _inventory, _path, test_manager, production, key_id, test_task, production_task) =
-        environment_switch_fixture().await;
+    let (_root, _inventory, _path, first_manager, second_manager, key_id, first_task, second_task) =
+        origin_switch_fixture().await;
     assert_eq!(
-        test_manager.summaries().unwrap()[0].1.state,
+        first_manager.summaries().unwrap()[0].1.state,
         "configured_untested"
     );
     assert!(
-        test_manager
+        first_manager
             .test_connection(
                 ToolId::DuMate,
                 &key_id,
@@ -748,11 +748,14 @@ async fn other_environment_connection_is_identified_and_cannot_be_tested() {
             .passed
     );
     assert_eq!(
-        production.summaries().unwrap()[0].1.state,
+        second_manager.summaries().unwrap()[0].1.state,
         "environment_mismatch"
     );
-    assert!(production.summaries().unwrap()[0].1.test_result.is_none());
-    let error = production
+    assert!(second_manager.summaries().unwrap()[0]
+        .1
+        .test_result
+        .is_none());
+    let error = second_manager
         .test_connection(
             ToolId::DuMate,
             &key_id,
@@ -764,8 +767,8 @@ async fn other_environment_connection_is_identified_and_cannot_be_tested() {
         .await
         .unwrap_err();
     assert!(error.to_string().contains("环境"));
-    test_task.abort();
-    production_task.abort();
+    first_task.abort();
+    second_task.abort();
 }
 
 #[tokio::test]
@@ -791,10 +794,10 @@ async fn unavailable_default_preserves_a_valid_existing_model() {
 }
 
 #[tokio::test]
-async fn reconnect_from_test_environment_selects_production_default_model() {
-    let (_root, inventory, path, test_manager, production, key_id, test_task, production_task) =
-        environment_switch_fixture().await;
-    let result = production
+async fn reconnect_to_another_origin_selects_its_default_model() {
+    let (_root, inventory, path, first_manager, second_manager, key_id, first_task, second_task) =
+        origin_switch_fixture().await;
+    let result = second_manager
         .reconnect(context(), ToolId::DuMate, &key_id, &inventory, path.clone())
         .await
         .unwrap();
@@ -803,15 +806,15 @@ async fn reconnect_from_test_environment_selects_production_default_model() {
     let configured: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     assert_eq!(configured["customLLMProvider"]["model"], "glm-5.3");
     assert_eq!(
-        production.summaries().unwrap()[0].1.state,
+        second_manager.summaries().unwrap()[0].1.state,
         "configured_untested"
     );
     assert_eq!(
-        test_manager.summaries().unwrap()[0].1.state,
+        first_manager.summaries().unwrap()[0].1.state,
         "environment_mismatch"
     );
-    test_task.abort();
-    production_task.abort();
+    first_task.abort();
+    second_task.abort();
 }
 
 #[tokio::test]

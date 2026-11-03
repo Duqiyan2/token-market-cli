@@ -26,7 +26,7 @@ current official product manually; Kimi's own documented migration is separate.
 
 Configuration is `$KIMI_CODE_HOME/config.toml`, otherwise
 `~/.kimi-code/config.toml`. Connect writes `[providers.tokenmarket]` with
-`type="openai"`, the gateway `/v1` URL and a literal `api_key`. It imports the
+`type="openai"`, the model API `/v1` URL and a literal `api_key`. It imports the
 Key-visible TEXT_GENERATION catalogue as `[models."tokenmarket/<id>"]` entries.
 Every model needs a positive `max_context_size`, from real catalogue
 `context_window_tokens` or a valid existing entry for the same provider/model.

@@ -43,7 +43,7 @@ command evidence without executing a version probe. Explicit Connect performs
 the compatibility check.
 
 Connect imports all compatible text models into the YAML dictionary
-`providers.tokenmarket.models`, sets `api` to the gateway `/v1`, an inline
+`providers.tokenmarket.models`, sets `api` to the model API `/v1`, an inline
 `api_key`, and `transport: chat_completions`. Existing `api_mode`/`apiMode`
 aliases are owned and restored too because they outrank transport. Each model's
 `context_length` is managed independently. A model without advertised context

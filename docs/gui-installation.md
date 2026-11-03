@@ -1,8 +1,7 @@
 # Graphical tool installation
 
-This workflow is implemented on the current source branch and is not included in
-the published Token Market 1.1.1 packages. Source/fixture checks and a native
-client compile are separate from installed-application and real Agent acceptance.
+Installation, source/fixture checks, native compilation and actual Agent runtime
+checks are separate verification steps.
 
 ## WorkBuddy
 
@@ -26,11 +25,11 @@ The user approved **exactly `0.2.1-rc.5` for Harness** as an exception to the st
 release policy. It is a release candidate, not a stable release. Other tools keep
 their stable-release rule.
 
-- macOS Apple Silicon: download the fixed official ZIP, verify the production
+- macOS Apple Silicon: download the fixed official ZIP, verify the official
   feed's SHA512, extract to staging and show its folder in Finder. Move the app
   into Applications. The client does not launch the app to initialize a profile
   or log in.
-- Windows x64: download the fixed official EXE, verify its production SHA512 and
+- Windows x64: download the fixed official EXE, verify its published SHA512 and
   open the native installation wizard.
 - Linux x64/arm64 and macOS Intel: install the fixed official npm CLI into a
   private prefix. Reuse a usable Node/npm runtime, or prepare a private official

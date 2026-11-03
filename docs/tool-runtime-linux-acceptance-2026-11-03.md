@@ -9,7 +9,7 @@ ordinary Ubuntu.
 This report records Linux installation evidence separately from actual Agent
 runtime evidence. The tested product CLI is source snapshot
 `e0578090d40237c39ca4907d96cb7d90d8576a3a`, CI run 41570682107,
-`npm-native-linux-arm64`, version 1.1.1. Its SHA256 is
+`npm-native-linux-arm64`. Its SHA256 is
 `a732bb28e31b61c96f38037af4a4f1ace2ac2832f18250989f9a8bc96582c4f4`,
 verified against the artifact manifest before execution.
 

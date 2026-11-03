@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Stable, certificate-pinned signatures for the macOS CLI/desktop test pair.
+"""Stable, certificate-pinned signatures for the macOS CLI/desktop local build pair.
 
-This is an internal-test identity, not Developer ID or a Gatekeeper bypass.
+A local signing identity does not provide Developer ID or Gatekeeper trust.
 Private signing material stays on the build machine, outside the repository.
 """
 import argparse
@@ -22,7 +22,7 @@ import tempfile
 
 APP_ID = "cn.tokenmarket.setup.test"
 CLI_ID = "cn.tokenmarket.setup.cli.test"
-IDENTITY_NAME = "Token Market Internal Test Signing"
+IDENTITY_NAME = "Token Market Local Signing"
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_IDENTITY = Path.home() / "Library/Application Support/Token Market/Local Signing"
 
@@ -102,7 +102,7 @@ def identity(directory, *, initialize=False):
                      "-P", password, "-T", "/usr/bin/codesign"], label="Import into private signing keychain")
                 run(["/usr/bin/security", "set-key-partition-list", "-S", "apple-tool:",
                      "-s", "-k", password, keychain], label="Authorize local signing tool")
-            ready.write_text(json.dumps({"certificateSha1": fingerprint(directory), "internalTestOnly": True}, indent=2) + "\n")
+            ready.write_text(json.dumps({"certificateSha1": fingerprint(directory), "localSigningOnly": True}, indent=2) + "\n")
             ready.chmod(0o600)
         if not keychain.is_file() or not password_path.is_file() or not certificate.is_file():
             raise RuntimeError("Signing identity is incomplete; it was not regenerated")
@@ -132,7 +132,7 @@ def sign(path, identifier, keychain, digest):
     run(["/usr/bin/codesign", "--force", "--sign", digest, "--keychain", keychain,
          "--timestamp=none", "--preserve-metadata=entitlements,flags,runtime",
          "--identifier", identifier, "--requirements",
-         "=designated => " + requirement(digest), path], label="Sign internal-test client")
+         "=designated => " + requirement(digest), path], label="Sign local client")
     verify(path, digest)
 
 
@@ -141,7 +141,7 @@ def package(args):
     with (source_app / "Contents/Info.plist").open("rb") as stream:
         info = plistlib.load(stream)
     if info.get("CFBundleIdentifier") != APP_ID:
-        raise RuntimeError("Only the test app can use the internal-test shared identity")
+        raise RuntimeError("App identifier does not match the local shared identity")
     if not source_cli.is_file():
         raise RuntimeError("CLI executable missing")
     for binary in (source_cli, source_app / "Contents/MacOS" / info["CFBundleExecutable"]):
@@ -156,25 +156,25 @@ def package(args):
     if any(output.iterdir()):
         raise RuntimeError("Output directory must be empty; existing artifacts were preserved")
     app = output / source_app.name
-    cli = output / f"tokenmarket-test-{cli_version[1]}-macos-arm64"
+    cli = output / f"tokenmarket-local-{cli_version[1]}-macos-arm64"
     run(["/usr/bin/ditto", source_app, app])
     shutil.copy2(source_cli, cli)
     with identity(args.identity_dir) as (keychain, digest):
         sign(app, APP_ID, keychain, digest)
         sign(cli, CLI_ID, keychain, digest)
-    dmg = output / f"TokenMarket-Test-{app_version}-arm64.dmg"
+    dmg = output / f"TokenMarket-Local-{app_version}-arm64.dmg"
     with tempfile.TemporaryDirectory(prefix="tokenmarket-dmg-") as staging:
         run(["/usr/bin/ditto", app, Path(staging) / app.name])
         (Path(staging) / "Applications").symlink_to("/Applications")
-        run(["/usr/bin/hdiutil", "create", "-volname", "Token Market Test", "-srcfolder", staging,
-             "-format", "UDZO", dmg], label="Create signed-test DMG")
+        run(["/usr/bin/hdiutil", "create", "-volname", "Token Market Local", "-srcfolder", staging,
+             "-format", "UDZO", dmg], label="Create locally signed DMG")
     run(["/usr/bin/hdiutil", "verify", dmg], label="Verify DMG integrity")
-    manifest = {"internalTestOnly": True, "certificateSha1": digest,
+    manifest = {"localSigningOnly": True, "certificateSha1": digest,
                 "sourceApp": str(source_app), "sourceCli": str(source_cli),
                 "sharedRequirement": requirement(digest),
                 "artifacts": {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in (cli, dmg)}}
     (output / "signing-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    print(f"Signed test pair and DMG: {output}")
+    print(f"Locally signed pair and DMG: {output}")
 
 
 def smoke(args):
@@ -221,17 +221,17 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("init", help="Create once; subsequent builds reuse the same private signing identity")
     commands.add_parser("smoke", help="Exercise dummy cross-process keychain access with UI disabled")
-    package_parser = commands.add_parser("package", help="Copy and sign an existing test app/CLI, then create a DMG")
+    package_parser = commands.add_parser("package", help="Copy and sign an existing local app/CLI, then create a DMG")
     package_parser.add_argument("--app", type=Path, required=True)
     package_parser.add_argument("--cli", type=Path, required=True)
     package_parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if sys.platform != "darwin":
-        parser.error("Local test signing requires macOS")
+        parser.error("Local signing requires macOS")
     os.umask(0o077)
     if args.command == "init":
         with identity(args.identity_dir, initialize=True) as (_, digest):
-            print(f"Stable internal-test certificate: {digest}")
+            print(f"Stable local signing certificate: {digest}")
     elif args.command == "smoke":
         smoke(args)
     else:

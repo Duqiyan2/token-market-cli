@@ -67,7 +67,7 @@ async fn platform(replies: Vec<(&'static str, Value)>) -> (String, tokio::task::
 }
 
 fn saved() -> String {
-    json!({"session_token":"dedicated-desktop-secret", "expires_at":"2098-01-01T00:00:00Z", "user":{"id":"old-user","name":"Old account"},"default_workspace":{"id":"old-space","name":"Old workspace"},"web_origin":"https://test.tokensapi.cn"}).to_string()
+    json!({"session_token":"dedicated-desktop-secret", "expires_at":"2098-01-01T00:00:00Z", "user":{"id":"old-user","name":"Old account"},"default_workspace":{"id":"old-space","name":"Old workspace"},"web_origin":"https://console.example.com"}).to_string()
 }
 fn context() -> Value {
     json!({"success":true,"data":{"expires_at":"2099-01-01T00:00:00Z","user":{"id":"old-user","name":"Old account"},"default_workspace":{"id":"new-default","name":"Updated default"}}})
@@ -99,7 +99,7 @@ async fn restart_renews_private_desktop_credential_and_leaves_existing_connectio
     assert_eq!(session.default_workspace.id, "new-default");
     assert_eq!(
         session.web_origin.as_deref(),
-        Some("https://test.tokensapi.cn")
+        Some("https://console.example.com")
     );
     assert_eq!(session.expires_at, "2099-01-01T00:00:00Z");
     assert_eq!(std::fs::read(connection).unwrap(), record);

@@ -1195,38 +1195,34 @@ async fn a_second_process_cannot_issue_a_key_while_an_operation_holds_the_device
 }
 
 #[tokio::test]
-async fn test_and_production_platforms_never_reuse_each_others_saved_keys() {
+async fn different_service_origins_never_reuse_each_others_saved_keys() {
     let root = tempdir().unwrap();
     let inv = inventory(root.path());
     let path = root.path().join("settings.json");
-    let production = platform(path.clone(), false).await;
-    let test = platform(path.clone(), false).await;
+    let first = platform(path.clone(), false).await;
+    let second = platform(path.clone(), false).await;
     let directory = root.path().join("state");
-    let prod_manager = support::manager(
-        directory.clone(),
-        production.url.clone(),
-        production.url.clone(),
-    );
-    let test_manager = support::manager(directory, test.url.clone(), test.url.clone());
-    prod_manager
+    let first_manager = support::manager(directory.clone(), first.url.clone(), first.url.clone());
+    let second_manager = support::manager(directory, second.url.clone(), second.url.clone());
+    first_manager
         .connect(context("a"), ToolId::ClaudeCode, &inv, path.clone())
         .await
         .unwrap();
     assert!(
-        !test_manager
+        !second_manager
             .reconnect(context("a"), ToolId::ClaudeCode, "1001", &inv, path.clone())
             .await
             .unwrap()
             .key_reused
     );
     assert!(
-        prod_manager
+        first_manager
             .reconnect(context("a"), ToolId::ClaudeCode, "1001", &inv, path)
             .await
             .unwrap()
             .key_reused
     );
-    for server in [&production, &test] {
+    for server in [&first, &second] {
         assert_eq!(
             server
                 .requests

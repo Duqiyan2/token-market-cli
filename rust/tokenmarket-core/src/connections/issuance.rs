@@ -235,7 +235,7 @@ impl ConnectionManager {
             .filter(|key| !key.is_empty())
             .context("接入服务未返回新的连接凭证")?;
         let key = self.key_from_reply(issued, raw)?;
-        // If this fails, leave the server's pending issuance recoverable. Never start another issuance silently.
+        // Preserve the pending operation on failure. Never start another issuance silently.
         self.remember_key(context, tool, device, &key)
             .context("无法保存连接信息，原连接未改变，请检查本地存储后重试")?;
         self.confirm_key(context, tool, device, &key, false).await?;

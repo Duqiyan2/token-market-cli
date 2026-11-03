@@ -83,7 +83,7 @@ pub struct InstallPlan {
     pub steps: Vec<InstallStep>,
 }
 
-/// The sole new external boundary: real downloads/processes in production, fixture installers in tests.
+/// Real downloads and processes use this boundary; tests supply fixture installers.
 pub trait InstallExecutor: Send + Sync {
     fn execute(
         &self,

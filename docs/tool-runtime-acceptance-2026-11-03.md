@@ -74,8 +74,8 @@ the accepted fixed RC exception; it is not represented as a stable release.
 ## Isolated setup and remaining compatibility limits
 
 The acceptance coordinator reused an existing platform Key and available model
-catalogue. This proves these runtime paths, not new-tool registration, new Key
-issuance, backend deployment or the complete product connection lifecycle.
+catalogue. This proves these runtime paths, rather than new credential issuance or the
+complete product connection lifecycle.
 The eleven CLI runs used isolated HOME/profile environments. WorkBuddy's actual
 GUI reused its existing connection and selected `glm-5.3`, with a new temporary
 workspace and test conversation; its existing model/Key configuration was not

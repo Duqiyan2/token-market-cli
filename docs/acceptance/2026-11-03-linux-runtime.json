@@ -19,7 +19,6 @@
     "ci_run": 41570682107,
     "name": "npm-native-linux-arm64",
     "id": 13201197939,
-    "version": "tokenmarket 1.1.1",
     "sha256": "a732bb28e31b61c96f38037af4a4f1ace2ac2832f18250989f9a8bc96582c4f4"
   },
   "isolation": {
@@ -36,7 +35,6 @@
     "ci_run": 41570682107,
     "artifact": "npm-native-linux-arm64",
     "artifact_id": 13201197939,
-    "client_version": "1.1.1",
     "client_sha256": "a732bb28e31b61c96f38037af4a4f1ace2ac2832f18250989f9a8bc96582c4f4",
     "installations_completed": [
       {

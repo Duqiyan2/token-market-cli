@@ -206,7 +206,7 @@ impl ConnectionManager {
         self.client_login = Some(login);
         self
     }
-    /// Isolated persistence seam for tests; production uses the native OS vault.
+    /// Isolated persistence seam for tests; the client uses the native OS vault.
     pub fn with_credentials(
         directory: PathBuf,
         platform_url: String,

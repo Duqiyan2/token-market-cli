@@ -67,7 +67,7 @@ jobs:
         run: cargo test --manifest-path rust/tokenmarket-core/Cargo.toml --all-targets --no-fail-fast --locked
 
       # Opt in only on the hosted Windows runner. This writes/deletes one fake
-      # .invalid fixture through the production store and reads it in a new process.
+      # .invalid fixture through the native store and reads it in a new process.
       # Do not unlock/reconfigure the OS store or provide account credentials.
       - name: Smoke test real Windows credential persistence
         if: ${{ !cancelled() && runner.os == 'Windows' }}

@@ -2,7 +2,7 @@
 
 核实日期：2026-11-03。目标是让 DuMate 使用 Token Market 的模型。
 已实现桌面端和 CLI 共享接入，目标为官方 `1.0.89` 个人版；企业版另行适配。
-下文分别记录使用方式、实现依据和验证范围。当前修改尚未发布或部署。
+下文分别记录使用方式、实现依据和验证范围。使用前请确认客户端提供对应工具入口。
 
 ## 使用
 
@@ -14,11 +14,10 @@
 5. 取消接入前同样完全退出 DuMate，运行 `tokenmarket disconnect dumate`，
    再重新打开。发生手动修改时使用共享冲突处理流程选择保留或恢复。
 
-个人版一次配置一个模型，接入或重新接入时优先使用构建默认模型
-（正式包 `glm-5.3`，测试包 `glm-5.2`）；默认模型不可用时，保留目录中仍可用且
+个人版一次配置一个模型，接入或重新接入时优先使用客户端默认模型；
+默认模型不可用时，保留目录中仍可用且
 能力元数据齐全的原模型，再选择目录中首个有效文本模型。
-切换客户端环境不会自动改写工具配置：其他环境的连接显示“已接入其他环境”，
-归入“待接入”，并暂停连接测试；确认重新接入后才切换配置和模型。
+更换服务地址不会自动改写工具配置；需确认重新接入后才更新配置。
 上下文与输出限制来自 `context_window_tokens`、`max_output_tokens`，
 输出上限不超过上下文减一；没有有效元数据时保留原配置并报错。
 接入与安装不会自动调用模型或修改 DuMate 白名单、登录信息。
@@ -80,7 +79,7 @@ Go `cfg.Cfg.XDGConfigDir` 读取该环境值，`prefFilePath` 再拼接
 ```json
 {
   "customLLMProvider": {
-    "baseURL": "https://gateway.example/v1",
+    "baseURL": "https://api.example.com/v1",
     "apiKey": "<Token Market key>",
     "model": "<selected model id>",
     "contextLimit": 128000,
@@ -104,7 +103,7 @@ Go `cfg.Cfg.XDGConfigDir` 读取该环境值，`prefFilePath` 再拼接
 （`gateway_llm.go:624-625`）在个人版取出 `customLLMProvider` 后进入
 `legacy_custom` 路由；`customProviderRoute`（`:723-730`）从请求路径去掉
 `/v1` 和开头斜线，再拼接所配置的 Base URL，并使用所配置的模型与 API Key。
-所以本次协议为 OpenAI Chat Completions，网关 Base URL 应包含 `/v1`。
+所以本次协议为 OpenAI Chat Completions，模型 API Base URL 应包含 `/v1`。
 
 `modelConfigEnabled` 的已知用途是控制官方界面的配置入口。本次检查的
 `SetGatewayCustomLLMProvider`、`SavePersonalCustomModel`、
@@ -144,7 +143,7 @@ Base URL/API Key 的注册合同。这条 API 与本任务要求的模型调用�
 配置保留、重连复用 Key、取消恢复、账号切换后测试失效以及显式测试边界。
 桌面 UI 覆盖安装与接入分离、单模型测试选择器、重启提示。
 本次 Core 全量回归 `228 passed / 1 ignored`、桌面 UI `25 passed`；
-平台注册配套的 Key/会话测试 `69 passed`。CLI 测试与桌面原生编译检查通过。
+CLI 测试与桌面原生编译检查通过。
 
 另实际运行官方 `1.0.89.447` 的 `dumate-main-server`，使用独立临时 XDG 目录和
 本地 OpenAI 模拟端点，验证偏好加载、`legacy_custom` 模型/密钥覆盖、普通和流式转发。
@@ -152,23 +151,4 @@ macOS 沙箱禁止外网及读取 `/Users`，没有使用真实百度或 Token M
 见 [原生后端证据](acceptance/2026-11-03-dumate-macos-runtime.json)。
 此证据不等于完整 Agent 工具执行循环或真实 Token Market 模型验收。
 
-平台注册配套已加入 `llm-platform` 当前主工作区，将 `dumate` 加入
-`ClientToolCatalog.TOKEN_MARKET_TOOLS`，并覆盖 Key 生命周期和管理会话的工具隔离测试。
-该配套尚未部署；未注册 `dumate` 的平台会拒绝真实接入。
-本次使用已有共享登录，对国内正式站 `https://console-api.tokensapi.cn`
-只读调用 `POST /api/client/keys/inspect`（独立探测 device scope，不带模型凭据）：
-HTTP 200，但业务 `success=false`，返回工具作用域错误。
-没有调用 `issue`、`confirm`、`applied` 或模型接口；当前站点需先接受新增工具标识。
-本机真实 DuMate 配置尚未改写，真实模型请求、完整 Agent 流式/工具调用、
-Windows 原生安装/运行和打包发布仍需分别验收。
-
-### 测试包凭证校验失败的定位
-
-内测包实际使用 `https://console-api-test.tokensapi.cn`。同一共享登录的只读
-`keys/inspect` 对照中，`claude-code` 返回成功，而 `grok-build`、`dumate` 返回
-`success=false`、`message="desktop client cannot manage this tool"`。
-这是已部署 `DesktopAuthService.requireKeyTool` 的工具清单拒绝，尚未进入 Key 签发。
-客户端已将该已知作用域错误改为明确的服务更新提示；未知服务错误仍脱敏显示，
-不会直接透传后台内容。9 项协议回归与 4 项 DuMate 回归通过，验证原凭据和配置保留。
-实际服务拒绝仍需发布平台注册配套才能消除。见
-[只读对照证据](acceptance/2026-11-03-dumate-test-inspect.json)。
+真实模型请求、完整 Agent 工具调用和 Windows 原生安装/运行需分别验证。

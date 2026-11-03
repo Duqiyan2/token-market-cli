@@ -17,7 +17,7 @@ Installation preserves configuration and never starts Pi, connects or tests a mo
 
 Pi reads `PI_CODING_AGENT_DIR/models.json`, otherwise `~/.pi/agent/models.json`.
 Connect imports the Key-visible text-generation catalogue under
-`providers.tokenmarket`, using `openai-completions`, the gateway `/v1` URL, Bearer
+`providers.tokenmarket`, using `openai-completions`, the model API `/v1` URL, Bearer
 authentication and ID-selected model rows. Existing `settings.json` choices remain
 untouched. Open `/model` in Pi to choose a model after connecting.
 

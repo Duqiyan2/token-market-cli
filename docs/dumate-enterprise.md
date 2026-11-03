@@ -16,19 +16,19 @@
 5. 重新打开 DuMate 企业版，在会话模型列表中选择通过检查的 `Token Market · <模型 ID>`。配置与检查结果落盘，普通重启会保留。
 6. 取消接入前同样完全退出 DuMate；`tokenmarket disconnect dumate-enterprise` 只恢复本连接拥有的字段，保留其他模型、重排及未知字段。账户切换或权限撤销后仍可清理原文件。
 
-个人版 `dumate` 与企业版 `dumate-enterprise` 是独立连接和凭证范围，共用官方应用与安装锁。平台须将 `dumate-enterprise` 注册到 WebAPI/Core 共用的 `ClientToolCatalog`；本次代码已补齐注册，尚未部署。
+个人版 `dumate` 与企业版 `dumate-enterprise` 是独立连接和凭证范围，共用官方应用与安装锁。
 
 ## 实现与验证
 
 连接前、配置发布前、显式测试前与结果写回前，均使用 DuMate **当前活动登录槽**的 Cookie 查询两项企业权限。历史 profile 中保留的 Cookie 不能在退出登录后被重新启用。Cookie 只在内存解密，并仅发往当前企业来源的固定权限 GET；不会保存到 Token Market、写入日志或发送给 Token Market 服务。不会创建或修复 DuMate 的 `.cookie-key`。
 
-企业模型使用 `personal:tokenmarket-<凭证范围摘要>-<模型配置摘要>` 稳定标识。网关、Key 或模型连接元数据改变时，生成新的未测试条目；相同配置重新接入保留上游已完成的真实检查。恢复记录以 `modelKey` 定位，不依赖数组下标。`accessStatus`、检查时间和输出参数探测结果属于派生检查状态，不作为静态配置所有权字段。
+企业模型使用 `personal:tokenmarket-<凭证范围摘要>-<模型配置摘要>` 稳定标识。服务地址、Key 或模型连接元数据改变时，生成新的未测试条目；相同配置重新接入保留上游已完成的真实检查。恢复记录以 `modelKey` 定位，不依赖数组下标。`accessStatus`、检查时间和输出参数探测结果属于派生检查状态，不作为静态配置所有权字段。
 
 为适配下文的官方 UI 缺口，本实现的企业显式测试会发送带 `max_tokens` 的一次真实请求；仅收到无错误的完整助手文本响应后写入 `normal`、真实检查时间、`maxOutputTokensField=max_tokens` 和 `maxOutputTokensFieldSource=probe_accepted`。这项结果来自 Token Market 的实际请求，不表示调用了 DuMate 自身的应用内检查接口，也不代表完整 Agent 工具调用通过。
 
 已覆盖隔离回归：权限关闭/重定向/中途撤销、凭据损坏、账号切换、多个模型导入、确认费用前零调用、单模型检查通过/失败、重排与上游检查结果保存、取消接入恢复。另运行官方原生后端，验证企业文件加载、目录可见、初始未测试，以及模拟真实检查后保存的 `normal` 在重启后仍能读取。见[原生验证记录](acceptance/2026-11-03-dumate-enterprise-runtime.json)。所有请求均使用本机 mock 和虚拟凭据；真实企业权限、真实模型、完整 Agent 与 Windows 原生运行仍未验收。
 
-最终验证：核心 237 passed / 1 ignored，桌面 UI 27 passed；服务端 ClientKeyServiceTest 35、DesktopAuthServiceTest 36 全部通过，Redis 装配与两个 bootJar 构建通过，两个产物内均确认包含企业工具注册。
+最终验证：核心 237 passed / 1 ignored，桌面 UI 27 passed。
 
 ## 持久文件与隔离
 

@@ -31,20 +31,6 @@ design decision to this round.
 | Antigravity CLI | [CLI getting started](https://antigravity.google/docs/getting-started?tab=cli), [BYOK](https://antigravity.google/docs/install?tab=cli) | Official command `agy` is distinct from the IDE. BYOK uses Gemini protocol with a custom base URL and environment credential. |
 | Oh My Pi | [Official repository](https://github.com/can1357/oh-my-pi) | Official command `omp`; script/binary or Bun installation. Its provider configuration is `~/.omp/agent/models.yml`, distinct from Pi. Verify supported runtime/binary for the selected platform. |
 
-## Gemini gateway evidence
-
-Read-only inspection of the local `llm-gateway` repository found native inbound
-Gemini routes in `GeminiController.java`: `/v1` and `/v1beta` model
-`generateContent` and `streamGenerateContent`. Its Gemini entrance adapter handles
-the request shape and streaming flag; access authentication accepts query `key`
-and `x-goog-api-key`.
-
-This establishes a source-level protocol path, not usable model availability.
-Gemini CLI integration is now deferred by the user. The source does not establish
-the deployed revision, key-visible model endpoints,
-auxiliary API compatibility, or a successful real streaming/tool-use loop.
-Investigate actual failures before proposing a gateway protocol expansion.
-
 ## Gemini-family model selection findings
 
 These findings come from the current upstream documentation and `main` source.
