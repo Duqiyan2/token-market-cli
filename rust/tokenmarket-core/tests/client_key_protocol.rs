@@ -294,7 +294,8 @@ async fn unsupported_server_tool_explains_service_update_and_preserves_existing_
             .await
             .unwrap();
         let config_before = std::fs::read(&path).unwrap();
-        let keys_before = support::read_private(&root.path().join("state/keys.json"));
+        let saved_keys_path = root.path().join("state").join("keys.json");
+        let keys_before = support::read_private(&saved_keys_path);
         api.state.lock().unwrap().inspect_tool_error = Some(message);
         let error = manager
             .reconnect(
@@ -314,7 +315,7 @@ async fn unsupported_server_tool_explains_service_update_and_preserves_existing_
         assert!(!error.contains("稍后重试"));
         assert_eq!(std::fs::read(&path).unwrap(), config_before);
         assert!(
-            support::read_private(&root.path().join("state/keys.json")) == keys_before,
+            support::read_private(&saved_keys_path) == keys_before,
             "saved credential contents changed after a scope rejection"
         );
         assert_eq!(api.state.lock().unwrap().issues, 1);
