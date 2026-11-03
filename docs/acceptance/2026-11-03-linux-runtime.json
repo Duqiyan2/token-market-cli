@@ -1,0 +1,951 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-03",
+  "platform": {
+    "os": "Ubuntu 22.04.5 LTS",
+    "architecture": "arm64",
+    "kernel": "6.12.76-linuxkit",
+    "libc": {
+      "name": "glibc",
+      "version": "2.35"
+    },
+    "containerized": true,
+    "uid": 501,
+    "gid": 20,
+    "python": "3.10.12"
+  },
+  "client_source_revision": "e0578090d40237c39ca4907d96cb7d90d8576a3a",
+  "client_artifact": {
+    "ci_run": 41570682107,
+    "name": "npm-native-linux-arm64",
+    "id": 13201197939,
+    "version": "tokenmarket 1.1.1",
+    "sha256": "a732bb28e31b61c96f38037af4a4f1ace2ac2832f18250989f9a8bc96582c4f4"
+  },
+  "isolation": {
+    "ordinary_user": true,
+    "privileged": false,
+    "added_capabilities": [],
+    "host_pid_namespace": false,
+    "host_network": false,
+    "docker_socket": false,
+    "published_ports": []
+  },
+  "installation": {
+    "source": "e0578090d40237c39ca4907d96cb7d90d8576a3a",
+    "ci_run": 41570682107,
+    "artifact": "npm-native-linux-arm64",
+    "artifact_id": 13201197939,
+    "client_version": "1.1.1",
+    "client_sha256": "a732bb28e31b61c96f38037af4a4f1ace2ac2832f18250989f9a8bc96582c4f4",
+    "installations_completed": [
+      {
+        "tool": "claude-code",
+        "platform": "Linux arm64",
+        "version_output": "2.1.309 (Claude Code)",
+        "version_exit": 0,
+        "launcher_sha256": "9796dd26899337f687739a0b39a7353b639f062a3436a7b941fcf19a1b757a9b",
+        "install_exit": 0,
+        "install_elapsed_seconds": 761.337,
+        "client_source": "e0578090d40237c39ca4907d96cb7d90d8576a3a",
+        "source_commit": null,
+        "version_warning_update_available": false
+      },
+      {
+        "tool": "codex",
+        "platform": "Linux arm64",
+        "version_output": "codex-cli 0.166.0",
+        "version_exit": 0,
+        "launcher_sha256": "f2e6c980c937e734644bed1b4a9a018d3e63a0ccbe71aafc85c86a8c6e4b462a",
+        "install_exit": 0,
+        "install_elapsed_seconds": 260.148,
+        "client_source": "e0578090d40237c39ca4907d96cb7d90d8576a3a",
+        "source_commit": null,
+        "version_warning_update_available": false
+      },
+      {
+        "tool": "pi",
+        "platform": "Linux arm64",
+        "version_output": "1.4.0",
+        "version_exit": 0,
+        "launcher_sha256": "26507c6bbf0beef1c5ef109dea333ddb73c058f9f75fed1de13f4186d73e919e",
+        "install_exit": 0,
+        "install_elapsed_seconds": 491.821,
+        "client_source": "e0578090d40237c39ca4907d96cb7d90d8576a3a",
+        "source_commit": null,
+        "version_warning_update_available": false
+      },
+      {
+        "tool": "opencode",
+        "platform": "Linux arm64",
+        "version_output": "1.19.5",
+        "version_exit": 0,
+        "launcher_sha256": "dab85b46f4ea4813da5367997f99a60aab64a2118d58ebf552980e792747436c",
+        "install_exit": 0,
+        "install_elapsed_seconds": 260.82,
+        "client_source": "e0578090d40237c39ca4907d96cb7d90d8576a3a",
+        "source_commit": null,
+        "version_warning_update_available": false
+      },
+      {
+        "tool": "kimi-code",
+        "platform": "Linux arm64",
+        "version_output": "2.4.1",
+        "version_exit": 0,
+        "launcher_sha256": "32b2dbe67e4a610beb19b8b5cf44473b311d2d5a591fa181ccce65836c8a1ef5",
+        "install_exit": 0,
+        "install_elapsed_seconds": 249.956,
+        "client_source": "e0578090d40237c39ca4907d96cb7d90d8576a3a",
+        "source_commit": null,
+        "version_warning_update_available": false
+      },
+      {
+        "tool": "oh-my-pi",
+        "platform": "Linux arm64",
+        "version_output": "omp/18.15.0",
+        "version_exit": 0,
+        "launcher_sha256": "6d7d65030ba562d73cb0687b9710e0ac597b362a185d1911e7b211706dadd4ac",
+        "install_exit": 0,
+        "install_elapsed_seconds": 407.056,
+        "client_source": "e0578090d40237c39ca4907d96cb7d90d8576a3a",
+        "source_commit": null,
+        "version_warning_update_available": false
+      },
+      {
+        "tool": "openclaw",
+        "platform": "Linux arm64",
+        "version_output": "OpenClaw 2026.10.9 (8b18b55)",
+        "version_exit": 0,
+        "launcher_sha256": "c5d669e05d12c2fabc6cc3f4b5608f1b5be40278c81575109c52df00c0748346",
+        "install_exit": 0,
+        "install_elapsed_seconds": 246.114,
+        "client_source": "e0578090d40237c39ca4907d96cb7d90d8576a3a",
+        "source_commit": null,
+        "version_warning_update_available": false
+      },
+      {
+        "tool": "grok-build",
+        "platform": "Linux arm64",
+        "version_output": "grok 1.0.70 (f50904eaee6c)",
+        "version_exit": 0,
+        "launcher_sha256": "3aa36883574b263088e5addffe241f55430e8daaee1a0c4934b02180007a9761",
+        "install_exit": 0,
+        "install_elapsed_seconds": 60.298,
+        "client_source": "e0578090d40237c39ca4907d96cb7d90d8576a3a",
+        "source_commit": null,
+        "version_warning_update_available": false
+      },
+      {
+        "tool": "minimax-code",
+        "platform": "Linux arm64",
+        "version_output": "0.7.2",
+        "version_exit": 0,
+        "launcher_sha256": "012c8a2839c87234cd1b8f606098e863eeaa8d824cd7f828cfd126815831e62b",
+        "install_exit": 0,
+        "install_elapsed_seconds": 41.959,
+        "client_source": "e0578090d40237c39ca4907d96cb7d90d8576a3a",
+        "source_commit": null,
+        "version_warning_update_available": false
+      },
+      {
+        "tool": "deepseek-harness",
+        "platform": "Linux arm64",
+        "version_output": "0.2.1-rc.5",
+        "version_exit": 0,
+        "launcher_sha256": "a6bc4c5c019b1daf2d6536386afe6ed69438a64224c77d47ffd31e47c27acac6",
+        "install_exit": 0,
+        "install_elapsed_seconds": 219.801,
+        "client_source": "e0578090d40237c39ca4907d96cb7d90d8576a3a",
+        "source_commit": null,
+        "version_warning_update_available": false
+      },
+      {
+        "tool": "hermes",
+        "platform": "Linux arm64",
+        "version_output": "Hermes Agent v0.22.5 (2026.9.24) · stable · local bf0203a794a0",
+        "version_exit": 0,
+        "launcher_sha256": "51efa82ce6d74e48b8958349ecbd0a08540bda4e848db741a47762da71641a01",
+        "install_exit": 0,
+        "install_elapsed_seconds": 205.507,
+        "client_source": "e0578090d40237c39ca4907d96cb7d90d8576a3a",
+        "source_commit": "bf0203a794a07aac3ff764972ab9087baa4e4f4e",
+        "version_warning_update_available": true
+      }
+    ],
+    "current_attempts": [
+      {
+        "tool": "claude-code",
+        "stage": "completed",
+        "exit_code": 0,
+        "elapsed_seconds": 761.337
+      },
+      {
+        "tool": "codex",
+        "stage": "completed",
+        "exit_code": 0,
+        "elapsed_seconds": 260.148
+      },
+      {
+        "tool": "pi",
+        "stage": "completed",
+        "exit_code": 0,
+        "elapsed_seconds": 491.821
+      },
+      {
+        "tool": "opencode",
+        "stage": "completed",
+        "exit_code": 0,
+        "elapsed_seconds": 260.82
+      },
+      {
+        "tool": "kimi-code",
+        "stage": "completed",
+        "exit_code": 0,
+        "elapsed_seconds": 249.956
+      },
+      {
+        "tool": "oh-my-pi",
+        "stage": "completed",
+        "exit_code": 0,
+        "elapsed_seconds": 407.056
+      },
+      {
+        "tool": "openclaw",
+        "stage": "completed",
+        "exit_code": 0,
+        "elapsed_seconds": 246.114
+      },
+      {
+        "tool": "grok-build",
+        "stage": "completed",
+        "exit_code": 0,
+        "elapsed_seconds": 60.298
+      },
+      {
+        "tool": "minimax-code",
+        "stage": "completed",
+        "exit_code": 0,
+        "elapsed_seconds": 41.959
+      },
+      {
+        "tool": "deepseek-harness",
+        "stage": "completed",
+        "exit_code": 0,
+        "elapsed_seconds": 219.801
+      },
+      {
+        "tool": "hermes",
+        "stage": "completed",
+        "exit_code": 0,
+        "elapsed_seconds": 205.507
+      },
+      {
+        "tool": "workbuddy",
+        "stage": "completed",
+        "exit_code": 1,
+        "elapsed_seconds": 0.006
+      }
+    ],
+    "historical_attempts": [
+      {
+        "tool": "openclaw",
+        "archive": "openclaw.json.attempt-1",
+        "stage": "completed",
+        "exit_code": 1,
+        "elapsed_seconds": 623.531,
+        "interruption": null
+      },
+      {
+        "tool": "openclaw",
+        "archive": "openclaw.json.attempt-2",
+        "stage": "interrupted",
+        "exit_code": null,
+        "elapsed_seconds": null,
+        "interruption": "Docker backend filesystem event queue failure; engine exited255, oom=false"
+      },
+      {
+        "tool": "grok-build",
+        "archive": "grok-build.json.attempt-1",
+        "stage": "interrupted",
+        "exit_code": null,
+        "elapsed_seconds": null,
+        "interruption": "Docker backend filesystem event queue failure; engine exited255, oom=false"
+      },
+      {
+        "tool": "minimax-code",
+        "archive": "minimax-code.json.attempt-1",
+        "stage": "interrupted",
+        "exit_code": null,
+        "elapsed_seconds": null,
+        "interruption": "Docker backend filesystem event queue failure; engine exited255, oom=false"
+      },
+      {
+        "tool": "deepseek-harness",
+        "archive": "deepseek-harness.json.attempt-1",
+        "stage": "interrupted",
+        "exit_code": null,
+        "elapsed_seconds": null,
+        "interruption": "Docker backend filesystem event queue failure; engine exited255, oom=false"
+      },
+      {
+        "tool": "hermes",
+        "archive": "hermes.json.attempt-1",
+        "stage": "completed",
+        "exit_code": 1,
+        "elapsed_seconds": 3.921,
+        "interruption": null
+      },
+      {
+        "tool": "hermes",
+        "archive": "hermes.json.attempt-2",
+        "stage": "completed",
+        "exit_code": 1,
+        "elapsed_seconds": 1001.76,
+        "interruption": null
+      },
+      {
+        "tool": "hermes",
+        "archive": "hermes.json.attempt-3",
+        "stage": "completed",
+        "exit_code": 1,
+        "elapsed_seconds": 10.295,
+        "interruption": null
+      }
+    ],
+    "platform_contract_unsupported": [
+      "workbuddy"
+    ],
+    "cancelled_attempt": {
+      "tool": "openclaw",
+      "client_exit": 1,
+      "cancel_seconds": 0.733,
+      "peer_alive": true,
+      "other_installers_alive": {
+        "claude-code": true,
+        "pi": true
+      },
+      "retained_node_version": "v24.22.1",
+      "retry_terminal_result_available": true,
+      "retry_exit": 0
+    },
+    "setup_agent_model_calls": false,
+    "runtime_evidence_owned_by": "acceptance coordinator",
+    "infrastructure_interruption": {
+      "observed": "2026-11-03T03:54:25Z",
+      "error": "service fs failed: injecting event blocked for 60s",
+      "container_exit": 255,
+      "oom": false,
+      "recovery": "ordinary Docker Desktop restart and same container start",
+      "cause_attribution": "no claim of memory exhaustion or concurrency root cause"
+    },
+    "status": "supported CLI installation complete; runtime gates remain independent",
+    "unsupported_platform_check": {
+      "tool": "workbuddy",
+      "product_command_executed": true,
+      "exit_code": 1,
+      "expected_guidance": "No verified generic Linux package; use official UOS/Kylin application stores"
+    },
+    "hermes_public_cache_diagnosis": {
+      "fsck_exit": 3,
+      "missing_object_counts": {
+        "blob": 206476
+      },
+      "diagnostic_bytes": 38549238,
+      "partial_clone_promisor_flag_present_after_initial_copy": false,
+      "test_preparation_defect": true,
+      "private_profiles_accessed": false
+    },
+    "hermes_public_cache_repair": {
+      "source_commit": "bf0203a794a07aac3ff764972ab9087baa4e4f4e",
+      "official_source": "https://github.com/NousResearch/hermes-agent.git",
+      "transport": "HTTPS HTTP/1.1",
+      "depth": 1,
+      "fsck_exit": 0,
+      "archived_incomplete_cache": "checkout.public-cache-incomplete-20261103-041121",
+      "elapsed_seconds": 103.051,
+      "private_profile_accessed": false,
+      "model_called": false
+    },
+    "filesystem_probe": {
+      "macos_bind": {
+        "case_sensitive": false,
+        "case_alias_symlink_read_errno": 40,
+        "matches_eloop": true
+      },
+      "container_linux": {
+        "case_sensitive": true,
+        "case_alias_symlink_read_errno": null,
+        "matches_eloop": false
+      }
+    },
+    "hermes_public_tools_relocation": {
+      "original_path_preserved_as_symlink": true,
+      "case_sensitive_probe_verified": true,
+      "private_profiles_moved_or_read": false,
+      "keys_moved_or_read": false,
+      "sandbox_permissions_changed": false,
+      "product_source_changed": false,
+      "elapsed_seconds": 8.496
+    },
+    "hermes_official_rate_limit": {
+      "official_url": "https://raw.githubusercontent.com/NousResearch/hermes-agent/bf0203a794a07aac3ff764972ab9087baa4e4f4e/scripts/install.sh",
+      "product_attempt_exit": 1,
+      "inner_download_exit": 22,
+      "response_status_in_product_log": 429,
+      "product_attempt_elapsed_seconds": 10.295,
+      "public_head_status": 200,
+      "public_head_date": "2026-11-03T04:34:33Z",
+      "retry_after_present": false,
+      "cache_control": "max-age=300; not interpreted as Retry-After",
+      "cooldown_policy": "at least 120 seconds after failed product attempt, then one normal product retry",
+      "earliest_next_product_attempt_epoch": 1793680508.4608357,
+      "source_version_or_verification_changed": false,
+      "credential_accessed": false
+    },
+    "hermes_public_payload_archive": {
+      "archive_basename": "hermes-managed-tools-public.tar.gz",
+      "sha256": "bccc97c72f7a865afb278d8c88591b54c0cbe4803f5c9ec0390bedc2d4414c23",
+      "bytes": 304601656,
+      "contents": "official public Hermes managed dependency tools only; tar preserves Linux case and symbolic links",
+      "profiles_included": false,
+      "keys_included": false,
+      "source_revision": "bf0203a794a07aac3ff764972ab9087baa4e4f4e",
+      "elapsed_seconds": 30.725
+    }
+  },
+  "runtime_status": "ten independently verified; Codex environment blocked; WorkBuddy unsupported on ordinary Ubuntu",
+  "issue_27_closed": false,
+  "released": false,
+  "runtime": {
+    "schema_version": 1,
+    "scope": {
+      "environment": "Ubuntu22.04.5 container, Linux arm64, glibc2.35, kernel6.12.76-linuxkit, uid501",
+      "model": "glm-5.3",
+      "other_platforms": "not established; Windows deferred",
+      "acceptance_type": "real native read/result/final and streaming runtime only"
+    },
+    "verified_runtime_count": 10,
+    "environment_blocked_count": 1,
+    "tools": [
+      {
+        "tool": "claude-code",
+        "version": "2.1.309 (Claude Code)",
+        "model": "glm-5.3",
+        "verification": "passed",
+        "native_association": "call_b9c17696a050449ab54d83d1",
+        "read_tool_completed": true,
+        "expected_result_and_final_match": true,
+        "exit_code": 0,
+        "timed_out": false,
+        "started_at": 1793677682.4083326,
+        "elapsed_seconds": 24.437,
+        "stream_evidence": [
+          {
+            "status": 200,
+            "started_at": 1793677701.2561326,
+            "first_byte_at": 1793677702.9498935,
+            "elapsed_seconds": 2.007,
+            "data_frames": 18,
+            "text_delta_frames": 6,
+            "tool_delta_frames": 5,
+            "tool_names": [
+              "Read"
+            ],
+            "transport_end_warning": null
+          },
+          {
+            "status": 200,
+            "started_at": 1793677705.0244107,
+            "first_byte_at": 1793677706.31179,
+            "elapsed_seconds": 1.459,
+            "data_frames": 12,
+            "text_delta_frames": 7,
+            "tool_delta_frames": 0,
+            "tool_names": [],
+            "transport_end_warning": null
+          }
+        ]
+      },
+      {
+        "tool": "pi",
+        "version": "1.4.0",
+        "model": "glm-5.3",
+        "verification": "passed",
+        "native_association": "call_ce1584fe97b94c8296d4f8a4",
+        "read_tool_completed": true,
+        "expected_result_and_final_match": true,
+        "exit_code": 0,
+        "timed_out": false,
+        "started_at": 1793677686.6087527,
+        "elapsed_seconds": 17.454,
+        "stream_evidence": [
+          {
+            "status": 200,
+            "started_at": 1793677700.0393932,
+            "first_byte_at": 1793677702.4029074,
+            "elapsed_seconds": 2.369,
+            "data_frames": 11,
+            "text_delta_frames": 4,
+            "tool_delta_frames": 4,
+            "tool_names": [
+              "read"
+            ],
+            "transport_end_warning": null
+          },
+          {
+            "status": 200,
+            "started_at": 1793677702.767779,
+            "first_byte_at": 1793677703.4307296,
+            "elapsed_seconds": 0.989,
+            "data_frames": 14,
+            "text_delta_frames": 11,
+            "tool_delta_frames": 0,
+            "tool_names": [],
+            "transport_end_warning": null
+          }
+        ]
+      },
+      {
+        "tool": "opencode",
+        "version": "1.19.5",
+        "model": "glm-5.3",
+        "verification": "passed",
+        "native_association": "call_492ea95c37e840bd912b0864",
+        "read_tool_completed": true,
+        "expected_result_and_final_match": true,
+        "exit_code": 0,
+        "timed_out": false,
+        "started_at": 1793678222.678181,
+        "elapsed_seconds": 13.122,
+        "stream_evidence": [
+          {
+            "status": 200,
+            "started_at": 1793678230.4925225,
+            "first_byte_at": 1793678232.3597198,
+            "elapsed_seconds": 2.021,
+            "data_frames": 21,
+            "text_delta_frames": 13,
+            "tool_delta_frames": 5,
+            "tool_names": [
+              "read"
+            ],
+            "transport_end_warning": null
+          },
+          {
+            "status": 200,
+            "started_at": 1793678233.0355465,
+            "first_byte_at": 1793678235.3325388,
+            "elapsed_seconds": 2.453,
+            "data_frames": 9,
+            "text_delta_frames": 6,
+            "tool_delta_frames": 0,
+            "tool_names": [],
+            "transport_end_warning": null
+          }
+        ]
+      },
+      {
+        "tool": "kimi-code",
+        "version": "2.4.1",
+        "model": "glm-5.3",
+        "verification": "passed",
+        "native_association": "call_aeaeedad20814f12893748d5",
+        "read_tool_completed": true,
+        "expected_result_and_final_match": true,
+        "exit_code": 0,
+        "timed_out": false,
+        "started_at": 1793678251.409695,
+        "elapsed_seconds": 9.455,
+        "stream_evidence": [
+          {
+            "status": 200,
+            "started_at": 1793678254.2752154,
+            "first_byte_at": 1793678255.4808147,
+            "elapsed_seconds": 1.623,
+            "data_frames": 23,
+            "text_delta_frames": 16,
+            "tool_delta_frames": 4,
+            "tool_names": [
+              "Read"
+            ],
+            "transport_end_warning": null
+          },
+          {
+            "status": 200,
+            "started_at": 1793678255.995175,
+            "first_byte_at": 1793678257.7916145,
+            "elapsed_seconds": 2.307,
+            "data_frames": 26,
+            "text_delta_frames": 23,
+            "tool_delta_frames": 0,
+            "tool_names": [],
+            "transport_end_warning": null
+          }
+        ]
+      },
+      {
+        "tool": "oh-my-pi",
+        "version": "omp/18.15.0",
+        "model": "glm-5.3",
+        "verification": "passed",
+        "native_association": "call_5089c30a048842579a858a7c",
+        "read_tool_completed": true,
+        "expected_result_and_final_match": true,
+        "exit_code": 0,
+        "timed_out": false,
+        "started_at": 1793678304.967818,
+        "elapsed_seconds": 11.559,
+        "stream_evidence": [
+          {
+            "status": 200,
+            "started_at": 1793678309.791227,
+            "first_byte_at": 1793678311.3425696,
+            "elapsed_seconds": 1.985,
+            "data_frames": 24,
+            "text_delta_frames": 14,
+            "tool_delta_frames": 7,
+            "tool_names": [
+              "read"
+            ],
+            "transport_end_warning": null
+          },
+          {
+            "status": 200,
+            "started_at": 1793678315.1145444,
+            "first_byte_at": 1793678316.2863412,
+            "elapsed_seconds": 1.35,
+            "data_frames": 10,
+            "text_delta_frames": 7,
+            "tool_delta_frames": 0,
+            "tool_names": [],
+            "transport_end_warning": "ConnectionResetError"
+          }
+        ]
+      },
+      {
+        "tool": "codex",
+        "version": "codex-cli 0.166.0",
+        "model": "glm-5.3",
+        "verification": "blocked_environment",
+        "native_association": "command_execution items2,5,7: bwrap namespace failure",
+        "read_tool_completed": false,
+        "expected_result_and_final_match": false,
+        "exit_code": 0,
+        "timed_out": false,
+        "started_at": 1793677302.7699947,
+        "elapsed_seconds": 74.818,
+        "stream_evidence": [
+          {
+            "status": 200,
+            "started_at": 1793677316.1148252,
+            "first_byte_at": 1793677317.3657806,
+            "elapsed_seconds": 1.253,
+            "data_frames": 22,
+            "text_delta_frames": 4,
+            "tool_delta_frames": 7,
+            "tool_names": [
+              "exec_command"
+            ],
+            "transport_end_warning": null
+          },
+          {
+            "status": 200,
+            "started_at": 1793677319.8268008,
+            "first_byte_at": 1793677321.1355746,
+            "elapsed_seconds": 3.221,
+            "data_frames": 90,
+            "text_delta_frames": 63,
+            "tool_delta_frames": 11,
+            "tool_names": [
+              "exec_command"
+            ],
+            "transport_end_warning": null
+          },
+          {
+            "status": 200,
+            "started_at": 1793677343.2042851,
+            "first_byte_at": 1793677344.2396114,
+            "elapsed_seconds": 1.536,
+            "data_frames": 35,
+            "text_delta_frames": 11,
+            "tool_delta_frames": 13,
+            "tool_names": [
+              "exec_command"
+            ],
+            "transport_end_warning": null
+          },
+          {
+            "status": 200,
+            "started_at": 1793677353.3416104,
+            "first_byte_at": 1793677355.6117363,
+            "elapsed_seconds": 4.699,
+            "data_frames": 101,
+            "text_delta_frames": 88,
+            "tool_delta_frames": 0,
+            "tool_names": [],
+            "transport_end_warning": null
+          }
+        ]
+      },
+      {
+        "tool": "openclaw",
+        "version": "OpenClaw 2026.10.9 (8b18b55)",
+        "model": "glm-5.3",
+        "verification": "passed",
+        "native_association": "call_112ab569d3934a389e444f9d",
+        "read_tool_completed": true,
+        "expected_result_and_final_match": true,
+        "exit_code": 0,
+        "timed_out": false,
+        "started_at": 1793678530.9220433,
+        "elapsed_seconds": 21.531,
+        "stream_evidence": [
+          {
+            "status": 200,
+            "started_at": 1793678548.321008,
+            "first_byte_at": 1793678549.850461,
+            "elapsed_seconds": 1.699,
+            "data_frames": 10,
+            "text_delta_frames": 3,
+            "tool_delta_frames": 4,
+            "tool_names": [
+              "read"
+            ],
+            "transport_end_warning": null
+          },
+          {
+            "status": 200,
+            "started_at": 1793678550.1202173,
+            "first_byte_at": 1793678551.6030962,
+            "elapsed_seconds": 1.681,
+            "data_frames": 10,
+            "text_delta_frames": 7,
+            "tool_delta_frames": 0,
+            "tool_names": [],
+            "transport_end_warning": null
+          }
+        ]
+      },
+      {
+        "tool": "grok-build",
+        "version": "grok 1.0.70 (f50904eaee6c)",
+        "model": "glm-5.3",
+        "verification": "passed",
+        "native_association": "call_a19404948e7449f7ac1d71e5",
+        "read_tool_completed": true,
+        "expected_result_and_final_match": true,
+        "exit_code": 0,
+        "timed_out": false,
+        "started_at": 1793678584.695407,
+        "elapsed_seconds": 6.69,
+        "stream_evidence": [
+          {
+            "status": 200,
+            "started_at": 1793678585.3880582,
+            "first_byte_at": 1793678587.7783098,
+            "elapsed_seconds": 2.965,
+            "data_frames": 31,
+            "text_delta_frames": 23,
+            "tool_delta_frames": 5,
+            "tool_names": [
+              "read_file"
+            ],
+            "transport_end_warning": null
+          },
+          {
+            "status": 200,
+            "started_at": 1793678588.3650153,
+            "first_byte_at": 1793678590.2840104,
+            "elapsed_seconds": 2.989,
+            "data_frames": 47,
+            "text_delta_frames": 44,
+            "tool_delta_frames": 0,
+            "tool_names": [],
+            "transport_end_warning": null
+          }
+        ]
+      },
+      {
+        "tool": "minimax-code",
+        "version": "0.7.2",
+        "model": "glm-5.3",
+        "verification": "passed",
+        "native_association": "call_195b1d6cb3f943998628a90e",
+        "read_tool_completed": true,
+        "expected_result_and_final_match": true,
+        "exit_code": 0,
+        "timed_out": false,
+        "started_at": 1793678607.0504308,
+        "elapsed_seconds": 9.752,
+        "stream_evidence": [
+          {
+            "status": 200,
+            "started_at": 1793678610.1475797,
+            "first_byte_at": 1793678613.0789478,
+            "elapsed_seconds": 3.534,
+            "data_frames": 30,
+            "text_delta_frames": 23,
+            "tool_delta_frames": 4,
+            "tool_names": [
+              "read"
+            ],
+            "transport_end_warning": null
+          },
+          {
+            "status": 200,
+            "started_at": 1793678613.8889267,
+            "first_byte_at": 1793678615.564038,
+            "elapsed_seconds": 2.586,
+            "data_frames": 42,
+            "text_delta_frames": 39,
+            "tool_delta_frames": 0,
+            "tool_names": [],
+            "transport_end_warning": null
+          }
+        ],
+        "auxiliary_warnings": [
+          {
+            "operation": "input_tokens",
+            "status": 404,
+            "stream": false
+          }
+        ]
+      },
+      {
+        "tool": "deepseek-harness",
+        "version": "0.2.1-rc.5",
+        "model": "glm-5.3",
+        "verification": "passed",
+        "native_association": "call_19244d6d397c4bb5af8d722d",
+        "read_tool_completed": true,
+        "expected_result_and_final_match": true,
+        "exit_code": 0,
+        "timed_out": false,
+        "started_at": 1793678886.201241,
+        "elapsed_seconds": 6.46,
+        "stream_evidence": [
+          {
+            "status": 200,
+            "started_at": 1793678890.1835458,
+            "first_byte_at": 1793678891.037747,
+            "elapsed_seconds": 1.4,
+            "data_frames": 33,
+            "text_delta_frames": 25,
+            "tool_delta_frames": 5,
+            "tool_names": [
+              "read"
+            ],
+            "transport_end_warning": null
+          },
+          {
+            "status": 200,
+            "started_at": 1793678891.6220505,
+            "first_byte_at": 1793678892.6120615,
+            "elapsed_seconds": 1.011,
+            "data_frames": 10,
+            "text_delta_frames": 7,
+            "tool_delta_frames": 0,
+            "tool_names": [],
+            "transport_end_warning": null
+          }
+        ]
+      },
+      {
+        "tool": "hermes",
+        "version": "Hermes Agent v0.22.5 (2026.9.24) · stable · local bf0203a794a0",
+        "upstream_source_commit": "bf0203a794a07aac3ff764972ab9087baa4e4f4e",
+        "model": "glm-5.3",
+        "verification": "passed",
+        "native_association": "call_5e43ed12151c4e27b00a4486",
+        "read_tool_completed": true,
+        "expected_result_and_final_match": true,
+        "exit_code": 0,
+        "timed_out": false,
+        "started_at": 1793680847.6186445,
+        "elapsed_seconds": 30.018,
+        "stream_evidence": [
+          {
+            "status": 200,
+            "started_at": 1793680872.2048898,
+            "first_byte_at": 1793680873.978506,
+            "elapsed_seconds": 2.405,
+            "data_frames": 35,
+            "text_delta_frames": 26,
+            "tool_delta_frames": 6,
+            "tool_names": [
+              "read_file"
+            ],
+            "transport_end_warning": null
+          },
+          {
+            "status": 200,
+            "started_at": 1793680875.2494292,
+            "first_byte_at": 1793680876.638224,
+            "elapsed_seconds": 1.773,
+            "data_frames": 19,
+            "text_delta_frames": 16,
+            "tool_delta_frames": 0,
+            "tool_names": [],
+            "transport_end_warning": null
+          }
+        ],
+        "auxiliary_warnings": [
+          {
+            "operation": "metadata_discovery",
+            "status": 404,
+            "count": 5,
+            "stream": false
+          }
+        ]
+      },
+      {
+        "tool": "workbuddy",
+        "version": null,
+        "model": null,
+        "verification": "unsupported_platform",
+        "native_association": null,
+        "read_tool_completed": false,
+        "expected_result_and_final_match": false,
+        "exit_code": 1,
+        "stream_evidence": []
+      }
+    ],
+    "unsupported_platform_count": 1,
+    "supported_cli_installations_completed": 11
+  },
+  "configuration_scope": {
+    "coordinator_prepared_runtime_fixtures": true,
+    "core_provider_alias_wire_model_shapes_reviewed_against_product": true,
+    "all_profile_fields_written_by_product_connect": false,
+    "selected_model": "glm-5.3",
+    "fixture_only_initial_selection": [
+      "Kimi default_model for upstream auth preflight",
+      "Hermes provider/default model and title-model upgrade disabled"
+    ],
+    "empty_home_unconfigured_first_launch_established": false,
+    "product_default_selection_behavior_established": false,
+    "full_connect_disconnect_lifecycle_established": false
+  },
+  "review_scope": {
+    "independent_runtime_matrix_completed": true,
+    "coordinator_hermes_cross_check": true,
+    "final_documentation_review": "coordinator self-review; no product code changes"
+  },
+  "cleanup": {
+    "temporary_profile_paths_removed": 16,
+    "container_private_key_file_removed": true,
+    "owned_container_removed": true,
+    "observer_stopped": true,
+    "user_profiles_modified_by_cleanup": false,
+    "credential_scan": {
+      "scanned_regular_files": 191822,
+      "scanned_bytes": 6872971224,
+      "scan_complete": true,
+      "remaining_plaintext_key_files": [],
+      "read_errors": [],
+      "follows_symlinks": false
+    },
+    "fixtures_unchanged": true,
+    "fixtures_checked": 11
+  }
+}
