@@ -12,6 +12,7 @@ pub(super) enum ConfigDocument {
     Harness(Option<HarnessConfig>),
     MultiModel(MultiModelConfig),
     Provider(ProviderConfig),
+    DuMateEnterprise(super::dumate_enterprise::EnterpriseConfig),
 }
 
 pub(super) struct PreparedFile {
@@ -34,6 +35,7 @@ impl ConfigDocument {
     pub fn select_models(&self, models: &[Value]) -> Result<Vec<Value>> {
         match self {
             Self::Provider(provider) => provider.select_models(models),
+            Self::DuMateEnterprise(config) => config.select_models(models),
             _ => Ok(models.to_vec()),
         }
     }
@@ -61,6 +63,7 @@ impl ConfigDocument {
             ),
             Self::MultiModel(value) => return value.credential(gateway),
             Self::Provider(value) => return value.credential(gateway),
+            Self::DuMateEnterprise(value) => return value.credential(gateway),
             Self::Harness(value) => {
                 return Ok(value.as_ref().and_then(|value| value.credential(gateway)))
             }
@@ -75,6 +78,11 @@ impl ConfigDocument {
             .map(str::to_owned))
     }
     pub fn parse(tool: ToolId, before: &Option<Vec<u8>>, path: &Path) -> Result<Self> {
+        if tool == ToolId::DuMateEnterprise {
+            return Ok(Self::DuMateEnterprise(
+                super::dumate_enterprise::EnterpriseConfig::parse(before)?,
+            ));
+        }
         if matches!(
             tool,
             ToolId::Hermes
@@ -101,6 +109,11 @@ impl ConfigDocument {
             if sibling.exists() {
                 bail!("OpenCode 同时存在 JSON 与 JSONC 配置，请先确认唯一生效配置")
             }
+        }
+        if tool == ToolId::DuMateEnterprise {
+            return Ok(Self::DuMateEnterprise(
+                super::dumate_enterprise::EnterpriseConfig::parse(before)?,
+            ));
         }
         if matches!(
             tool,
@@ -193,6 +206,7 @@ impl ConfigDocument {
         match self {
             Self::MultiModel(config) => config.apply(gateway, key, models),
             Self::Provider(config) => config.apply(gateway, key, models),
+            Self::DuMateEnterprise(config) => config.apply(gateway, key, models),
             Self::Harness(config) => {
                 let mut files = config
                     .take()

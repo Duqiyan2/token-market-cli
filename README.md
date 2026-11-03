@@ -90,6 +90,7 @@ Choose a tool in the app, or use its ID in CLI commands:
 | Oh My Pi | `oh-my-pi` |
 | Kimi Code | `kimi-code` |
 | Baidu DuMate Personal | `dumate` |
+| Baidu DuMate Enterprise | `dumate-enterprise` |
 
 Claude Code and Codex use `glm-5.3` in production (`glm-5.2` in test builds). DuMate Personal configures one model; other tools receive the compatible text-generation model catalogue.
 
@@ -98,6 +99,15 @@ fully quit it, then connect with a source build using `tokenmarket connect dumat
 or the desktop action. Reopen DuMate to apply the configuration. Disconnect also
 requires quitting DuMate and restores the original custom provider. The platform
 must register the `dumate` tool ID before live connection. See [DuMate notes](docs/dumate.md).
+
+DuMate Enterprise is a separate connection (`tokenmarket connect dumate-enterprise`).
+Sign in to the enterprise account and fully quit DuMate first. Both administrator
+permissions (custom models and model selection) must be enabled; Token Market
+checks them with the current DuMate session against that enterprise origin. Models
+are imported without a paid probe. Keep DuMate fully closed and explicitly test a selected model in Token Market
+(`tokenmarket test dumate-enterprise --model <id>`). The real result is persisted
+for that model. Reopen DuMate and choose a passing model in the conversation. The platform must register the
+`dumate-enterprise` tool ID. See [enterprise notes](docs/dumate-enterprise.md).
 
 Grok Build can be installed with **安装** in the app or `tokenmarket install grok-build`.
 Installation does not connect or test a model. After connecting, restart Grok and

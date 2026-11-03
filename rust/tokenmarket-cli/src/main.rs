@@ -301,6 +301,9 @@ async fn run() -> Result<()> {
                     record.models.join(", ")
                 )
             }
+            if tool == tokenmarket_core::ToolId::DuMateEnterprise {
+                println!("请先完全退出 DuMate。测试会保存所选企业模型的真实检查状态，通过后重新打开 DuMate 并选择该模型。");
+            }
             println!(
                 "正在测试现有连接，可能产生少量费用；计费空间：{}",
                 record.bound_workspace.name

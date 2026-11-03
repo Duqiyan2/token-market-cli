@@ -61,6 +61,12 @@ fn catalogue() -> Value {
 async fn server(
     catalogue: Value,
 ) -> (String, Arc<Mutex<Vec<String>>>, tokio::task::JoinHandle<()>) {
+    server_with_revocation(catalogue, None).await
+}
+async fn server_with_revocation(
+    catalogue: Value,
+    revoke: Option<Arc<std::sync::atomic::AtomicU8>>,
+) -> (String, Arc<Mutex<Vec<String>>>, tokio::task::JoinHandle<()>) {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
@@ -93,11 +99,17 @@ async fn server(
             }
             let request = String::from_utf8(bytes).unwrap();
             let response = if request.starts_with("GET /v1/models ") {
+                if let Some(grants) = &revoke {
+                    grants.store(0, std::sync::atomic::Ordering::SeqCst);
+                }
                 catalogue.clone()
             } else if request.starts_with("POST /v1/chat/completions ") {
-                json!({"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"OK"}}]})
+                catalogue.get("_mock_chat_response").cloned().unwrap_or_else(|| json!({"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"OK"}}]}))
             } else {
-                assert!(request.contains("\"tool\":\"dumate\""));
+                assert!(
+                    request.contains("\"tool\":\"dumate\"")
+                        || request.contains("\"tool\":\"dumate-enterprise\"")
+                );
                 json!({"success":true,"data":{"api_key":"sk-dumate-fixture","key_id":"9030","owner":{"id":"u1","name":"Ada"},"bound_workspace":{"id":"42","name":"Research"}}})
             };
             captured.lock().unwrap().push(request);
@@ -358,6 +370,316 @@ async fn wrong_account_version_or_malformed_preferences_fail_before_key_issuance
     assert!(!root.path().join("state/keys.json").exists());
 }
 
+fn enterprise_auth(home: &Path, user: &str, origin: &str, profile_id: &str, cookies: Value) {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
+    let key = [17_u8; 32];
+    let nonce = [29_u8; 12]; // fixture only, never used outside this isolated test directory
+    let mut encrypted = serde_json::to_vec(&cookies).unwrap();
+    let tag = LessSafeKey::new(UnboundKey::new(&AES_256_GCM, &key).unwrap())
+        .seal_in_place_separate_tag(
+            Nonce::assume_unique_for_key(nonce),
+            Aad::empty(),
+            &mut encrypted,
+        )
+        .unwrap();
+    let mut blob = nonce.to_vec();
+    blob.extend_from_slice(tag.as_ref());
+    blob.extend(encrypted);
+    write(
+        &data(home).join("auth.json"),
+        &json!({
+            "activeProviderType":"enterprise", "activeProfileId":profile_id, "enterpriseApiBaseUrl":origin, "cookies": STANDARD.encode(&blob),
+            "accountProfiles":[{"profileId":profile_id,"loginType":"enterprise","bceUserId":user,
+                "enterpriseApiBaseUrl":origin,"encryptedCookies":STANDARD.encode(&blob)}]
+        }),
+    );
+    std::fs::write(data(home).join(".cookie-key"), key).unwrap();
+}
+fn enterprise_cookies() -> Value {
+    json!([
+        {"name":"session","value":"dummy-enterprise-session","domain":"127.0.0.1","path":"/","secure":false},
+        {"name":"bce-user-info","value":"\"dummy-csrf\"","domain":"127.0.0.1","path":"/api"},
+        {"name":"wrong-domain","value":"exclude","domain":"elsewhere.invalid","path":"/"},
+        {"name":"wrong-path","value":"exclude","domain":"127.0.0.1","path":"/private"},
+        {"name":"expired","value":"exclude","domain":"127.0.0.1","expirationDate":1,"path":"/"},
+        {"name":"secure-only","value":"exclude","domain":"127.0.0.1","secure":true,"path":"/"}
+    ])
+}
+async fn permission_server() -> (
+    String,
+    Arc<std::sync::atomic::AtomicU8>,
+    Arc<Mutex<Vec<String>>>,
+    tokio::task::JoinHandle<()>,
+) {
+    use std::sync::atomic::{AtomicU8, Ordering};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let grants = Arc::new(AtomicU8::new(3));
+    let state = grants.clone();
+    let requests = Arc::new(Mutex::new(vec![]));
+    let captured = requests.clone();
+    let task = tokio::spawn(async move {
+        loop {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut bytes = vec![0; 8192];
+            let n = socket.read(&mut bytes).await.unwrap();
+            let request = String::from_utf8(bytes[..n].to_vec()).unwrap();
+            assert!(request.starts_with("GET /api/dumate-enterprise/app/v1/model"));
+            assert!(!request.to_ascii_lowercase().contains("authorization:"));
+            assert!(request.contains("session=dummy-enterprise-session"));
+            assert!(request
+                .to_ascii_lowercase()
+                .contains("csrftoken: dummy-csrf"));
+            assert!(!request.contains("exclude"));
+            let white = request.starts_with("GET /api/dumate-enterprise/app/v1/modelwhite/");
+            let flags = state.load(Ordering::SeqCst);
+            let body = if white {
+                json!({"switchs":{"model_controller":flags&2!=0}})
+            } else {
+                json!({"appCreateModelEnabled":flags&1!=0})
+            }
+            .to_string();
+            let status = if flags & 4 != 0 {
+                "302 Found\r\nLocation: https://elsewhere.invalid/"
+            } else {
+                "200 OK"
+            };
+            captured.lock().unwrap().push(request);
+            socket.write_all(format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
+        }
+    });
+    (url, grants, requests, task)
+}
+
+#[tokio::test]
+async fn enterprise_imports_multiple_untested_models_and_restores_after_vendor_probe_and_reorder() {
+    let root = tempfile::tempdir().unwrap();
+    let inventory = fixture(root.path());
+    let (enterprise, _, permissions, permission_task) = permission_server().await;
+    enterprise_auth(
+        root.path(),
+        "enterprise-user",
+        &enterprise,
+        "tenant-a",
+        enterprise_cookies(),
+    );
+    let tool = ToolId::DuMateEnterprise;
+    let path = inventory.config_path(tool);
+    assert!(path.ends_with("enterprise-user/config/desktop-main/personal-models.json"));
+    assert!(inventory.is_installed(tool));
+    let unrelated = json!({"modelKey":"personal:my-model-12345678","modelID":"mine","future":true});
+    write(&path, &json!([unrelated]));
+    let personal = path.with_file_name("dumate-app.json");
+    write(
+        &personal,
+        &json!({"customLLMProvider":{"model":"keep-personal"}}),
+    );
+    let (url, requests, task) = server(catalogue()).await;
+    let manager = support::manager(root.path().join("state"), url.clone(), url);
+    let connection = manager
+        .connect(context(), tool, &inventory, path.clone())
+        .await
+        .unwrap();
+    assert_eq!(connection.models, ["glm-5.3", "existing"]);
+    assert_eq!(permissions.lock().unwrap().len(), 4); // before issuance and before publish
+    let mut configured: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(configured.as_array().unwrap().len(), 3);
+    for row in configured.as_array().unwrap().iter().skip(1) {
+        assert_eq!(row["protocol"], "openai_chat_completions");
+        assert!(row.get("accessStatus").is_none());
+        assert!(row.get("maxOutputTokensFieldSource").is_none());
+        assert_eq!(row["apiKey"], "sk-dumate-fixture");
+        assert_eq!(row["modelCategory"], "LLM");
+    }
+    // The official checker owns these dynamic results. Reconnect must preserve them.
+    configured[1]["accessStatus"] = json!("normal");
+    configured[1]["connectionCheckedAt"] = json!(123);
+    configured[1]["maxOutputTokensField"] = json!("max_tokens");
+    configured[1]["maxOutputTokensFieldSource"] = json!("probe_accepted");
+    configured.as_array_mut().unwrap().reverse();
+    write(&path, &configured);
+    let again = manager
+        .reconnect(
+            context(),
+            tool,
+            &connection.key_id,
+            &inventory,
+            path.clone(),
+        )
+        .await
+        .unwrap();
+    assert!(again.key_reused);
+    let after: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(after, configured);
+    assert!(requests
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|r| !r.starts_with("POST /v1/chat/")));
+    // Only a confirmed real probe activates the selected imported model.
+    assert!(manager
+        .test_connection(
+            tool,
+            &connection.key_id,
+            ConnectionTestRequest {
+                confirmed: false,
+                model: Some("existing".into())
+            }
+        )
+        .await
+        .is_err());
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        serde_json::to_vec_pretty(&after).unwrap()
+    );
+    let checked = manager
+        .test_connection(
+            tool,
+            &connection.key_id,
+            ConnectionTestRequest {
+                confirmed: true,
+                model: Some("existing".into()),
+            },
+        )
+        .await
+        .unwrap();
+    assert!(checked.passed);
+    let activated: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let selected = activated
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["modelID"] == "existing")
+        .unwrap();
+    assert_eq!(selected["accessStatus"], "normal");
+    assert_eq!(selected["maxOutputTokensField"], "max_tokens");
+    assert_eq!(selected["maxOutputTokensFieldSource"], "probe_accepted");
+    assert_eq!(
+        requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|r| r.starts_with("POST /v1/chat/"))
+            .count(),
+        1
+    );
+    assert_eq!(
+        activated
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["modelID"] == "glm-5.3")
+            .unwrap()["accessStatus"],
+        "normal"
+    ); // previous vendor probe preserved
+       // Same user/path on another enterprise profile is a different identity.
+    enterprise_auth(
+        root.path(),
+        "enterprise-user",
+        &enterprise,
+        "tenant-b",
+        enterprise_cookies(),
+    );
+    assert_eq!(
+        manager
+            .summaries()
+            .unwrap()
+            .iter()
+            .find(|(id, _)| *id == tool)
+            .unwrap()
+            .1
+            .state,
+        "configuration_changed"
+    );
+    assert!(manager
+        .test_connection(
+            tool,
+            &connection.key_id,
+            ConnectionTestRequest {
+                confirmed: true,
+                model: Some("existing".into())
+            }
+        )
+        .await
+        .is_err());
+    // Cleanup is permitted even after switching accounts and revocation.
+    manager
+        .disconnect(tool, &connection.key_id, None, DisconnectRequest::default())
+        .await
+        .unwrap();
+    let restored: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    assert_eq!(restored, json!([unrelated]));
+    let kept: Value = serde_json::from_slice(&std::fs::read(personal).unwrap()).unwrap();
+    assert_eq!(kept["customLLMProvider"]["model"], "keep-personal");
+    task.abort();
+    permission_task.abort();
+}
+
+#[tokio::test]
+async fn enterprise_permissions_fail_closed_before_issuance_and_explicit_test() {
+    use std::sync::atomic::Ordering;
+    let root = tempfile::tempdir().unwrap();
+    let inventory = fixture(root.path());
+    let (enterprise, grants, permissions, permission_task) = permission_server().await;
+    enterprise_auth(
+        root.path(),
+        "enterprise-user",
+        &enterprise,
+        "tenant-a",
+        enterprise_cookies(),
+    );
+    let (url, requests, task) = server(catalogue()).await;
+    let manager = support::manager(root.path().join("state"), url.clone(), url);
+    let tool = ToolId::DuMateEnterprise;
+    let path = inventory.config_path(tool);
+    for flags in [0, 1, 2, 7] {
+        // either missing grant or HTTP redirect
+        grants.store(flags, Ordering::SeqCst);
+        assert!(manager
+            .connect(context(), tool, &inventory, path.clone())
+            .await
+            .is_err());
+        assert!(!path.exists());
+        assert!(requests.lock().unwrap().is_empty());
+    }
+    grants.store(3, Ordering::SeqCst);
+    let connection = manager
+        .connect(context(), tool, &inventory, path.clone())
+        .await
+        .unwrap();
+    let before = std::fs::read(&path).unwrap();
+    let request_count = requests.lock().unwrap().len();
+    grants.store(0, Ordering::SeqCst);
+    assert!(manager
+        .test_connection(
+            tool,
+            &connection.key_id,
+            ConnectionTestRequest {
+                confirmed: true,
+                model: Some("existing".into())
+            }
+        )
+        .await
+        .is_err());
+    assert!(manager
+        .reconnect(
+            context(),
+            tool,
+            &connection.key_id,
+            &inventory,
+            path.clone()
+        )
+        .await
+        .is_err());
+    assert_eq!(requests.lock().unwrap().len(), request_count);
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    assert!(!permissions.lock().unwrap().is_empty());
+    task.abort();
+    permission_task.abort();
+}
+
 async fn environment_switch_fixture() -> (
     tempfile::TempDir,
     ToolInventory,
@@ -490,4 +812,154 @@ async fn reconnect_from_test_environment_selects_production_default_model() {
     );
     test_task.abort();
     production_task.abort();
+}
+
+#[tokio::test]
+async fn enterprise_revocation_during_catalogue_prevents_publish_and_keeps_original_preferences() {
+    let root = tempfile::tempdir().unwrap();
+    let inventory = fixture(root.path());
+    let (enterprise, grants, _, permission_task) = permission_server().await;
+    enterprise_auth(
+        root.path(),
+        "enterprise-user",
+        &enterprise,
+        "tenant-a",
+        enterprise_cookies(),
+    );
+    let (url, requests, task) = server_with_revocation(catalogue(), Some(grants)).await;
+    let manager = support::manager(root.path().join("state"), url.clone(), url);
+    let tool = ToolId::DuMateEnterprise;
+    let path = inventory.config_path(tool);
+    let original = b"[ {\"modelKey\":\"personal:original\",\"displayName\":\"original\"} ]\n";
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, original).unwrap();
+    assert!(manager
+        .connect(context(), tool, &inventory, path.clone())
+        .await
+        .is_err());
+    assert_eq!(std::fs::read(path).unwrap(), original);
+    assert!(manager.summaries().unwrap().is_empty());
+    let calls = requests.lock().unwrap();
+    assert_eq!(calls.len(), 2); // issued + catalogue, never model inference
+    assert!(calls
+        .iter()
+        .any(|r| r.contains("\"tool\":\"dumate-enterprise\"")));
+    assert!(calls
+        .iter()
+        .all(|r| !r.contains("dummy-enterprise-session") && !r.contains("dummy-csrf")));
+    task.abort();
+    permission_task.abort();
+}
+
+#[tokio::test]
+async fn enterprise_invalid_session_never_repairs_vendor_credentials_or_contacts_services() {
+    let root = tempfile::tempdir().unwrap();
+    let inventory = fixture(root.path());
+    let (enterprise, _, permissions, permission_task) = permission_server().await;
+    enterprise_auth(
+        root.path(),
+        "enterprise-user",
+        &enterprise,
+        "tenant-a",
+        enterprise_cookies(),
+    );
+    let auth_path = data(root.path()).join("auth.json");
+    let before = std::fs::read(&auth_path).unwrap();
+    let (url, requests, task) = server(catalogue()).await;
+    let manager = support::manager(root.path().join("state"), url.clone(), url);
+    let tool = ToolId::DuMateEnterprise;
+    let path = inventory.config_path(tool);
+    for invalid_key in [vec![1_u8; 31], vec![1_u8; 32]] {
+        std::fs::write(data(root.path()).join(".cookie-key"), &invalid_key).unwrap();
+        assert!(manager
+            .connect(context(), tool, &inventory, path.clone())
+            .await
+            .is_err());
+        assert_eq!(
+            std::fs::read(data(root.path()).join(".cookie-key")).unwrap(),
+            invalid_key
+        );
+        assert_eq!(std::fs::read(&auth_path).unwrap(), before);
+        assert!(!path.exists());
+    }
+    assert!(permissions.lock().unwrap().is_empty());
+    assert!(requests.lock().unwrap().is_empty());
+    task.abort();
+    permission_task.abort();
+}
+
+#[tokio::test]
+async fn enterprise_checks_only_the_selected_model_and_removes_a_new_file_on_disconnect() {
+    for passed in [true, false] {
+        let root = tempfile::tempdir().unwrap();
+        let inventory = fixture(root.path());
+        let (enterprise, _, _, permission_task) = permission_server().await;
+        enterprise_auth(
+            root.path(),
+            "enterprise-user",
+            &enterprise,
+            "tenant-a",
+            enterprise_cookies(),
+        );
+        let mut models = catalogue();
+        if !passed {
+            models["_mock_chat_response"] = json!({"choices":[]});
+        }
+        let (url, requests, task) = server(models).await;
+        let manager = support::manager(root.path().join("state"), url.clone(), url);
+        let tool = ToolId::DuMateEnterprise;
+        let path = inventory.config_path(tool);
+        let connection = manager
+            .connect(context(), tool, &inventory, path.clone())
+            .await
+            .unwrap();
+        let result = manager
+            .test_connection(
+                tool,
+                &connection.key_id,
+                ConnectionTestRequest {
+                    confirmed: true,
+                    model: Some("existing".into()),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.passed, passed);
+        let configured: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let row = configured
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["modelID"] == "existing")
+            .unwrap();
+        assert_eq!(
+            row["accessStatus"],
+            if passed { "normal" } else { "abnormal" }
+        );
+        assert_eq!(row.get("maxOutputTokensField").is_some(), passed);
+        assert!(configured
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["modelID"] == "glm-5.3")
+            .unwrap()
+            .get("accessStatus")
+            .is_none());
+        assert_eq!(
+            requests
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|r| r.starts_with("POST /v1/chat/"))
+                .count(),
+            1
+        );
+        manager
+            .disconnect(tool, &connection.key_id, None, DisconnectRequest::default())
+            .await
+            .unwrap();
+        assert!(!path.exists());
+        task.abort();
+        permission_task.abort();
+    }
 }

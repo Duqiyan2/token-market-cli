@@ -3,6 +3,7 @@ mod configuration;
 mod issuance;
 pub use issuance::CredentialLoss;
 mod dumate;
+mod dumate_enterprise;
 mod grok;
 mod harness;
 mod hermes;
@@ -425,8 +426,10 @@ impl ConnectionManager {
             .map_err(|_| anyhow::anyhow!("接入正在进行，请稍候"))?;
         inventory.require_installed(tool)?;
         let _installation_guard = inventory.connection_guard(tool)?;
-        if tool == ToolId::DuMate && path != inventory.config_path(tool) {
-            bail!("DuMate 活动个人账号已改变，请重新检测后接入")
+        if matches!(tool, ToolId::DuMate | ToolId::DuMateEnterprise)
+            && path != inventory.config_path(tool)
+        {
+            bail!("DuMate 活动账号已改变，请重新检测后接入")
         }
         if !matches!(
             tool,
@@ -443,6 +446,7 @@ impl ConnectionManager {
                 | ToolId::OhMyPi
                 | ToolId::KimiCode
                 | ToolId::DuMate
+                | ToolId::DuMateEnterprise
         ) {
             bail!("此工具的桌面接入尚未开放")
         }
@@ -469,6 +473,7 @@ impl ConnectionManager {
             bail!("工具配置是符号链接，请先确认实际配置路径");
         }
         let configuration_location = inventory.configuration_location(tool)?;
+        configuration_location.authorize(tool).await?;
         let before = match fs::read(&path) {
             Ok(v) => Some(v),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
@@ -649,8 +654,8 @@ impl ConnectionManager {
             .transpose()?;
         self.validate_for_apply(context, tool, device_id, key)
             .await?;
-        configuration_location.verify(tool)?;
-        if tool == ToolId::DuMate {
+        configuration_location.authorize(tool).await?;
+        if matches!(tool, ToolId::DuMate | ToolId::DuMateEnterprise) {
             crate::dumate::require_stopped(path)?;
         }
         let mut receipts = vec![];
@@ -823,7 +828,7 @@ impl ConnectionManager {
             )?;
         }
         records.remove(index);
-        if tool == ToolId::DuMate {
+        if matches!(tool, ToolId::DuMate | ToolId::DuMateEnterprise) {
             if let Some(receipt) = record.receipts.first() {
                 crate::dumate::require_stopped(&receipt.path)?;
             }

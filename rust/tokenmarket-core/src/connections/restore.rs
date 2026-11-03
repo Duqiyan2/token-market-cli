@@ -273,11 +273,15 @@ fn selector_index(array: &[Value], token: &str) -> Result<Option<usize>> {
             bail!("配置存在重复列表标识，未执行恢复")
         }
         Ok(index)
-    } else if let Some(id) = token.strip_prefix("@id=") {
+    } else if let Some((field, id)) = token
+        .strip_prefix("@id=")
+        .map(|id| ("id", id))
+        .or_else(|| token.strip_prefix("@modelKey=").map(|id| ("modelKey", id)))
+    {
         let mut matching = array
             .iter()
             .enumerate()
-            .filter(|(_, v)| v.get("id").and_then(Value::as_str) == Some(id));
+            .filter(|(_, v)| v.get(field).and_then(Value::as_str) == Some(id));
         let index = matching.next().map(|(i, _)| i);
         if matching.next().is_some() {
             bail!("配置存在重复插件标识，未执行恢复")
@@ -305,6 +309,22 @@ fn empty_container(value: &Value, token: Option<&str>) -> bool {
     value.as_array().is_some_and(|v| v.is_empty())
         || value.as_object().is_some_and(|v| {
             v.is_empty()
+                || (token
+                    .and_then(|s| s.strip_prefix("@modelKey="))
+                    .is_some_and(|id| v.get("modelKey").and_then(Value::as_str) == Some(id))
+                    && v.keys().all(|k| {
+                        matches!(
+                            k.as_str(),
+                            "modelKey"
+                                | "accessStatus"
+                                | "accessStatusMessage"
+                                | "connectionCheckedAt"
+                                | "createdAt"
+                                | "sortOrder"
+                                | "maxOutputTokensField"
+                                | "maxOutputTokensFieldSource"
+                        )
+                    }))
                 || (v.len() == 1
                     && token
                         .and_then(|s| s.strip_prefix("@id="))

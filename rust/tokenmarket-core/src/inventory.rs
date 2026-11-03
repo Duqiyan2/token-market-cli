@@ -139,12 +139,45 @@ pub(crate) struct ConfigurationLocation {
     environment: InstallationEnvironment,
     path: PathBuf,
     follows_process_home: bool,
+    #[serde(default)]
+    dumate_profile: Option<String>,
 }
 impl ConfigurationLocation {
+    pub(crate) fn dumate_test_guard(&self) -> Result<crate::installation::InstallationGuard> {
+        self.verify(ToolId::DuMateEnterprise)?;
+        let mut environment = self.environment.clone();
+        if self.follows_process_home {
+            environment.home = crate::config::home_dir();
+        }
+        ToolInventory::new(environment).connection_guard(ToolId::DuMateEnterprise)
+    }
+
+    pub(crate) async fn authorize(&self, tool: ToolId) -> Result<()> {
+        self.verify(tool)?;
+        if tool == ToolId::DuMateEnterprise {
+            let home = if self.follows_process_home {
+                crate::config::home_dir()
+            } else {
+                self.environment.home.clone()
+            };
+            crate::dumate::authorize_enterprise(&home, self.environment.platform).await?;
+            self.verify(tool)?;
+        }
+        Ok(())
+    }
     pub(crate) fn verify(&self, tool: ToolId) -> Result<()> {
         let mut environment = self.environment.clone();
         if self.follows_process_home {
             environment.home = crate::config::home_dir();
+        }
+        if tool == ToolId::DuMateEnterprise
+            && self.dumate_profile.as_deref()
+                != Some(&crate::dumate::enterprise_fingerprint(
+                    &environment.home,
+                    environment.platform,
+                )?)
+        {
+            bail!("DuMate 活动企业账号已改变，请取消原连接后重新接入")
         }
         let current = ToolInventory::new(environment).config_path(tool);
         if absolute_config_path(&current)? != self.path {
@@ -179,6 +212,14 @@ impl ToolInventory {
             environment: self.environment.clone(),
             path: absolute_config_path(&self.config_path(tool))?,
             follows_process_home: self.environment.home == crate::config::home_dir(),
+            dumate_profile: if tool == ToolId::DuMateEnterprise {
+                Some(crate::dumate::enterprise_fingerprint(
+                    &self.environment.home,
+                    self.environment.platform,
+                )?)
+            } else {
+                None
+            },
         })
     }
     pub fn list(&self) -> Result<Vec<ToolInventoryEntry>> {
@@ -229,11 +270,15 @@ impl ToolInventory {
     }
     /// Desktop discovery and desktop writes share this path. Terminal CLI paths are unchanged.
     pub fn config_path(&self, tool: ToolId) -> PathBuf {
-        if tool == ToolId::DuMate {
-            return crate::dumate::display_config(
-                &self.environment.home,
-                self.environment.platform,
-            );
+        if matches!(tool, ToolId::DuMate | ToolId::DuMateEnterprise) {
+            return if tool == ToolId::DuMateEnterprise {
+                crate::dumate::enterprise_display_config(
+                    &self.environment.home,
+                    self.environment.platform,
+                )
+            } else {
+                crate::dumate::display_config(&self.environment.home, self.environment.platform)
+            };
         }
         if tool == ToolId::KimiCode {
             return std::env::var_os("KIMI_CODE_HOME")
@@ -332,9 +377,12 @@ impl ToolInventory {
         Ok(())
     }
     pub fn connection_guard(&self, tool: ToolId) -> Result<crate::installation::InstallationGuard> {
-        if tool == ToolId::DuMate {
-            let path =
-                crate::dumate::personal_config(&self.environment.home, self.environment.platform)?;
+        if matches!(tool, ToolId::DuMate | ToolId::DuMateEnterprise) {
+            let path = if tool == ToolId::DuMateEnterprise {
+                crate::dumate::enterprise_config(&self.environment.home, self.environment.platform)?
+            } else {
+                crate::dumate::personal_config(&self.environment.home, self.environment.platform)?
+            };
             crate::dumate::require_stopped(&path)?;
         }
         crate::installation::InstallationManager::new(
@@ -345,7 +393,7 @@ impl ToolInventory {
         .connection_guard(tool)
     }
     pub fn is_installed(&self, tool: ToolId) -> bool {
-        if tool == ToolId::DuMate {
+        if matches!(tool, ToolId::DuMate | ToolId::DuMateEnterprise) {
             return self.application_path(tool).is_some();
         }
         self.environment
@@ -358,7 +406,7 @@ impl ToolInventory {
     /// Verified application launch target; command launchers are handled separately.
     pub fn application_path(&self, tool: ToolId) -> Option<PathBuf> {
         let (folders, files): (&[&str], &[&str]) = match tool {
-            ToolId::DuMate => (&["DuMate", "dumate"], &["DuMate.exe"]),
+            ToolId::DuMate | ToolId::DuMateEnterprise => (&["DuMate", "dumate"], &["DuMate.exe"]),
             ToolId::WorkBuddy => (&["WorkBuddy"], &["WorkBuddy.exe"]),
             ToolId::DeepSeekHarness => (
                 &["DeepSeek Harness", "deepseek-harness"],
@@ -375,7 +423,7 @@ impl ToolInventory {
             if self.environment.platform == HostPlatform::MacOs {
                 for name in folders {
                     let bundle = directory.join(format!("{name}.app"));
-                    let identified = tool != ToolId::DuMate
+                    let identified = !matches!(tool, ToolId::DuMate | ToolId::DuMateEnterprise)
                         || plist::Value::from_file(bundle.join("Contents/Info.plist"))
                             .ok()
                             .and_then(|v| {
@@ -431,7 +479,7 @@ pub fn official_download_url(tool: ToolId) -> &'static str {
         ToolId::MiniMaxCode => "https://github.com/MiniMax-AI/minimax-code/releases/tag/v0.7.2",
         ToolId::OhMyPi => "https://omp.sh/",
         ToolId::KimiCode => "https://github.com/MoonshotAI/kimi-code",
-        ToolId::DuMate => "https://www.dumate.cn/",
+        ToolId::DuMate | ToolId::DuMateEnterprise => "https://www.dumate.cn/",
     }
 }
 
@@ -623,7 +671,7 @@ impl ToolInventory {
     /// are required for a private wrapper; execution remains an explicit action.
     pub fn terminal_launch_plan(&self, tool: ToolId) -> Result<ToolLaunchPlan> {
         self.require_installed(tool)?;
-        if tool == ToolId::DuMate {
+        if matches!(tool, ToolId::DuMate | ToolId::DuMateEnterprise) {
             return self.launch_plan(tool);
         }
         let command = tool.command();

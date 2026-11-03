@@ -121,6 +121,14 @@ impl ConnectionManager {
             bail!("此连接属于其他环境，请先在当前环境重新接入后再测试")
         }
         super::restore::verify_applied(&record)?;
+        if tool == ToolId::DuMateEnterprise {
+            record
+                .configuration_location
+                .as_ref()
+                .context("企业连接缺少账号记录，请重新接入")?
+                .authorize(tool)
+                .await?;
+        }
         let single = matches!(tool, ToolId::ClaudeCode | ToolId::Codex | ToolId::DuMate);
         let model = if single {
             request
@@ -149,6 +157,17 @@ impl ConnectionManager {
         {
             bail!("请选择连接中已配置且协议匹配的模型")
         }
+        let _dumate_guard = if tool == ToolId::DuMateEnterprise {
+            Some(
+                record
+                    .configuration_location
+                    .as_ref()
+                    .context("企业连接缺少账号记录")?
+                    .dumate_test_guard()?,
+            )
+        } else {
+            None
+        };
         let url = url::Url::parse(&record.gateway_url)
             .map_err(|_| anyhow::anyhow!("连接网关地址无效，请重新接入"))?;
         if !url.username().is_empty()
@@ -210,6 +229,20 @@ impl ConnectionManager {
                 });
                 (verified, if verified { "已收到一次完整助手文本输出" } else { "网关未返回有效的完整助手文本输出；请检查模型与已配置协议后手动重试" }.into())
             }
+        };
+        let detail = if tool == ToolId::DuMateEnterprise {
+            record
+                .configuration_location
+                .as_ref()
+                .context("企业连接缺少账号记录")?
+                .authorize(tool)
+                .await?;
+            super::dumate_enterprise::persist_check(&record, &model, passed)?;
+            format!(
+                "{detail}；已保存所选 DuMate 企业模型的检查状态，请重新打开 DuMate 后选择该模型"
+            )
+        } else {
+            detail
         };
         let detail = format!(
             "{detail}。本次仅检查模型 {model} 的一次非流式接口文本响应；未验证其他模型、流式、工具调用或 Agent 运行表现。"

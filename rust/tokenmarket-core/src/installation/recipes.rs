@@ -57,7 +57,7 @@ pub(super) fn owned_command_paths(
         ToolId::MiniMaxCode => vec![home.join(".tokenmarket/tools/minimax-code/bin")],
         ToolId::OhMyPi => vec![home.join(".tokenmarket/tools/oh-my-pi/bin")],
         ToolId::KimiCode => vec![home.join(".tokenmarket/tools/kimi-code/bin")],
-        ToolId::WorkBuddy | ToolId::DuMate => vec![],
+        ToolId::WorkBuddy | ToolId::DuMate | ToolId::DuMateEnterprise => vec![],
     };
     let names: Vec<_> = if environment.platform == HostPlatform::Windows {
         vec![

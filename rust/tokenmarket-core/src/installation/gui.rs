@@ -14,12 +14,13 @@ use std::{
 pub(super) fn is_gui(tool: ToolId) -> bool {
     matches!(
         tool,
-        ToolId::WorkBuddy | ToolId::DeepSeekHarness | ToolId::DuMate
+        ToolId::WorkBuddy | ToolId::DeepSeekHarness | ToolId::DuMate | ToolId::DuMateEnterprise
     )
 }
 pub(super) fn instructions(tool: ToolId, platform: HostPlatform) -> &'static str {
-    if tool == ToolId::DuMate && platform == HostPlatform::MacOs {
-        "请将已打开文件夹中的 DuMate.app 拖入 Applications。安装完成后请先登录个人版；接入前完全退出 DuMate"
+    if matches!(tool, ToolId::DuMate | ToolId::DuMateEnterprise) && platform == HostPlatform::MacOs
+    {
+        "请将已打开文件夹中的 DuMate.app 拖入 Applications。安装完成后请先登录要接入的个人版或企业版；接入前完全退出 DuMate"
     } else if tool == ToolId::DeepSeekHarness && platform == HostPlatform::MacOs {
         "请将已打开文件夹中的 DeepSeek Harness.app 移入 Applications。dsh 命令注册可在工具内另行操作；取消请关闭原生安装窗口"
     } else if platform == HostPlatform::MacOs {
@@ -39,8 +40,10 @@ pub(super) fn plan(
     environment: &InstallationEnvironment,
     architecture: &str,
 ) -> Result<InstallPlan> {
-    if tool == ToolId::DuMate {
-        return super::dumate::plan(environment, architecture);
+    if matches!(tool, ToolId::DuMate | ToolId::DuMateEnterprise) {
+        let mut plan = super::dumate::plan(environment, architecture)?;
+        plan.tool = tool;
+        return Ok(plan);
     }
     if tool == ToolId::DeepSeekHarness {
         return harness_plan(environment, architecture);

@@ -21,7 +21,8 @@ fn registers_all_supported_tools() {
             "minimax-code",
             "oh-my-pi",
             "kimi-code",
-            "dumate"
+            "dumate",
+            "dumate-enterprise"
         ]
     );
 }
@@ -47,6 +48,7 @@ fn serializes_every_tool_with_the_server_contract_id() {
         ("oh-my-pi", "oh-my-pi"),
         ("kimi-code", "kimi-code"),
         ("dumate", "dumate"),
+        ("dumate-enterprise", "dumate-enterprise"),
     ] {
         let tool = tool_id(input).unwrap();
         let value = serde_json::to_value(&tool).unwrap();

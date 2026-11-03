@@ -24,6 +24,7 @@
     const entry = event.detail;
     if (!entry?.connection?.keyId || ['legacy','configuration_changed','environment_mismatch'].includes(entry.connection.state)) return;
     pending = entry;
+    dialog.querySelector('.test-scope').textContent = entry.id === 'dumate-enterprise' ? `${scope}请先完全退出 DuMate；测试会将所选模型的真实检查状态写回 DuMate，通过后重新打开并选择该模型。` : `${scope}不会更改 Agent 配置。`;
     dialog.querySelector('.test-context').textContent = `${entry.name} · 所属账号：${entry.connection.owner.name} · 计费空间：${entry.connection.boundWorkspace.name} · 协议：${entry.connection.protocol}`;
     selector.replaceChildren();
     const single = ['claude-code','codex','dumate'].includes(entry.id);

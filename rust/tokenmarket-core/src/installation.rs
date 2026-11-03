@@ -399,7 +399,7 @@ impl InstallationManager {
     pub fn installed_version(&self, tool: ToolId) -> Result<Option<String>> {
         // Installed GUI metadata is readable even on a fixture host without a
         // matching installer architecture. DuMate has no official CLI identity.
-        if tool == ToolId::DuMate {
+        if matches!(tool, ToolId::DuMate | ToolId::DuMateEnterprise) {
             return ToolInventory::new(self.environment.clone())
                 .application_path(tool)
                 .map(|path| self.executor.tool_application_version(tool, &path))
@@ -424,7 +424,7 @@ impl InstallationManager {
     /// with configuration mutation. This is never part of read-only discovery.
     pub fn connection_guard(&self, tool: ToolId) -> Result<InstallationGuard> {
         let guard = installation_lock(&self.environment, tool)?;
-        if tool == ToolId::DuMate {
+        if matches!(tool, ToolId::DuMate | ToolId::DuMateEnterprise) {
             let version = self
                 .installed_version(tool)?
                 .context("无法确认 DuMate 版本，请先安装官方 1.0.89 客户端")?;
@@ -547,7 +547,7 @@ impl InstallationManager {
             }
         }
         let repairing_owned;
-        let command = if plan.tool == ToolId::DuMate {
+        let command = if matches!(plan.tool, ToolId::DuMate | ToolId::DuMateEnterprise) {
             None
         } else {
             self.environment.command_path(&plan.command)
@@ -696,6 +696,11 @@ fn installation_lock(
     environment: &InstallationEnvironment,
     tool: ToolId,
 ) -> Result<InstallationGuard> {
+    let tool = if tool == ToolId::DuMateEnterprise {
+        ToolId::DuMate
+    } else {
+        tool
+    };
     let directory = environment.home.join(".tokenmarket/install-locks");
     std::fs::create_dir_all(&directory)?;
     let file = std::fs::OpenOptions::new()

@@ -49,6 +49,8 @@ pub enum ToolId {
     KimiCode,
     #[serde(rename = "dumate")]
     DuMate,
+    #[serde(rename = "dumate-enterprise")]
+    DuMateEnterprise,
 }
 
 impl ToolId {
@@ -68,6 +70,7 @@ impl ToolId {
             Self::OhMyPi => "omp",
             Self::KimiCode => "kimi",
             Self::DuMate => "dumate",
+            Self::DuMateEnterprise => "dumate",
         }
     }
 }
@@ -88,6 +91,7 @@ impl std::fmt::Display for ToolId {
             ToolId::OhMyPi => "oh-my-pi",
             ToolId::KimiCode => "kimi-code",
             ToolId::DuMate => "dumate",
+            ToolId::DuMateEnterprise => "dumate-enterprise",
         };
         f.write_str(value)
     }
@@ -147,6 +151,7 @@ enum PathKind {
     OhMyPi,
     KimiCode,
     DuMate,
+    DuMateEnterprise,
 }
 
 impl Adapter {
@@ -155,6 +160,9 @@ impl Adapter {
         match self.path_kind {
             PathKind::DuMate => {
                 crate::inventory::ToolInventory::current().config_path(ToolId::DuMate)
+            }
+            PathKind::DuMateEnterprise => {
+                crate::inventory::ToolInventory::current().config_path(ToolId::DuMateEnterprise)
             }
             PathKind::ClaudeSettings => std::env::var_os("CLAUDE_CONFIG_DIR")
                 .map(PathBuf::from)
@@ -215,6 +223,7 @@ impl Adapter {
     pub fn read_config(&self) -> Result<Option<ToolConfig>> {
         match self.id {
             ToolId::DuMate => bail!("请使用共享客户端连接状态查看 DuMate 个人版配置"),
+            ToolId::DuMateEnterprise => bail!("请使用共享客户端连接状态查看 DuMate 企业版配置"),
             ToolId::KimiCode => bail!("请使用共享客户端连接状态查看 Kimi Code 配置"),
             ToolId::Hermes => {
                 let Some(text) = read_file_if_exists(&self.config_path())? else {
@@ -494,6 +503,7 @@ impl Adapter {
 
         match self.id {
             ToolId::DuMate => bail!("请使用共享客户端接入流程配置 DuMate 个人版"),
+            ToolId::DuMateEnterprise => bail!("请使用共享客户端接入流程配置 DuMate 企业版"),
             ToolId::KimiCode => bail!("请使用共享客户端接入流程配置 Kimi Code"),
             ToolId::MiniMaxCode => bail!("请使用共享客户端接入流程配置 MiniMax Code"),
             ToolId::OhMyPi => bail!("请使用共享客户端接入流程配置 Oh My Pi"),
@@ -782,6 +792,13 @@ pub fn adapters() -> Vec<Adapter> {
             protocol: Protocol::OpenAiCompatible,
             requires_restart: true,
             path_kind: PathKind::DuMate,
+        },
+        Adapter {
+            id: ToolId::DuMateEnterprise,
+            name: "百度搭子 DuMate（企业版）",
+            protocol: Protocol::OpenAiCompatible,
+            requires_restart: true,
+            path_kind: PathKind::DuMateEnterprise,
         },
     ]
 }

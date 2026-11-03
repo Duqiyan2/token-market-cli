@@ -48,7 +48,7 @@
   function stateBadge(entry) { return text('span', connectionLabel(entry), `tool-state ${entry.connection?.state || 'unconnected'}`); }
   function toolIcon(entry) {
     const icon = text('div', '', 'tool-icon'); const image = document.createElement('img');
-    image.src = `assets/tools/${entry.id}.${({'workbuddy':'svg',openclaw:'svg',codex:'ico','deepseek-harness':'ico','grok-build':'svg',hermes:'svg',pi:'svg','minimax-code':'svg','oh-my-pi':'svg','kimi-code':'svg'})[entry.id] || 'png'}`;
+    image.src = `assets/tools/${entry.id === 'dumate-enterprise' ? 'dumate' : entry.id}.${({'workbuddy':'svg',openclaw:'svg',codex:'ico','deepseek-harness':'ico','grok-build':'svg',hermes:'svg',pi:'svg','minimax-code':'svg','oh-my-pi':'svg','kimi-code':'svg'})[entry.id] || 'png'}`;
     image.alt = ''; icon.append(image); return icon;
   }
   function actionButton(label, className, action, disabled = false) {
@@ -154,7 +154,7 @@
       notice.append(text('h3', connectionLabel(entry)));
       const note = connection.state === 'environment_mismatch' ? '当前工具使用其他环境的连接，尚未接入当前环境，测试已停用。请通过“管理连接 → 重新接入”切换到当前环境。' : connection.state === 'configuration_changed' ? '当前配置与接入记录不一致，测试已停用。请检查配置或重新接入。' : connection.state === 'test_passed' ? window.TokenMarketConnectionTests.scope : connection.state === 'test_failed' ? `未通过接口文本测试。请检查权限、余额与模型可用性后重试。${window.TokenMarketConnectionTests.scope}` : '配置已保存，尚未发起模型测试。可以先打开工具；需要时再确认费用并测试。';
       notice.append(text('p', note)); detailRoot.append(notice);
-    } else detailRoot.append(text('p', entry.id === 'dumate' ? 'DuMate 个人版一次配置一个模型。请先在 DuMate 登录个人版，再完全退出应用后接入；重新打开后生效。' : entry.installed ? '工具已安装，接入后即可使用 Token Market 模型。' : '先安装工具，再返回重新检测和接入。', 'notice'));
+    } else detailRoot.append(text('p', entry.id === 'dumate-enterprise' ? '企业管理员需开放自定义模型与模型选择权限。先在 DuMate 登录企业版并完全退出，再接入；将使用当前企业登录态查询权限。导入后在此选择一个模型并确认费用测试，通过后重新打开 DuMate 并在会话中选择。' : entry.id === 'dumate' ? 'DuMate 个人版一次配置一个模型。请先在 DuMate 登录个人版，再完全退出应用后接入；重新打开后生效。' : entry.installed ? '工具已安装，接入后即可使用 Token Market 模型。' : '先安装工具，再返回重新检测和接入。', 'notice'));
     detailRoot.append(actions(entry, true));
     const grid = text('div', '', 'tool-detail-grid'), left = text('div');
     const models = text('section', '', 'sheet'); models.append(text('h2', '已配置模型'));
@@ -323,7 +323,7 @@
     runConnect(pending.tool);
   };
   window.addEventListener('current-workspace-changed', () => { pendingConnect = null; if (connectDialog.open) connectDialog.close(); });
-  const supportedConnections = {'claude-code':'Claude Code', codex:'Codex CLI', 'deepseek-harness':'DeepSeek Harness',workbuddy:'WorkBuddy',openclaw:'OpenClaw',opencode:'OpenCode','grok-build':'Grok Build',hermes:'Hermes',pi:'Pi','minimax-code':'MiniMax Code','oh-my-pi':'Oh My Pi','kimi-code':'Kimi Code',dumate:'百度搭子 DuMate（个人版）'};
+  const supportedConnections = {'claude-code':'Claude Code', codex:'Codex CLI', 'deepseek-harness':'DeepSeek Harness',workbuddy:'WorkBuddy',openclaw:'OpenClaw',opencode:'OpenCode','grok-build':'Grok Build',hermes:'Hermes',pi:'Pi','minimax-code':'MiniMax Code','oh-my-pi':'Oh My Pi','kimi-code':'Kimi Code',dumate:'百度搭子 DuMate（个人版）','dumate-enterprise':'百度搭子 DuMate（企业版）'};
   let launchTool = 'claude-code';
   const dialog = document.createElement('dialog');
   dialog.innerHTML = '<h3></h3><p class="restart-notice"></p><p>模型测试由你另行发起，可能产生少量费用。</p><div class="tool-actions"><button class="primary launch">打开终端运行 Claude Code</button><button class="close">完成</button></div><p class="launch-error" role="status"></p>';
@@ -374,6 +374,7 @@
         workbuddy:'请完全退出并重新打开 WorkBuddy，在模型列表中选择导入模型。',
         openclaw:'请重启 OpenClaw Gateway 并重新打开会话。原有模型白名单或 agent 专属配置仍可能限制可选模型，请在 OpenClaw 中检查。',
         opencode:'请退出并重新启动 OpenCode，在模型列表中选择导入模型。项目或运行时的配置覆盖仍按 OpenCode 自身规则生效。',
+        'dumate-enterprise':'请保持 DuMate 完全退出，在本工具详情中选择一个模型并确认费用测试。测试会保存该模型的真实检查状态；通过后重新打开 DuMate 企业版，在会话的模型列表中选择。其他导入模型仍需分别测试，取消接入前也请完全退出 DuMate。',
         dumate:'请完全退出并重新打开 DuMate。个人版一次配置一个模型；接入时优先使用当前环境默认模型，不可用时保留有效原模型或选择目录中的首个可用模型。取消接入前也请先完全退出 DuMate。',
         'kimi-code':'在 Kimi Code 的模型选择器中选择 Token Market 模型；已有默认模型和 Thinking 设置保持不变。',
         'oh-my-pi':'在 Oh My Pi 中用 /model 选择 Token Market 模型；当前 profile 的既有模型角色保持不变。',
@@ -383,7 +384,7 @@
         hermes:'请重新启动 Hermes，通过 /model 选择 Token Market provider 下的模型。已有 provider 和默认模型选择会保留；命令行参数可能覆盖本地配置。',
       };
       dialog.querySelector('.restart-notice').textContent = `${modelNotice} ${guidance[tool] || `现有 ${name} 会话需要退出后重新启动，新终端将读取接入配置。`}`;
-      dialog.querySelector('.launch').textContent = ['deepseek-harness','workbuddy','dumate'].includes(tool) ? `打开 ${name}` : `打开工具 / 终端运行 ${name}`;
+      dialog.querySelector('.launch').textContent = ['deepseek-harness','workbuddy','dumate','dumate-enterprise'].includes(tool) ? `打开 ${name}` : `打开工具 / 终端运行 ${name}`;
       dialog.querySelector('.launch-error').textContent = ''; dialog.showModal();
     } catch(error) {
       if (authenticated && actionGeneration === generation) {

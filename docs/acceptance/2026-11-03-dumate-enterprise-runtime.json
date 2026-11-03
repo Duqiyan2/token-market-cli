@@ -1,0 +1,19 @@
+{
+  "date": "2026-11-03",
+  "native_backend": "DuMate 1.0.89.447 darwin/arm64",
+  "backend_commit": "e35aadb162c15ad1c7c449d4754a11b1dd4e3a49",
+  "mode": "enterprise",
+  "personal_models_loaded": true,
+  "listed_by_native_registry": true,
+  "initial_access_status": "untested",
+  "verified_status_after_restart": "normal",
+  "persisted_probe_field": "max_tokens",
+  "fixture_protocol_requests": 1,
+  "probe": "Explicit fixture-only request to localhost mock; successful status saved in isolated preferences before restarting official backend",
+  "isolation": "sandbox-exec denies outbound network except localhost, all reads under /Users, and writes outside temporary root",
+  "real_credentials_read": false,
+  "real_enterprise_account_verified": false,
+  "paid_model_called": false,
+  "agent_tool_loop_verified": false,
+  "windows_native_verified": false
+}
