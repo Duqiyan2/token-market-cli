@@ -1,0 +1,88 @@
+name: Remove archived legacy npm versions
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type delete-legacy-tokenmarket after 1.0.0 is published and backups are verified'
+        required: true
+        type: string
+      dry_run:
+        description: 'Inspect authentication and versions without deletion'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tokenmarket-registry-maintenance
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    if: inputs.confirm == 'delete-legacy-tokenmarket'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Verify existing npm authentication
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm whoami > /dev/null
+      - name: Inspect or remove only the four archived legacy versions
+        shell: python
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          CLEANUP_DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          import json, os, pathlib, subprocess
+
+          registry = ['--registry', 'https://registry.npmjs.org/']
+          keep = '1.0.0'
+          old = ['0.0.0-stage', '0.1.0', '1.1.0', '1.1.1']
+
+          def npm(*args):
+              return subprocess.run(['npm', *args, *registry], capture_output=True, text=True)
+
+          if os.environ.get('CLEANUP_DRY_RUN', 'false') == 'true':
+              inventory = npm('view', 'tokenmarket', 'versions', '--json')
+              assert inventory.returncode == 0, inventory.stderr
+              summary = {'dry_run': True, 'retained_target': keep, 'current_versions': json.loads(inventory.stdout), 'deletions': 0}
+              pathlib.Path('npm-cleanup-summary.json').write_text(json.dumps(summary, indent=2) + '\n')
+              print(json.dumps(summary, indent=2))
+              raise SystemExit(0)
+
+          present = npm('view', 'tokenmarket@' + keep, 'version', '--json')
+          assert present.returncode == 0 and json.loads(present.stdout) == keep, 'Retained 1.0.0 is not published; no deletion permitted'
+          latest = npm('view', 'tokenmarket', 'dist-tags.latest', '--json')
+          assert latest.returncode == 0 and json.loads(latest.stdout) == keep, '1.0.0 must be latest before deleting legacy versions'
+          assert keep not in old
+          results = []
+          for version in old:
+              before = npm('view', 'tokenmarket@' + version, 'version', '--json')
+              if before.returncode and 'E404' in before.stdout + before.stderr:
+                  results.append({'version': version, 'state': 'already_absent'})
+                  continue
+              if before.returncode:
+                  results.append({'version': version, 'state': 'inspection_failed', 'detail': before.stderr[-2000:]})
+                  continue
+              removed = npm('unpublish', 'tokenmarket@' + version)
+              results.append({'version': version, 'state': 'deleted' if removed.returncode == 0 else 'blocked', 'detail': removed.stderr[-2000:] if removed.returncode else ''})
+          after = npm('view', 'tokenmarket', 'versions', '--json')
+          assert after.returncode == 0, 'Registry could not be verified after cleanup'
+          remaining = json.loads(after.stdout)
+          summary = {'retained': keep, 'results': results, 'remaining_versions': remaining}
+          pathlib.Path('npm-cleanup-summary.json').write_text(json.dumps(summary, indent=2) + '\n')
+          print(json.dumps(summary, indent=2))
+          assert remaining == [keep], 'Some old versions remain; inspect policy/authentication errors in the summary'
+      - name: Preserve cleanup outcome
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-cleanup-summary
+          path: npm-cleanup-summary.json
+          if-no-files-found: ignore

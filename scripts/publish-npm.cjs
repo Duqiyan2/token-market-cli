@@ -35,7 +35,7 @@ try {
   // Check every tarball before writing any package to the registry.
   const publish = (file, dryRun) => {
     const result = spawnSync(process.execPath, [process.env.npm_execpath, 'publish', file,
-      '--access', 'public', ...(dryRun ? ['--dry-run'] : [])], { stdio: 'inherit' });
+      '--access', 'public', '--tag', 'latest', ...(dryRun ? ['--dry-run'] : [])], { stdio: 'inherit' });
     if (result.error) throw result.error;
     if (result.status !== 0) throw new Error(`Publishing ${path.basename(file)} failed; launcher publication stopped.`);
   };

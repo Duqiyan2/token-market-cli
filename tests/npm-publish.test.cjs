@@ -107,3 +107,14 @@ test('release retries skip identical artifacts but reject an existing conflictin
     assert.match(result.stderr, /different contents/);
   });
 });
+
+test('a reset release explicitly assigns the latest dist-tag', () => {
+  fixture(({ execute }) => {
+    const result = execute();
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.writes.length, 1);
+    const args = result.writes[0];
+    assert.ok(args.includes('--tag'));
+    assert.equal(args[args.indexOf('--tag') + 1], 'latest');
+  });
+});

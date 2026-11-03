@@ -4,9 +4,9 @@
 
 通过桌面应用或终端，将本机 AI Agent 工具接入 Token Market。两端共用登录、当前空间和工具连接，可以随时切换使用。
 
-**最新已发布版本 1.1.1** · [下载桌面端](https://github.com/FitBBC/token-market-cli/releases/tag/v1.1.1) · [npm 包](https://www.npmjs.com/package/tokenmarket)
+**版本 1.0.0** · [下载桌面端](https://github.com/FitBBC/token-market-cli/releases/tag/v1.0.0) · [npm 包](https://www.npmjs.com/package/tokenmarket)
 
-**未发布的源码流程：** 下文的一键工具安装和新增工具接入面向本分支构建，尚未包含在已发布的 1.1.1 安装包中。使用 1.1.1 时仍需先自行安装 Agent 工具。
+1.0.0 包含下文的一键工具安装与工具接入。已验证平台及剩余检查见[发布验收记录](docs/release-readiness.md)。
 
 ## 安装
 
@@ -14,7 +14,7 @@
 
 ### 桌面端
 
-从 [Releases](https://github.com/FitBBC/token-market-cli/releases/tag/v1.1.1) 下载安装包：
+从 [Releases](https://github.com/FitBBC/token-market-cli/releases/tag/v1.0.0) 下载安装包：
 
 | 系统 | 安装方式 |
 | --- | --- |
@@ -26,21 +26,21 @@
 需要 **Node.js 20+**。支持 macOS arm64/x64、Windows x64，以及 glibc 2.35+ 的 Linux x64/arm64。
 
 ```bash
-npm install -g tokenmarket@1.1.1
+npm install -g tokenmarket@1.0.0
 tokenmarket --version
 ```
 
 也可以直接运行，无需全局安装：
 
 ```bash
-npx --yes tokenmarket@1.1.1 login
+npx --yes tokenmarket@1.0.0 login
 ```
 
 npm 包内置全部五个平台的原生二进制，启动器会自动选择当前系统对应的版本。
 
 ## 接入第一个工具
 
-本节中的工具安装步骤需要使用本分支构建的桌面端或 CLI。
+以下步骤使用 1.0.0 桌面端或 CLI。
 
 ### 使用桌面端
 
@@ -53,7 +53,7 @@ npm 包内置全部五个平台的原生二进制，启动器会自动选择当�
 
 ### 使用终端
 
-以下使用本分支构建的 CLI；已发布的 1.1.1 二进制尚无 `install` 命令。
+使用上方安装的 CLI。
 
 ```bash
 tokenmarket login
@@ -122,8 +122,8 @@ TypeScript 版 **2.4.1** 独立二进制，并准备或复用 Windows Git Bash�
 
 | 操作 | 桌面端 | CLI |
 | --- | --- | --- |
-| 安装缺失工具（未发布） | 点击 **安装**，按需完成原生步骤 | 源码构建中运行 `tokenmarket install <tool>` |
-| 在当前终端运行（未发布） | **打开工具** | 源码构建中运行 `tokenmarket run <tool>` |
+| 安装缺失工具 | 点击 **安装**，按需完成原生步骤 | `tokenmarket install <tool>` |
+| 在当前终端运行 | **打开工具** | `tokenmarket run <tool>` |
 | 刷新安装状态 | 自动刷新或 **重新检测** | `tokenmarket status [tool]` |
 | 查看归属、模型和状态 | 打开工具详情 | `tokenmarket status [tool]` |
 | 更新连接或更换计费空间 | 切换空间后，点击 **重新接入** | `tokenmarket reconnect <tool>` |
@@ -171,7 +171,7 @@ CLI 和桌面端按环境、账号、空间、设备和工具复用凭证。保�
 | 找不到已安装的工具 | 桌面端点击 **重新检测**；终端确认工具可从命令行启动，必要时重新打开终端。 |
 | 接入后仍使用旧配置 | 完全退出并重开工具；OpenClaw 需重启 Gateway／会话，OpenCode 需检查项目配置是否覆盖全局设置。 |
 | 显示“配置已变化”或无法测试 | 按提示修复配置或重新接入，再执行测试。 |
-| npm 提示缺少内置二进制 | 重新安装：`npm install -g tokenmarket@1.1.1`。 |
+| npm 提示缺少内置二进制 | 重新安装：`npm install -g tokenmarket@1.0.0`。 |
 | 需要恢复原配置 | 使用 **取消接入** 或 `disconnect`；加密恢复记录位于 `~/.tokenmarket/desktop-connections/`。 |
 
 ### macOS 首次打开被拦截
@@ -191,4 +191,4 @@ xattr -cr "/Applications/Token Market.app"
 - [工具检测与配置](docs/tool-inventory.md)
 - [共享凭证生命周期](docs/adr/0004-shared-client-key-lifecycle.md)
 
-CLI 和桌面端共用 `rust/tokenmarket-core` 与版本号。发布时，`cli-v1.1.1`、`v1.1.1` 指向同一提交，分别触发 CLI 和桌面端构建。
+CLI 和桌面端共用 `rust/tokenmarket-core` 与版本号。发布时，`cli-v1.0.0`、`v1.0.0` 指向同一提交，分别触发 CLI 和桌面端构建。

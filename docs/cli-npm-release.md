@@ -39,15 +39,15 @@ npm run test:package -- .
 
 首次发布需要有权创建 `tokenmarket` 包的 npm 账号，以及仓库 Actions secret `NPM_TOKEN`。Token 需要允许发布，并满足 npm 的 2FA 要求。通过校验后，手动运行 **CLI npm packages** 并勾选 `publish`。
 
-CLI 和 App 从 1.1.0 起统一版本。`package.json`、`rust/tokenmarket-cli/Cargo.toml`、`rust/tokenmarket-core/Cargo.toml`、`src-tauri/Cargo.toml` 与 `src-tauri/tauri.conf.json` 的版本必须一致。正式发布时，在同一提交上创建 CLI tag `cli-v1.1.1` 和桌面 tag `v1.1.1`，分别触发 npm 五平台验证／发布和桌面安装包构建。
+CLI 和 App 从 1.1.0 起统一版本。`package.json`、`rust/tokenmarket-cli/Cargo.toml`、`rust/tokenmarket-core/Cargo.toml`、`src-tauri/Cargo.toml` 与 `src-tauri/tauri.conf.json` 的版本必须一致。正式发布时，在同一提交上创建 CLI tag `cli-v1.0.0` 和桌面 tag `v1.0.0`，分别触发 npm 五平台验证／发布和桌面安装包构建。
 
 发布脚本先检查 tarball 包名、版本与全部平台文件，再执行发布预演。失败后可以使用相同的 `npm-release` artifact 重试：已发布包的 integrity 完全一致才会跳过；如果同版本内容不同，必须使用新版本。
 
 发布完成后，在空目录用公共 registry 验证：
 
 ```bash
-npx --yes --registry=https://registry.npmjs.org tokenmarket@1.1.1 --version
-npx --yes --registry=https://registry.npmjs.org tokenmarket@1.1.1 --help
+npx --yes --registry=https://registry.npmjs.org tokenmarket@1.0.0 --version
+npx --yes --registry=https://registry.npmjs.org tokenmarket@1.0.0 --help
 ```
 
 完整浏览器授权和实际工具配置仍是独立验收步骤，需要用户真实登录。仅通过打包测试不能证明线上授权、Key 权限或模型请求可用。
@@ -57,3 +57,9 @@ npx --yes --registry=https://registry.npmjs.org tokenmarket@1.1.1 --help
 首次尝试独立平台包时，npm 对 `tokenmarket-win32-x64` 返回 `Package name triggered spam detection`。最终分发方案只使用一个通用包；不再创建或依赖独立平台 npm 包。
 
 npm Token 与后续的免 Token 发布配置参见 [npm access tokens](https://docs.npmjs.com/creating-and-viewing-access-tokens/) 和 [Trusted Publishing](https://docs.npmjs.com/trusted-publishers/)。
+
+## 旧版本清理（维护者要求的 1.0.0 重置）
+
+先发布并核对 `tokenmarket@1.0.0` 和 `latest`，再通过手动工作流 `Remove archived legacy npm versions` 清理固定的四个旧版本。默认 `dry_run=true` 只验证认证与版本清单；实际清理须显式指定 `dry_run=false` 和确认文本 `delete-legacy-tokenmarket`。工作流拒绝在 1.0.0 尚未发布或尚未成为 latest 时删除任何版本，也永不删除保留版本。
+
+该工作流复用仓库已有 `NPM_TOKEN`，不导出密钥。若 npm 的权限或 unpublish 政策拒绝删除，结果保留在工作流的 `npm-cleanup-summary` 附件中，不能把“弃用”当作已删除。旧内容的本地归档位于 `dist/release-reset-20261103/`。

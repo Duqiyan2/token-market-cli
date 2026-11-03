@@ -1,11 +1,11 @@
 {
   "name": "tokenmarket",
-  "version": "1.1.1",
+  "version": "1.0.0",
   "description": "Configure Token Market in popular AI agent tools",
   "license": "UNLICENSED",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/FitBBC/token-market-cli.git"
+    "url": "git+https://github.com/Duqiyan2/token-market-cli.git"
   },
   "bin": {
     "tokenmarket": "npm/bin/tokenmarket.cjs"
