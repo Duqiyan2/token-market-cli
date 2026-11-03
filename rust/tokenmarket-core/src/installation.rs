@@ -126,7 +126,16 @@ impl InstallExecutor for NativeInstallExecutor {
                 "--tlsv1.2".into(),
                 "--connect-timeout".into(),
                 "30".into(),
-                "--max-time".into(),
+                // Large official packages can make healthy progress for much
+                // longer than five minutes. Abort stalled transfers, not slow
+                // successful ones; curl retries transient errors from scratch.
+                "--speed-limit".into(),
+                "1024".into(),
+                "--speed-time".into(),
+                "120".into(),
+                "--retry".into(),
+                "2".into(),
+                "--retry-max-time".into(),
                 "300".into(),
                 "--output".into(),
                 path.to_string_lossy().into(),
@@ -138,7 +147,7 @@ impl InstallExecutor for NativeInstallExecutor {
                 &[],
                 cancelled,
                 output,
-                Duration::from_secs(310),
+                None,
             )?;
         }
         if !step.program.is_empty() {
@@ -148,7 +157,7 @@ impl InstallExecutor for NativeInstallExecutor {
                 &step.environment,
                 cancelled,
                 output,
-                Duration::from_secs(1800),
+                Some(Duration::from_secs(1800)),
             )?;
         }
         Ok(())
@@ -185,7 +194,7 @@ impl InstallExecutor for NativeInstallExecutor {
             &[],
             &AtomicBool::new(false),
             &mut |line| lines.push(line),
-            Duration::from_secs(15),
+            Some(Duration::from_secs(15)),
         )?;
         lines
             .into_iter()
@@ -222,7 +231,7 @@ impl InstallExecutor for NativeInstallExecutor {
                 &[],
                 &AtomicBool::new(false),
                 &mut |line| lines.push(line),
-                Duration::from_secs(15),
+                Some(Duration::from_secs(15)),
             )?;
             Ok(lines.into_iter().find(|line| !line.trim().is_empty()))
         }
@@ -239,7 +248,7 @@ fn run_process(
     environment: &[(String, String)],
     cancelled: &AtomicBool,
     output: &mut dyn FnMut(String),
-    timeout: Duration,
+    timeout: Option<Duration>,
 ) -> Result<()> {
     if cancelled.load(Ordering::SeqCst) {
         bail!("安装已取消")
@@ -292,12 +301,14 @@ fn run_process(
         });
     }
     drop(sender);
-    let deadline = Instant::now() + timeout;
+    let deadline = timeout.map(|timeout| Instant::now() + timeout);
     loop {
         while let Ok(line) = receiver.try_recv() {
             output(line);
         }
-        if cancelled.load(Ordering::SeqCst) || Instant::now() >= deadline {
+        if cancelled.load(Ordering::SeqCst)
+            || deadline.is_some_and(|deadline| Instant::now() >= deadline)
+        {
             #[cfg(unix)]
             {
                 let _ = Command::new("/bin/kill")
