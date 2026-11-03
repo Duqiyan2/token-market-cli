@@ -14,7 +14,7 @@ acceptance. The work remains unreleased. Issues #25–27 remain open.
 
 ## Method and evidence
 
-Each isolated run received a fixture filename and a request to read it. The file
+Each run received a fixture filename and a request to read it. The file
 contained a tool-specific random nonce that was absent from the prompt. Review
 required the native read call, its corresponding completed result containing the
 complete nonce, a final answer with that exact nonce, and the tool's normal
@@ -76,10 +76,14 @@ the accepted fixed RC exception; it is not represented as a stable release.
 The acceptance coordinator reused an existing platform Key and available model
 catalogue. This proves these runtime paths, not new-tool registration, new Key
 issuance, backend deployment or the complete product connection lifecycle.
-Runtime configuration was kept in disposable acceptance profiles, apart from the
-user's real preferences. The independent runtime review did not inspect private
-profiles and does not establish an unconfigured first launch or product default
-selection behavior.
+The eleven CLI runs used isolated HOME/profile environments. WorkBuddy's actual
+GUI reused its existing connection and selected `glm-5.3`, with a new temporary
+workspace and test conversation; its existing model/Key configuration was not
+rewritten, and its entire profile was not isolated. The GUI test workspace and
+conversation were retained as evidence. Existing user model preferences were not
+rewritten. The independent runtime review did not inspect private profiles and
+does not establish an unconfigured first launch or product default selection
+behavior.
 
 - Kimi used the same `glm-5.3` as a temporary default to satisfy its upstream
   authentication preflight before the explicitly selected runtime turn.
@@ -87,7 +91,7 @@ selection behavior.
   final run also set the official
   `auxiliary.title_generation.model_upgrade_enabled: false` in the disposable
   profile. Rule-based titles remained; the separate automatic title-model
-  upgrade request was disabled. User preferences were unchanged.
+  upgrade request was disabled. Existing user model preferences were not rewritten.
 - Grok's helper models selected the same GLM model. Historical requests for a
   different auxiliary model are outside the final passing window.
 - Harness used a read-only preset. This does not validate every preset or
