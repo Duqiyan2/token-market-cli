@@ -8,7 +8,7 @@
 - `npm/native/<os-arch>/bin/`：macOS arm64 / x64、Windows x64、Linux glibc x64 / arm64 的 Rust CLI。
 - `npm/native/<os-arch>/manifest.json`：该二进制的版本、Rust target 和 SHA-256。
 
-只发布 `tokenmarket` 一个 npm 包，压缩后约 13 MB。启动器在本地选择当前系统的二进制，不运行安装脚本，不在运行时下载二进制，不调用桌面 App，也不依赖 optional dependencies。生成的 `npm/native` 不提交到 Git。
+只发布 `tokenmarket` 一个 npm 包，1.0.0 压缩后约 17.5 MB。启动器在本地选择当前系统的二进制，不运行安装脚本，不在运行时下载二进制，不调用桌面 App，也不依赖 optional dependencies。生成的 `npm/native` 不提交到 Git。
 
 ## 本地验证
 
@@ -39,7 +39,7 @@ npm run test:package -- .
 
 首次发布需要有权创建 `tokenmarket` 包的 npm 账号，以及仓库 Actions secret `NPM_TOKEN`。Token 需要允许发布，并满足 npm 的 2FA 要求。通过校验后，手动运行 **CLI npm packages** 并勾选 `publish`。
 
-CLI 和 App 从 1.1.0 起统一版本。`package.json`、`rust/tokenmarket-cli/Cargo.toml`、`rust/tokenmarket-core/Cargo.toml`、`src-tauri/Cargo.toml` 与 `src-tauri/tauri.conf.json` 的版本必须一致。正式发布时，在同一提交上创建 CLI tag `cli-v1.0.0` 和桌面 tag `v1.0.0`，分别触发 npm 五平台验证／发布和桌面安装包构建。
+CLI 和 App 的版本现已统一重置为 1.0.0。`package.json`、`rust/tokenmarket-cli/Cargo.toml`、`rust/tokenmarket-core/Cargo.toml`、`src-tauri/Cargo.toml` 与 `src-tauri/tauri.conf.json` 的版本必须一致。正式发布时，在同一提交上创建 CLI tag `cli-v1.0.0` 和桌面 tag `v1.0.0`，分别触发 npm 五平台验证／发布和桌面安装包构建。
 
 发布脚本先检查 tarball 包名、版本与全部平台文件，再执行发布预演。失败后可以使用相同的 `npm-release` artifact 重试：已发布包的 integrity 完全一致才会跳过；如果同版本内容不同，必须使用新版本。
 
@@ -60,6 +60,6 @@ npm Token 与后续的免 Token 发布配置参见 [npm access tokens](https://d
 
 ## 旧版本清理（维护者要求的 1.0.0 重置）
 
-先发布并核对 `tokenmarket@1.0.0` 和 `latest`，再通过手动工作流 `Remove archived legacy npm versions` 清理固定的四个旧版本。默认 `dry_run=true` 只验证认证与版本清单；实际清理须显式指定 `dry_run=false` 和确认文本 `delete-legacy-tokenmarket`。工作流拒绝在 1.0.0 尚未发布或尚未成为 latest 时删除任何版本，也永不删除保留版本。
+2026-11-03 先发布并核对 `tokenmarket@1.0.0` 和 `latest`，再逐个删除 `0.0.0-stage`、`0.1.0`、`1.1.0`、`1.1.1`。官方 registry 最终确认版本清单仅为 `["1.0.0"]`，`latest` 为 `1.0.0`；保留版本的 integrity 与实际发布 tarball 一致。
 
-该工作流复用仓库已有 `NPM_TOKEN`，不导出密钥。若 npm 的权限或 unpublish 政策拒绝删除，结果保留在工作流的 `npm-cleanup-summary` 附件中，不能把“弃用”当作已删除。旧内容的本地归档位于 `dist/release-reset-20261103/`。
+仓库的发布 Token 可以发布，但 npm 拒绝其执行 unpublish，要求交互式二次验证。此次清理由维护者完成官方浏览器验证后执行，已移除一次性清理工作流。未来清理仍需先备份、核对保留版本及 latest，再按 npm 当时要求完成认证；不能把“弃用”当作已删除。旧内容归档、删除回执与最终 registry 校验位于本地 `dist/release-reset-20261103/`。
