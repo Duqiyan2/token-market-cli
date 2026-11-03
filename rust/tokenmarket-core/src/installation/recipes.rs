@@ -102,6 +102,16 @@ pub fn compatible_existing_version(tool: ToolId, actual: &str, target: &str) -> 
     if tool == ToolId::OpenCode {
         return super::opencode::compatible_existing_version(actual);
     }
+    matches_pinned_version(tool, actual, target)
+}
+pub(super) fn matches_pinned_version(tool: ToolId, actual: &str, target: &str) -> bool {
+    // The official OMP standalone binary reports its identity and version as a
+    // single token. Match that prefix only for OMP and retain an exact version.
+    if tool == ToolId::OhMyPi {
+        if let Some(version) = actual.trim().strip_prefix("omp/") {
+            return version == target;
+        }
+    }
     actual
         .split_whitespace()
         .any(|part| part.trim_start_matches('v') == target)
