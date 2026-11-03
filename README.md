@@ -4,11 +4,13 @@
 
 Connect local AI agent tools to Token Market from the desktop app or terminal. Both share your sign-in, current workspace and tool connections, so you can switch between them.
 
-**Version 1.1.1** · [Desktop download](https://github.com/FitBBC/token-market-cli/releases/tag/v1.1.1) · [npm package](https://www.npmjs.com/package/tokenmarket)
+**Latest published release: 1.1.1** · [Desktop download](https://github.com/FitBBC/token-market-cli/releases/tag/v1.1.1) · [npm package](https://www.npmjs.com/package/tokenmarket)
+
+**Unreleased source workflow:** integrated tool installation and the additional tool integrations below describe builds from this branch. They are not included in the published 1.1.1 packages, which require installing Agent tools separately.
 
 ## Install
 
-Have a Token Market account and install the AI agent tool you want to connect first.
+Have a Token Market account. The downloads below install the published Token Market client.
 
 ### Desktop
 
@@ -38,19 +40,25 @@ The npm package includes all five native binaries; the launcher selects the one 
 
 ## Connect your first tool
 
+The installation steps in this section require a desktop or CLI build from this branch.
+
 ### In the desktop app
 
 1. Open Token Market and click **使用浏览器登录** (Sign in with browser).
 2. Finish signing in, then click **Open Application** to return to the app.
 3. Confirm the current workspace. New connections use this workspace for billing.
-4. Find your tool and click **接入** (Connect). Click **重新检测** (Detect again) if you just installed it.
-5. Reopen the tool and select the Token Market model as prompted.
+4. If the tool is missing, click **安装** (Install). Follow any native installer steps; the client automatically detects completion. A disabled button explains an unavailable installation method.
+5. Click **接入** (Connect) separately after installation.
+6. Reopen the tool and select the Token Market model as prompted.
 
 ### In the terminal
+
+Use the CLI built from this branch; `install` is not available in the published 1.1.1 binary.
 
 ```bash
 tokenmarket login
 tokenmarket workspace
+tokenmarket install claude-code
 tokenmarket connect claude-code
 tokenmarket status
 ```
@@ -75,13 +83,44 @@ Choose a tool in the app, or use its ID in CLI commands:
 | DeepSeek Harness | `deepseek-harness` |
 | OpenClaw | `openclaw` |
 | OpenCode | `opencode` |
+| Grok Build | `grok-build` |
+| Hermes | `hermes` |
+| Pi | `pi` |
+| MiniMax Code | `minimax-code` |
+| Oh My Pi | `oh-my-pi` |
+| Kimi Code | `kimi-code` |
 
 Claude Code and Codex use `glm-5.3` in production (`glm-5.2` in test builds). Other tools receive the compatible text-generation model catalogue.
+
+Grok Build can be installed with **安装** in the app or `tokenmarket install grok-build`.
+Installation does not connect or test a model. After connecting, restart Grok and
+use `/model` to select an imported Token Market model; the existing default stays unchanged.
+
+Pi can be installed with **安装** or `tokenmarket install pi`. Open `/model` in Pi
+to select an imported model. Existing defaults and other providers stay intact. If
+`auth.json` already has a `tokenmarket` credential, log out of that provider in Pi
+before connecting; Token Market leaves existing API keys and OAuth credentials alone.
+See [Pi integration](docs/pi.md) for paths and installation requirements.
+
+MiniMax Code uses the fixed official 0.7.2 release package and separate active data/profile configuration. See [MiniMax Code integration](docs/minimax-code.md).
+
+Oh My Pi is installed separately with **安装** or `tokenmarket install oh-my-pi`.
+It uses the active OMP profile and `models.yml`/`models.yaml`; model roles and
+existing authentication stay intact. Open `/model` to choose a Token Market model.
+See [Oh My Pi integration](docs/oh-my-pi.md) for profiles, runtime libraries and conflicts.
+
+Kimi Code uses the official TypeScript **2.4.1** native release: **安装** or
+`tokenmarket install kimi-code`. Windows Git Bash is prepared or reused. Connect
+preserves existing defaults and Thinking settings and requires a real context limit
+for every imported model. See [Kimi Code integration](docs/kimi-code.md).
 
 ## Manage connections
 
 | Action | Desktop | CLI |
 | --- | --- | --- |
+| Install a missing tool (unreleased) | **安装**, then complete any native steps | `tokenmarket install <tool>` from a source build |
+| Run in the current terminal (unreleased) | **Open Tool** | `tokenmarket run <tool>` from a source build |
+| Refresh installation status | Automatic refresh or **重新检测** | `tokenmarket status [tool]` |
 | View ownership, models and status | Open tool details | `tokenmarket status [tool]` |
 | Update a connection or change its billing workspace | Switch workspace, then **重新接入** | `tokenmarket reconnect <tool>` |
 | Restore managed configuration | **取消接入** | `tokenmarket disconnect <tool>` |
@@ -89,6 +128,8 @@ Claude Code and Codex use `glm-5.3` in production (`glm-5.2` in test builds). Ot
 | Sign out of shared management | Account menu → **退出登录** | `tokenmarket logout` |
 
 Connecting and reconnecting configure tools without sending model requests. **Testing sends one potentially billable model request.** For tools with several saved models, specify one with `--model <id>`.
+
+Installation also sends no model requests and does not connect automatically. The source CLI prints `tokenmarket run <tool>` for terminal installations, including private prefixes; this foreground action preserves the shell’s persistent PATH. An interrupted client-owned installation is repaired by retrying Install, including after restarting the client. Existing compatible installations are reused without automatic upgrades. GUI installers own their cancellation; **停止等待** only stops the client's monitoring. See [GUI installation](docs/gui-installation.md) for WorkBuddy and Harness behavior.
 
 Reconnecting asks for confirmation when the account or billing workspace changes. Disconnecting restores the fields managed by the connection and asks how to handle later edits. Signing out preserves tool configurations and saved credentials.
 

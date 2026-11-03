@@ -1,6 +1,15 @@
 name: Native validation
 
 on:
+  pull_request:
+    paths:
+      - "rust/**"
+      - "src-tauri/**"
+      - "src/tauri-ui/**"
+      - "tests/desktop-ui.test.cjs"
+      - "tests/helpers/**"
+      - "package.json"
+      - ".github/workflows/native-validation.yml"
   push:
     branches:
       - main
@@ -20,6 +29,7 @@ jobs:
         platform:
           - macos-latest
           - windows-latest
+          - ubuntu-22.04
     steps:
       - name: Checkout validation revision
         uses: actions/checkout@v4
@@ -34,11 +44,23 @@ jobs:
         with:
           components: rustfmt
 
+      - name: Report Rust compiler
+        run: rustc --version
+
+      - name: Report Cargo version
+        run: cargo --version
+
       # Keep each external command in its own step: PowerShell must not hide
       # an earlier command failure behind the exit code of a later command.
       # Subsequent checks still run after a check fails; the job remains failed.
       - name: Check Rust formatting
         run: cargo fmt --manifest-path rust/tokenmarket-core/Cargo.toml --all --check
+
+      - name: Check terminal CLI formatting
+        run: cargo fmt --manifest-path rust/tokenmarket-cli/Cargo.toml --all --check
+
+      - name: Check desktop formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all --check
 
       - name: Test shared core
         if: ${{ !cancelled() }}
@@ -56,5 +78,37 @@ jobs:
         run: cargo test --manifest-path rust/tokenmarket-cli/Cargo.toml --all-targets --locked
 
       - name: Check native desktop compilation
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && runner.os != 'Linux' }}
         run: cargo check --manifest-path src-tauri/Cargo.toml --locked
+
+  desktop-ui:
+    name: Desktop DOM/IPC fixtures
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout validation revision
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Report checked revision
+        run: git rev-parse HEAD
+
+      - name: Install Node runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+
+      - name: Install pinned browser fixture library
+        run: npm install --prefix "$RUNNER_TEMP/tokenmarket-ui-runtime" --no-save --package-lock=false --ignore-scripts playwright@1.61.0
+
+      - name: Install matching Chromium and OS libraries
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/tokenmarket-ui-browsers
+        run: node "$RUNNER_TEMP/tokenmarket-ui-runtime/node_modules/playwright/cli.js" install --with-deps chromium
+
+      - name: Test desktop DOM and native IPC contracts
+        env:
+          NODE_PATH: ${{ runner.temp }}/tokenmarket-ui-runtime/node_modules
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/tokenmarket-ui-browsers
+        run: node --test --test-reporter=tap tests/desktop-ui.test.cjs

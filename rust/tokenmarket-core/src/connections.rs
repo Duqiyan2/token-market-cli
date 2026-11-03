@@ -2,11 +2,18 @@
 mod configuration;
 mod issuance;
 pub use issuance::CredentialLoss;
+mod grok;
 mod harness;
+mod hermes;
 mod jsonc;
+mod kimi;
+mod minimax;
 mod model_plan;
 mod multi_model;
+pub(crate) mod oh_my_pi;
+mod pi;
 mod private_storage;
+mod provider_config;
 mod restore;
 mod testing;
 use configuration::{ConfigDocument, PreparedFile};
@@ -74,6 +81,8 @@ pub struct ConnectionRecord {
     #[serde(default)]
     pub platform_url: String,
     pub created_at: String,
+    #[serde(default)]
+    configuration_location: Option<crate::inventory::ConfigurationLocation>,
     pub receipts: Vec<FileReceipt>,
     api_key: String,
 }
@@ -170,6 +179,14 @@ pub struct ConnectionManager {
     private: private_storage::PrivateStorage,
     client_login: Option<crate::desktop::DesktopLogin>,
 }
+/// Release the completed operation even if a concurrently spawned version probe
+/// briefly inherited its descriptor before exec (as with InstallationGuard).
+struct OperationLock(fs::File);
+impl Drop for OperationLock {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
+}
 impl ConnectionManager {
     pub fn current() -> Self {
         Self::new(
@@ -234,7 +251,7 @@ impl ConnectionManager {
         }
     }
     /// OS file lock also serializes distinct manager instances/processes on this device.
-    fn operation_lock(&self) -> Result<fs::File> {
+    fn operation_lock(&self) -> Result<OperationLock> {
         fs::create_dir_all(&self.directory)?;
         let file = fs::OpenOptions::new()
             .read(true)
@@ -244,7 +261,7 @@ impl ConnectionManager {
             .open(self.directory.join("operation.lock"))?;
         file.try_lock()
             .map_err(|_| anyhow::anyhow!("工具操作正在进行，请稍候"))?;
-        Ok(file)
+        Ok(OperationLock(file))
     }
     fn saved_keys(&self) -> Result<Vec<SavedKey>> {
         let path = self.directory.join("keys.json");
@@ -406,6 +423,7 @@ impl ConnectionManager {
             .try_lock()
             .map_err(|_| anyhow::anyhow!("接入正在进行，请稍候"))?;
         inventory.require_installed(tool)?;
+        let _installation_guard = inventory.connection_guard(tool)?;
         if !matches!(
             tool,
             ToolId::ClaudeCode
@@ -414,6 +432,12 @@ impl ConnectionManager {
                 | ToolId::WorkBuddy
                 | ToolId::OpenClaw
                 | ToolId::OpenCode
+                | ToolId::GrokBuild
+                | ToolId::Hermes
+                | ToolId::Pi
+                | ToolId::MiniMaxCode
+                | ToolId::OhMyPi
+                | ToolId::KimiCode
         ) {
             bail!("此工具的桌面接入尚未开放")
         }
@@ -439,6 +463,7 @@ impl ConnectionManager {
         if fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
             bail!("工具配置是符号链接，请先确认实际配置路径");
         }
+        let configuration_location = inventory.configuration_location(tool)?;
         let before = match fs::read(&path) {
             Ok(v) => Some(v),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
@@ -536,6 +561,7 @@ impl ConnectionManager {
                 &key,
                 &mut records,
                 previous.as_ref(),
+                configuration_location,
             )
             .await;
         let connection = result?;
@@ -557,6 +583,7 @@ impl ConnectionManager {
         key: &IssuedKey,
         records: &mut Vec<ConnectionRecord>,
         previous: Option<&ConnectionRecord>,
+        configuration_location: crate::inventory::ConfigurationLocation,
     ) -> Result<ConnectionSummary> {
         if key.bound_workspace.id != context.workspace_id
             || key.owner.id != context.owner_id
@@ -617,6 +644,7 @@ impl ConnectionManager {
             .transpose()?;
         self.validate_for_apply(context, tool, device_id, key)
             .await?;
+        configuration_location.verify(tool)?;
         let mut receipts = vec![];
         for file in &files {
             let current = match fs::read(&file.path) {
@@ -695,6 +723,7 @@ impl ConnectionManager {
             gateway_url: self.gateway_url.clone(),
             platform_url: self.platform_url.trim_end_matches('/').into(),
             created_at: crate::config::now_iso8601(),
+            configuration_location: Some(configuration_location),
             receipts,
             api_key: key.api_key.clone(),
         };

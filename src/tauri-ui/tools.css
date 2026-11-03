@@ -84,3 +84,7 @@
 }
 
 @media (max-width: 800px) { .tool-detail-grid { grid-template-columns: 1fr; } }
+
+.tool-install-dialog { width: min(680px, calc(100vw - 36px)); max-height: 85vh; }
+.tool-install-output { max-height: 42vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 14px; background: var(--surface, #f5f5f7); border-radius: 10px; font-size: 12px; }
+.tool-install-unavailable { display: block; max-width: 210px; font-size: 12px; color: var(--text-secondary, #666); }

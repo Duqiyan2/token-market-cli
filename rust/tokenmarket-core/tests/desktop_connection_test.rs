@@ -168,6 +168,12 @@ async fn codex_test_uses_saved_responses_credentials_and_persists_redacted_inven
     assert!(result.passed);
     assert!(result.output_verified);
     assert!(!result.streaming_verified && !result.tool_call_verified);
+    assert!(result
+        .detail
+        .contains("仅检查模型 glm-5.3 的一次非流式接口文本响应"));
+    assert!(result
+        .detail
+        .contains("未验证其他模型、流式、工具调用或 Agent 运行表现"));
     let request = request.await.unwrap();
     assert!(
         request.starts_with("POST /v1/responses HTTP/1.1"),
@@ -472,10 +478,17 @@ async fn rejected_key_returns_redacted_actionable_failure_and_network_failure_is
             .unwrap()
             .contains("sk-original"));
         assert!(result.detail.contains(if remote {
-            "清除连接"
+            "平台检查 Key 状态"
         } else {
             "手动重试"
         }));
+        assert!(!result.detail.contains("清除连接"));
+        assert!(result
+            .detail
+            .contains("仅检查模型 glm-5.3 的一次非流式接口文本响应"));
+        assert!(result
+            .detail
+            .contains("未验证其他模型、流式、工具调用或 Agent 运行表现"));
         if remote {
             assert!(result.detail.contains("HTTP 401"));
             request.await.unwrap();

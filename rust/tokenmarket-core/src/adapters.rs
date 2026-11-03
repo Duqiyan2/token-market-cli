@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::{
@@ -40,6 +40,33 @@ pub enum ToolId {
     OpenClaw,
     #[serde(rename = "opencode")]
     OpenCode,
+    GrokBuild,
+    Hermes,
+    Pi,
+    #[serde(rename = "minimax-code")]
+    MiniMaxCode,
+    OhMyPi,
+    KimiCode,
+}
+
+impl ToolId {
+    /// The upstream command identity is shared by discovery and all launch surfaces.
+    pub fn command(self) -> &'static str {
+        match self {
+            Self::ClaudeCode => "claude",
+            Self::Codex => "codex",
+            Self::WorkBuddy => "workbuddy",
+            Self::DeepSeekHarness => "dsh",
+            Self::OpenClaw => "openclaw",
+            Self::OpenCode => "opencode",
+            Self::GrokBuild => "grok",
+            Self::Hermes => "hermes",
+            Self::Pi => "pi",
+            Self::MiniMaxCode => "mcode",
+            Self::OhMyPi => "omp",
+            Self::KimiCode => "kimi",
+        }
+    }
 }
 
 impl std::fmt::Display for ToolId {
@@ -51,6 +78,12 @@ impl std::fmt::Display for ToolId {
             ToolId::DeepSeekHarness => "deepseek-harness",
             ToolId::OpenClaw => "openclaw",
             ToolId::OpenCode => "opencode",
+            ToolId::GrokBuild => "grok-build",
+            ToolId::Hermes => "hermes",
+            ToolId::Pi => "pi",
+            ToolId::MiniMaxCode => "minimax-code",
+            ToolId::OhMyPi => "oh-my-pi",
+            ToolId::KimiCode => "kimi-code",
         };
         f.write_str(value)
     }
@@ -103,6 +136,12 @@ enum PathKind {
     DeepSeekHarness { fallback_root: bool },
     OpenClaw,
     OpenCode,
+    GrokBuild,
+    Hermes,
+    Pi,
+    MiniMaxCode,
+    OhMyPi,
+    KimiCode,
 }
 
 impl Adapter {
@@ -140,6 +179,24 @@ impl Adapter {
             PathKind::OpenCode => env_path("OPENCODE_CONFIG", || {
                 home.join(".config/opencode/opencode.json")
             }),
+            PathKind::GrokBuild => env_path("GROK_HOME", || home.join(".grok")).join("config.toml"),
+            PathKind::KimiCode => {
+                env_path("KIMI_CODE_HOME", || home.join(".kimi-code")).join("config.toml")
+            }
+            PathKind::Hermes => crate::config::hermes_home(
+                &home,
+                if cfg!(windows) {
+                    crate::inventory::HostPlatform::Windows
+                } else {
+                    crate::inventory::HostPlatform::Unix
+                },
+            )
+            .join("config.yaml"),
+            PathKind::MiniMaxCode => minimax_data_dir(&home).join("config.yaml"),
+            PathKind::OhMyPi => crate::connections::oh_my_pi::config_path(&home),
+            PathKind::Pi => {
+                env_path("PI_CODING_AGENT_DIR", || home.join(".pi/agent")).join("models.json")
+            }
         }
     }
 
@@ -149,6 +206,107 @@ impl Adapter {
 
     pub fn read_config(&self) -> Result<Option<ToolConfig>> {
         match self.id {
+            ToolId::KimiCode => bail!("请使用共享客户端连接状态查看 Kimi Code 配置"),
+            ToolId::Hermes => {
+                let Some(text) = read_file_if_exists(&self.config_path())? else {
+                    return Ok(None);
+                };
+                let value: Value =
+                    serde_yaml::from_str(&text).context("Hermes 配置不是有效 YAML")?;
+                let provider = &value["providers"]["tokenmarket"];
+                let Some(base_url) = provider["api"].as_str() else {
+                    return Ok(None);
+                };
+                let Some(api_key) = provider["api_key"].as_str() else {
+                    return Ok(None);
+                };
+                let model = provider["models"]
+                    .as_object()
+                    .and_then(|models| models.keys().next())
+                    .cloned()
+                    .unwrap_or_default();
+                Ok(Some(ToolConfig {
+                    base_url: base_url.into(),
+                    api_key: api_key.into(),
+                    model,
+                    context_window_tokens: None,
+                }))
+            }
+            ToolId::MiniMaxCode => {
+                let Some(content) = read_file_if_exists(&self.config_path())? else {
+                    return Ok(None);
+                };
+                let value: Value =
+                    serde_yaml::from_str(&content).context("MiniMax Code 配置不是有效 YAML")?;
+                let provider = &value["custom_provider"]["tokenmarket"];
+                Ok(
+                    match (
+                        provider["options"]["baseURL"].as_str(),
+                        provider["options"]["apiKey"].as_str(),
+                        provider["models"].as_object().and_then(|m| m.keys().next()),
+                    ) {
+                        (Some(base), Some(key), Some(model)) => Some(ToolConfig {
+                            base_url: base.into(),
+                            api_key: key.into(),
+                            model: model.into(),
+                            context_window_tokens: None,
+                        }),
+                        _ => None,
+                    },
+                )
+            }
+            ToolId::OhMyPi => bail!("请使用共享客户端连接状态查看 Oh My Pi 配置"),
+            ToolId::Pi => {
+                let value = read_json_if_exists(&self.config_path())?;
+                let provider = &value["providers"]["tokenmarket"];
+                Ok(
+                    match (
+                        provider["baseUrl"].as_str(),
+                        provider["apiKey"].as_str(),
+                        provider["models"]
+                            .as_array()
+                            .and_then(|rows| rows.first())
+                            .and_then(|row| row["id"].as_str()),
+                    ) {
+                        (Some(base), Some(key), Some(model)) => Some(ToolConfig {
+                            base_url: base.into(),
+                            api_key: key.into(),
+                            model: model.into(),
+                            context_window_tokens: None,
+                        }),
+                        _ => None,
+                    },
+                )
+            }
+            ToolId::GrokBuild => {
+                let Some(content) = read_file_if_exists(&self.config_path())? else {
+                    return Ok(None);
+                };
+                let value: Value =
+                    toml_edit::de::from_str(&content).context("Grok Build 配置不是有效 TOML")?;
+                for (name, model) in value
+                    .get("model")
+                    .and_then(Value::as_object)
+                    .into_iter()
+                    .flatten()
+                {
+                    if name.starts_with("tokenmarket/") {
+                        if let (Some(base_url), Some(api_key), Some(model_id)) = (
+                            model["base_url"].as_str(),
+                            model["api_key"].as_str(),
+                            model["model"].as_str(),
+                        ) {
+                            return Ok(Some(ToolConfig {
+                                base_url: base_url.into(),
+                                api_key: api_key.into(),
+                                model: model_id.into(),
+                                context_window_tokens: model["context_window"].as_u64(),
+                            }));
+                        }
+                    }
+                }
+                Ok(None)
+            }
             ToolId::ClaudeCode => {
                 let value = read_json_if_exists(&self.config_path())?;
                 let base_url = value
@@ -326,6 +484,12 @@ impl Adapter {
         let backup_path = create_backup(&config_path)?;
 
         match self.id {
+            ToolId::KimiCode => bail!("请使用共享客户端接入流程配置 Kimi Code"),
+            ToolId::MiniMaxCode => bail!("请使用共享客户端接入流程配置 MiniMax Code"),
+            ToolId::OhMyPi => bail!("请使用共享客户端接入流程配置 Oh My Pi"),
+            ToolId::Pi => bail!("请使用共享客户端接入流程配置 Pi"),
+            ToolId::GrokBuild => bail!("请使用共享客户端接入流程配置 Grok Build"),
+            ToolId::Hermes => bail!("请使用共享客户端接入流程配置 Hermes"),
             ToolId::ClaudeCode => {
                 let mut current = read_json_if_exists(&config_path)?;
                 if current.is_null() {
@@ -560,7 +724,88 @@ pub fn adapters() -> Vec<Adapter> {
             requires_restart: false,
             path_kind: PathKind::OpenCode,
         },
+        Adapter {
+            id: ToolId::GrokBuild,
+            name: "Grok Build",
+            protocol: Protocol::OpenAiCompatible,
+            requires_restart: true,
+            path_kind: PathKind::GrokBuild,
+        },
+        Adapter {
+            id: ToolId::Hermes,
+            name: "Hermes",
+            protocol: Protocol::OpenAiCompatible,
+            requires_restart: true,
+            path_kind: PathKind::Hermes,
+        },
+        Adapter {
+            id: ToolId::Pi,
+            name: "Pi",
+            protocol: Protocol::OpenAiCompatible,
+            requires_restart: false,
+            path_kind: PathKind::Pi,
+        },
+        Adapter {
+            id: ToolId::MiniMaxCode,
+            name: "MiniMax Code",
+            protocol: Protocol::OpenAiCompatible,
+            requires_restart: true,
+            path_kind: PathKind::MiniMaxCode,
+        },
+        Adapter {
+            id: ToolId::OhMyPi,
+            name: "Oh My Pi",
+            protocol: Protocol::OpenAiCompatible,
+            requires_restart: false,
+            path_kind: PathKind::OhMyPi,
+        },
+        Adapter {
+            id: ToolId::KimiCode,
+            name: "Kimi Code",
+            protocol: Protocol::OpenAiCompatible,
+            requires_restart: false,
+            path_kind: PathKind::KimiCode,
+        },
     ]
+}
+
+/// MiniMax's data/profile location is independent of MCODE_INSTALL_DIR.
+/// Explicit CLI profiles can be managed by exporting their data directory;
+/// only the upstream opt-in legacy runtime environment has profile semantics.
+pub(crate) fn minimax_data_dir(home: &Path) -> PathBuf {
+    let nonempty = |name: &str| {
+        std::env::var(name)
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .map(|v| v.trim().to_owned())
+    };
+    if let Some(path) = nonempty("MINIMAX_DATA_DIR").or_else(|| nonempty("MAVIS_DATA_DIR")) {
+        return path.into();
+    }
+    let legacy = std::env::var("__MAVIS_ALLOW_LEGACY_RUNTIME_ENV")
+        .ok()
+        .as_deref()
+        == Some("1");
+    if legacy {
+        if let Some(path) = nonempty("__MAVIS_RUNTIME_DATA_DIR") {
+            return path.into();
+        }
+    }
+    let profile = if legacy {
+        nonempty("__MAVIS_RUNTIME_PROFILE")
+    } else {
+        None
+    };
+    let suffix = profile.map(|p| format!("-{p}")).unwrap_or_default();
+    let primary = home.join(format!(".minimax{suffix}"));
+    let previous = home.join(format!(".mavis{suffix}"));
+    // Do not migrate or merge data while discovering configuration. An explicit
+    // launch binding keeps a retained legacy root effective without a rename.
+    if !primary.exists() && previous.is_dir() {
+        previous
+    } else {
+        primary
+    }
 }
 
 pub fn get_adapter(id: ToolId) -> Adapter {

@@ -20,7 +20,7 @@ fn missing_tools_offer_official_downloads_and_refuse_connection_even_with_leftov
     std::fs::create_dir_all(root.path().join("Applications/WorkBuddy.app")).unwrap();
     let inventory = ToolInventory::new(environment(root.path(), HostPlatform::MacOs));
     let entries = inventory.list().unwrap();
-    assert_eq!(entries.len(), 6);
+    assert_eq!(entries.len(), 12);
     assert_eq!(
         entries.iter().map(|e| e.name).collect::<Vec<_>>(),
         [
@@ -29,7 +29,13 @@ fn missing_tools_offer_official_downloads_and_refuse_connection_even_with_leftov
             "WorkBuddy",
             "DeepSeek Harness",
             "OpenClaw",
-            "OpenCode"
+            "OpenCode",
+            "Grok Build",
+            "Hermes",
+            "Pi",
+            "MiniMax Code",
+            "Oh My Pi",
+            "Kimi Code"
         ]
     );
     assert!(entries.iter().all(|e| !e.installed && !e.can_connect));
@@ -66,6 +72,10 @@ fn command_installation_is_freshly_detected_and_removed_without_running_the_tool
         (ToolId::DeepSeekHarness, "dsh"),
         (ToolId::OpenClaw, "openclaw"),
         (ToolId::OpenCode, "opencode"),
+        (ToolId::GrokBuild, "grok"),
+        (ToolId::Pi, "pi"),
+        (ToolId::OhMyPi, "omp"),
+        (ToolId::KimiCode, "kimi"),
     ] {
         assert!(inventory.require_installed(tool).is_err());
         let binary = root.path().join("bin").join(command);
@@ -184,4 +194,28 @@ fn macos_launch_plan_uses_nvm_target_and_quotes_paths_for_terminal_and_applescri
     assert!(plan.args[3].contains("'\\\"'\\\"'quoted'\\\"'\\\"'"));
     assert!(plan.args[3].contains("env PATH="));
     assert!(plan.wait_for_exit);
+}
+
+#[test]
+fn linux_terminal_launch_resolves_private_wrappers_and_process_environment_without_a_shell_search()
+{
+    let root = tempfile::tempdir().unwrap();
+    let mut env = environment(root.path(), HostPlatform::Unix);
+    let prefix = root.path().join("home/.tokenmarket/tools/minimax-code/bin");
+    env.command_directories = vec![prefix.clone()];
+    executable(&prefix.join("mcode"));
+    let inventory = ToolInventory::new(env);
+    let plan = inventory.launch_plan(ToolId::MiniMaxCode).unwrap();
+    assert_eq!(std::path::PathBuf::from(plan.program), prefix.join("mcode"));
+    assert!(plan.args.is_empty());
+    assert!(plan.wait_for_exit);
+    assert!(plan
+        .environment
+        .iter()
+        .any(|(key, value)| key == "PATH"
+            && value.starts_with(&prefix.to_string_lossy().to_string())));
+    assert!(plan
+        .environment
+        .iter()
+        .any(|(key, value)| key == "MINIMAX_DATA_DIR" && value.ends_with(".minimax")));
 }

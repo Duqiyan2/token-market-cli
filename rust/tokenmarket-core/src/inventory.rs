@@ -4,13 +4,13 @@ use crate::{
     ToolId,
 };
 use anyhow::{bail, Context, Result};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     fs,
     path::{Path, PathBuf},
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HostPlatform {
     MacOs,
     Windows,
@@ -18,7 +18,7 @@ pub enum HostPlatform {
 }
 
 /// Platform boundary used by the desktop and by isolated filesystem fixtures.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstallationEnvironment {
     pub platform: HostPlatform,
     pub home: PathBuf,
@@ -47,6 +47,9 @@ impl InstallationEnvironment {
             home.join(".cargo/bin"),
             home.join(".opencode/bin"),
         ]);
+        command_directories.extend(crate::installation::recipes::managed_command_directories(
+            &home,
+        ));
         let mut application_directories = vec![];
         if platform == HostPlatform::Windows {
             if let Some(appdata) = std::env::var_os("APPDATA") {
@@ -126,6 +129,39 @@ pub struct ToolInventoryEntry {
     pub download_url: &'static str,
     pub config_path: String,
     pub connection: Option<ConnectionProjection>,
+    pub installation: crate::installation::InstallationAvailability,
+}
+
+/// Private connection context: re-resolve the same installation's effective path
+/// using current overrides before displaying a valid verdict or sending traffic.
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct ConfigurationLocation {
+    environment: InstallationEnvironment,
+    path: PathBuf,
+    follows_process_home: bool,
+}
+impl ConfigurationLocation {
+    pub(crate) fn verify(&self, tool: ToolId) -> Result<()> {
+        let mut environment = self.environment.clone();
+        if self.follows_process_home {
+            environment.home = crate::config::home_dir();
+        }
+        let current = ToolInventory::new(environment).config_path(tool);
+        if absolute_config_path(&current)? != self.path {
+            bail!(
+                "{} 活动配置目录/profile 已改变，请先取消原连接后重新检测接入",
+                get_adapter(tool).name
+            )
+        }
+        Ok(())
+    }
+}
+fn absolute_config_path(path: &Path) -> Result<PathBuf> {
+    Ok(if path.is_absolute() {
+        path.into()
+    } else {
+        std::env::current_dir()?.join(path)
+    })
 }
 
 pub struct ToolInventory {
@@ -137,6 +173,13 @@ impl ToolInventory {
     }
     pub fn current() -> Self {
         Self::new(InstallationEnvironment::current())
+    }
+    pub(crate) fn configuration_location(&self, tool: ToolId) -> Result<ConfigurationLocation> {
+        Ok(ConfigurationLocation {
+            environment: self.environment.clone(),
+            path: absolute_config_path(&self.config_path(tool))?,
+            follows_process_home: self.environment.home == crate::config::home_dir(),
+        })
     }
     pub fn list(&self) -> Result<Vec<ToolInventoryEntry>> {
         let manager = crate::connections::ConnectionManager::new(
@@ -161,6 +204,11 @@ impl ToolInventory {
                     id: adapter.id,
                     name: adapter.name,
                     installed,
+                    installation: crate::installation::recipes::availability(
+                        adapter.id,
+                        &self.environment,
+                        std::env::consts::ARCH,
+                    ),
                     can_connect: installed,
                     download_url: official_download_url(adapter.id),
                     config_path: self.config_path(adapter.id).display().to_string(),
@@ -181,6 +229,54 @@ impl ToolInventory {
     }
     /// Desktop discovery and desktop writes share this path. Terminal CLI paths are unchanged.
     pub fn config_path(&self, tool: ToolId) -> PathBuf {
+        if tool == ToolId::KimiCode {
+            return std::env::var_os("KIMI_CODE_HOME")
+                .filter(|v| !v.is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| self.environment.home.join(".kimi-code"))
+                .join("config.toml");
+        }
+        if tool == ToolId::Hermes {
+            return crate::config::hermes_home(&self.environment.home, self.environment.platform)
+                .join("config.yaml");
+        }
+        if tool == ToolId::OhMyPi {
+            return crate::connections::oh_my_pi::config_path(&self.environment.home);
+        }
+        if tool == ToolId::DeepSeekHarness
+            && std::env::var_os("DSH_ACTIVE_PROFILE").is_none()
+            && self.application_path(tool).is_none()
+            && self.environment.command_path("dsh")
+                == Some(
+                    self.environment
+                        .home
+                        .join(".tokenmarket/tools/deepseek-harness/bin/dsh"),
+                )
+        {
+            // The npm CLI cannot boot Electron's reserved desktop profile. Its
+            // home patch applies to web/headless and preserves retained profiles.
+            return std::env::var_os("DSH_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| self.environment.home.join(".dsh"))
+                .join("cordis.patch.yml");
+        }
+        if tool == ToolId::MiniMaxCode {
+            return crate::adapters::minimax_data_dir(&self.environment.home).join("config.yaml");
+        }
+        if tool == ToolId::Pi {
+            return std::env::var_os("PI_CODING_AGENT_DIR")
+                .filter(|v| !v.to_string_lossy().trim().is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| self.environment.home.join(".pi/agent"))
+                .join("models.json");
+        }
+        if tool == ToolId::GrokBuild {
+            return std::env::var_os("GROK_HOME")
+                .filter(|v| !v.to_string_lossy().trim().is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| self.environment.home.join(".grok"))
+                .join("config.toml");
+        }
         if tool == ToolId::WorkBuddy {
             let override_path = |name: &str| {
                 std::env::var_os(name)
@@ -211,6 +307,16 @@ impl ToolInventory {
     }
     /// Rechecks the filesystem immediately before a connection operation begins.
     pub fn require_installed(&self, tool: ToolId) -> Result<()> {
+        if self
+            .environment
+            .command_path(tool.command())
+            .is_some_and(|path| {
+                crate::installation::attempt::incomplete(&self.environment, tool, &path)
+            })
+            && self.application_path(tool).is_none()
+        {
+            bail!("上次安装尚未完成，请重试 tokenmarket install {tool}；已准备的依赖保留")
+        }
         if !self.is_installed(tool) {
             bail!(
                 "{} 未安装，请先从官网下载并重新检测",
@@ -219,18 +325,20 @@ impl ToolInventory {
         }
         Ok(())
     }
+    pub fn connection_guard(&self, tool: ToolId) -> Result<crate::installation::InstallationGuard> {
+        crate::installation::InstallationManager::new(
+            self.environment.clone(),
+            std::env::consts::ARCH.into(),
+            std::sync::Arc::new(crate::installation::NativeInstallExecutor),
+        )
+        .connection_guard(tool)
+    }
     pub fn is_installed(&self, tool: ToolId) -> bool {
-        let commands: &[&str] = match tool {
-            ToolId::ClaudeCode => &["claude"],
-            ToolId::Codex => &["codex"],
-            ToolId::WorkBuddy => &["workbuddy"],
-            ToolId::DeepSeekHarness => &["dsh"],
-            ToolId::OpenClaw => &["openclaw"],
-            ToolId::OpenCode => &["opencode"],
-        };
-        commands
-            .iter()
-            .any(|command| self.environment.has_command(command))
+        self.environment
+            .command_path(tool.command())
+            .is_some_and(|path| {
+                !crate::installation::attempt::incomplete(&self.environment, tool, &path)
+            })
             || self.application_path(tool).is_some()
     }
     /// Verified application launch target; command launchers are handled separately.
@@ -291,6 +399,12 @@ pub fn official_download_url(tool: ToolId) -> &'static str {
         ToolId::DeepSeekHarness => "https://www.deepseek.com/download/",
         ToolId::OpenClaw => "https://docs.openclaw.ai/install",
         ToolId::OpenCode => "https://opencode.ai/docs/",
+        ToolId::GrokBuild => "https://github.com/xai-org/grok-build",
+        ToolId::Hermes => "https://hermes-agent.nousresearch.com/docs/getting-started/installation",
+        ToolId::Pi => "https://pi.dev/",
+        ToolId::MiniMaxCode => "https://github.com/MiniMax-AI/minimax-code/releases/tag/v0.7.2",
+        ToolId::OhMyPi => "https://omp.sh/",
+        ToolId::KimiCode => "https://github.com/MoonshotAI/kimi-code",
     }
 }
 
@@ -298,7 +412,7 @@ impl InstallationEnvironment {
     pub(crate) fn has_command(&self, command: &str) -> bool {
         self.command_path(command).is_some()
     }
-    fn command_path(&self, command: &str) -> Option<PathBuf> {
+    pub(crate) fn command_path(&self, command: &str) -> Option<PathBuf> {
         for directory in &self.command_directories {
             if self.platform != HostPlatform::Windows {
                 let path = directory.join(command);
@@ -471,38 +585,18 @@ pub struct ToolLaunchPlan {
     pub wait_for_exit: bool,
 }
 impl ToolInventory {
-    /// Resolve against this fresh installation snapshot, including registry PATH and nvm.
-    pub fn launch_plan(&self, tool: ToolId) -> Result<ToolLaunchPlan> {
+    /// Foreground terminal/SSH launch. No shell lookup or persistent PATH changes
+    /// are required for a private wrapper; execution remains an explicit action.
+    pub fn terminal_launch_plan(&self, tool: ToolId) -> Result<ToolLaunchPlan> {
         self.require_installed(tool)?;
-        if let Some(path) = self.application_path(tool) {
-            return match self.environment.platform {
-                HostPlatform::MacOs => Ok(ToolLaunchPlan {
-                    program: "open".into(),
-                    args: vec!["-a".into(), path.to_string_lossy().into()],
-                    environment: vec![],
-                    wait_for_exit: true,
-                }),
-                HostPlatform::Windows => Ok(ToolLaunchPlan {
-                    program: path.to_string_lossy().into(),
-                    args: vec![],
-                    environment: vec![],
-                    wait_for_exit: false,
-                }),
-                HostPlatform::Unix => bail!("请从系统应用入口打开工具"),
-            };
-        }
-        let command = match tool {
-            ToolId::ClaudeCode => "claude",
-            ToolId::Codex => "codex",
-            ToolId::DeepSeekHarness => "dsh",
-            ToolId::WorkBuddy => "workbuddy",
-            ToolId::OpenClaw => "openclaw",
-            ToolId::OpenCode => "opencode",
-        };
+        let command = tool.command();
         let target = self
             .environment
             .command_path(command)
-            .context("工具启动文件已移除，请重新检测")?;
+            .context("未检测到命令行启动文件，请从系统应用入口打开此工具")?;
+        if crate::installation::attempt::incomplete(&self.environment, tool, &target) {
+            bail!("命令行安装尚未完成，请重试 tokenmarket install {tool}；桌面应用可单独打开")
+        }
         let mut directories = vec![target.parent().context("工具启动目录无效")?.to_path_buf()];
         directories.extend(
             self.environment
@@ -522,34 +616,113 @@ impl ToolInventory {
             .map(|p| p.to_string_lossy())
             .collect::<Vec<_>>()
             .join(delimiter);
+        let mut environment = vec![("PATH".into(), path)];
+        if tool == ToolId::MiniMaxCode {
+            environment.push((
+                "MINIMAX_DATA_DIR".into(),
+                self.config_path(tool)
+                    .parent()
+                    .context("MiniMax Code 数据目录无效")?
+                    .to_string_lossy()
+                    .into_owned(),
+            ));
+        }
+        if tool == ToolId::KimiCode
+            && self.environment.platform == HostPlatform::Windows
+            && std::env::var_os("KIMI_SHELL_PATH").is_none_or(|v| v.is_empty())
+        {
+            if let Some(bash) = crate::installation::portable_git::bash_path(&self.environment) {
+                environment.push((
+                    "KIMI_SHELL_PATH".into(),
+                    bash.to_string_lossy().into_owned(),
+                ));
+            }
+        }
         if self.environment.platform == HostPlatform::Windows {
-            // Only fixed command names enter cmd text. Discovered paths stay in the child
-            // environment, so spaces, ampersands and .cmd launchers need no shell interpolation.
-            let fixed = if tool == ToolId::OpenClaw {
-                "openclaw tui"
+            // CMD/BAT need cmd.exe. Only the fixed catalogue command enters cmd
+            // text; discovered paths (including &, spaces and Unicode) stay in PATH.
+            return Ok(ToolLaunchPlan {
+                program: "cmd.exe".into(),
+                args: vec![
+                    "/d".into(),
+                    "/c".into(),
+                    if tool == ToolId::OpenClaw {
+                        "openclaw tui".into()
+                    } else {
+                        command.into()
+                    },
+                ],
+                environment,
+                wait_for_exit: true,
+            });
+        }
+        Ok(ToolLaunchPlan {
+            program: target.to_string_lossy().into_owned(),
+            args: if tool == ToolId::OpenClaw {
+                vec!["tui".into()]
             } else {
-                command
+                vec![]
+            },
+            environment,
+            wait_for_exit: true,
+        })
+    }
+    /// Desktop discovery and foreground CLI launch share the executable/env plan.
+    pub fn launch_plan(&self, tool: ToolId) -> Result<ToolLaunchPlan> {
+        self.require_installed(tool)?;
+        if let Some(path) = self.application_path(tool) {
+            return match self.environment.platform {
+                HostPlatform::MacOs => Ok(ToolLaunchPlan {
+                    program: "open".into(),
+                    args: vec!["-a".into(), path.to_string_lossy().into()],
+                    environment: vec![],
+                    wait_for_exit: true,
+                }),
+                HostPlatform::Windows => Ok(ToolLaunchPlan {
+                    program: path.to_string_lossy().into(),
+                    args: vec![],
+                    environment: vec![],
+                    wait_for_exit: false,
+                }),
+                HostPlatform::Unix => bail!("请从系统应用入口打开工具"),
             };
+        }
+        let foreground = self.terminal_launch_plan(tool)?;
+        if self.environment.platform == HostPlatform::Windows {
             return Ok(ToolLaunchPlan {
                 program: "cmd".into(),
-                args: ["/c", "start", "", "cmd", "/k", fixed]
-                    .map(str::to_owned)
-                    .to_vec(),
-                environment: vec![("PATH".into(), path)],
+                args: [
+                    "/c",
+                    "start",
+                    "",
+                    "cmd",
+                    "/k",
+                    foreground.args.last().unwrap(),
+                ]
+                .map(str::to_owned)
+                .to_vec(),
+                environment: foreground.environment,
                 wait_for_exit: false,
             });
         }
         if self.environment.platform == HostPlatform::MacOs {
-            fn shell_quote(value: &str) -> String {
+            fn quote(value: &str) -> String {
                 format!("'{}'", value.replace('\'', "'\"'\"'"))
             }
-            let terminal = format!(
-                "env PATH={} {}{}",
-                shell_quote(&path),
-                shell_quote(&target.to_string_lossy()),
-                if tool == ToolId::OpenClaw { " tui" } else { "" }
-            );
-            let script = terminal.replace('\\', "\\\\").replace('"', "\\\"");
+            let variables = foreground
+                .environment
+                .iter()
+                .map(|(k, v)| format!("{k}={}", quote(v)))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let args = foreground
+                .args
+                .iter()
+                .map(|v| quote(v))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let terminal = format!("env {variables} {} {args}", quote(&foreground.program));
+            let script = terminal.replace('\\', "\\\\").replace('\"', "\\\"");
             return Ok(ToolLaunchPlan {
                 program: "osascript".into(),
                 args: vec![
@@ -562,6 +735,6 @@ impl ToolInventory {
                 wait_for_exit: true,
             });
         }
-        bail!("请打开终端运行工具")
+        Ok(foreground)
     }
 }

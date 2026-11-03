@@ -21,11 +21,14 @@ connection action. No environment variable or real configuration is mutated.
 Configuration locations continue to use the existing adapters and their explicit
 `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `WORKBUDDY_CONFIG_PATH`, `DSH_HOME`,
 `DSH_ACTIVE_PROFILE`, `OPENCLAW_CONFIG_PATH` and `OPENCODE_CONFIG` overrides.
+New adapters also respect `GROK_HOME`, `HERMES_HOME`, `PI_CODING_AGENT_DIR`, and MiniMax
+`MINIMAX_DATA_DIR` / `MAVIS_DATA_DIR` (see [MiniMax profile rules](minimax-code.md)).
 Windows home discovery uses `USERPROFILE`.
 
 ## Installation evidence
 
-- Commands: `claude`, `codex`, `workbuddy`, `dsh`, `openclaw`, `opencode`.
+- Commands: `claude`, `codex`, `workbuddy`, `dsh`, `openclaw`, `opencode`, `grok`,
+  `hermes`, `pi`, `mcode`, `omp`.
   Unix discovery requires an executable file, including a valid symlink target.
   Search includes PATH and common user/package-manager binary directories.
 - macOS desktop applications: WorkBuddy, DeepSeek Harness, OpenClaw and OpenCode
@@ -43,8 +46,11 @@ Windows home discovery uses `USERPROFILE`.
 - A configuration directory such as `.dsh`, credentials or an old key record is
   never sufficient installation evidence. No detection probe executes a tool.
 
-The six rows display native SVG tool marks, names and installation status.
-Missing tools offer the fixed official download page and a disabled Connect.
+The rows display tool marks, names and installation status. Missing tools offer
+an Install button with catalogue-owned compatibility information. The shared
+installation manager selects each tool's verified recipe. An unavailable recipe disables Install with
+an explanation and retains the fixed official installation-guide link.
+Connection remains unavailable until actual installation is detected.
 The UI refreshes after login, explicit re-detection, foreground/visibility return
 and every 15 seconds while visible and authenticated. Logout clears the region
 and late results cannot restore a previous account's inventory. Old CLI key-history files are not read or projected. Unknown tool configuration
@@ -61,12 +67,52 @@ never supplies an arbitrary download URL. Verified primary pages, 2026-10-28:
 | DeepSeek Harness | [DeepSeek downloads](https://www.deepseek.com/download/) |
 | OpenClaw | [OpenClaw install](https://docs.openclaw.ai/install) |
 | OpenCode | [OpenCode install](https://opencode.ai/docs/) |
+| Hermes | [Hermes CLI installation](https://hermes-agent.nousresearch.com/docs/getting-started/installation) |
 
 DeepSeek's [desktop README](https://github.com/deepseek-ai/deepseek-harness/blob/master/apps/desktop/README.md)
 confirms `dsh` / `dsh.cmd`, optional command registration and uninstall preservation
 of `.dsh`. WorkBuddy's [vendor download archive](https://www.codebuddy.cn/docs/workbuddy/Download-History)
 links the vendor's current site and macOS/Windows installers. These are verified
 landing-page entries, not a claim that downloading/installing succeeded.
+
+## Explicit installation
+
+`InstallationManager` is separate from connection and credential management.
+OpenClaw uses official version-bound rootless installation on macOS/Linux, or
+private Node preparation and private-prefix npm installation on Windows. Both
+skip onboarding and Gateway service work. The initial source-checked stable pin
+is `2026.10.9`; native/runtime acceptance remains separate.
+
+OpenCode installs the official V1 `1.19.5` release archive into a user-private
+command directory, checks its release SHA256 before extraction, and uses the
+baseline x64 artifacts rather than assuming AVX2 support. Stable existing V1
+installations are reused without upgrading to the install pin. A positively
+identified V2 CLI or desktop application stops Connect/Reconnect before Key
+issuance or configuration mutation. CLI and application identities are both
+checked because desktop launch prefers an application while terminal management
+may use a separate command. Version metadata is read without launching the GUI.
+Unknown version metadata is not proof of incompatibility.
+
+The supported contract is the [version-tagged V1 provider implementation](https://github.com/anomalyco/opencode/blob/v1.19.5/packages/opencode/src/provider/provider.ts)
+and [V1 configuration](https://github.com/anomalyco/opencode/blob/v1.19.5/packages/opencode/src/config/config.ts).
+The [official release](https://github.com/anomalyco/opencode/releases/tag/v1.19.5)
+publishes the archive digests. Source/fixture checks do not establish installed
+binary or Agent runtime acceptance.
+
+The desktop exposes progress, output, cancellation and failure retry, then
+refreshes actual installation and retained connection state. The terminal entry
+is `tokenmarket install openclaw`; Ctrl-C cancels the managed process tree.
+Cancellation retains dependencies already prepared. Installer success without
+an executable does not count as installed. Same-tool installation is serialized
+across client processes by an OS file lock.
+Connect/Reconnect holds the same per-tool lock through configuration publication,
+so a partially visible installation cannot race credential/configuration work.
+
+Version probes run only during explicit operations. Read-only inventory never
+executes tools. The public explicit `installed_version` probe can support a
+tool-specific compatibility gate before Connect writes configuration; an
+installer's selected version must not be confused with the adapter's entire
+documented compatible version range.
 
 ## Integration and verification boundaries
 
@@ -88,3 +134,28 @@ revision; a successful job is CI proof for that revision. These checks do not
 establish installed-bundle protocol handoff, registry/installer integration,
 application/computer restart, actual tool launch or target deployment. Those
 remain separate [native acceptance](desktop-login.md#verification-boundaries).
+
+Hermes CLI uses the pinned source bootstrap and provider YAML contract documented
+in [Hermes adapter notes](hermes.md). Its Windows data root is LOCALAPPDATA/hermes,
+with HERMES_HOME taking precedence; desktop package architecture limits do not
+restrict the verified CLI matrix.
+
+## Interrupted installation and terminal launch
+
+Client-owned installation attempts keep a path-scoped incomplete marker until
+all recipe steps and explicit version detection finish. Read-only discovery does
+not advertise such a launcher as usable. Install can repair that recorded work
+after failure, cancellation or a client restart, preserving prepared dependencies.
+An external compatible installation is still reused and is not upgraded by repair.
+Native GUI Stop Waiting retains its separate late-install detection behavior.
+
+`terminal_launch_plan` returns a foreground executable/argument/environment plan;
+the source CLI exposes it as `tokenmarket run <tool>` and prints that next step
+after Install and in Status. Private wrappers and Windows Git Bash stay available
+through process-only environment settings. Linux/SSH needs no GUI or persistent
+PATH edit. Launch is always a separate explicit action from installation.
+
+New connection records retain their effective configuration-location context.
+Summaries and Test re-resolve it with current directory/profile overrides, so an
+old receipt cannot authorize a model request for an inactive configuration root.
+Disconnect continues restoring the receipt's original files after a root changes.

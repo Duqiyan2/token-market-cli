@@ -1,3 +1,4 @@
+use super::provider_config::ProviderConfig;
 use super::{harness::HarnessConfig, multi_model::MultiModelConfig, FieldReceipt};
 use crate::ToolId;
 use anyhow::{bail, Context, Result};
@@ -10,6 +11,7 @@ pub(super) enum ConfigDocument {
     Codex(DocumentMut),
     Harness(Option<HarnessConfig>),
     MultiModel(MultiModelConfig),
+    Provider(ProviderConfig),
 }
 
 pub(super) struct PreparedFile {
@@ -52,6 +54,7 @@ impl ConfigDocument {
                     .and_then(|v| v.as_str()),
             ),
             Self::MultiModel(value) => return value.credential(gateway),
+            Self::Provider(value) => return value.credential(gateway),
             Self::Harness(value) => {
                 return Ok(value.as_ref().and_then(|value| value.credential(gateway)))
             }
@@ -66,6 +69,17 @@ impl ConfigDocument {
             .map(str::to_owned))
     }
     pub fn parse(tool: ToolId, before: &Option<Vec<u8>>, path: &Path) -> Result<Self> {
+        if matches!(
+            tool,
+            ToolId::Hermes
+                | ToolId::GrokBuild
+                | ToolId::Pi
+                | ToolId::MiniMaxCode
+                | ToolId::OhMyPi
+                | ToolId::KimiCode
+        ) {
+            return Ok(Self::Provider(ProviderConfig::parse(tool, before, path)?));
+        }
         if tool == ToolId::OpenCode
             && matches!(
                 path.extension().and_then(|v| v.to_str()),
@@ -171,6 +185,7 @@ impl ConfigDocument {
             .context("模型目录缺少模型 ID")?;
         match self {
             Self::MultiModel(config) => config.apply(gateway, key, models),
+            Self::Provider(config) => config.apply(gateway, key, models),
             Self::Harness(config) => {
                 let mut files = config
                     .take()

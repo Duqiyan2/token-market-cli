@@ -4,11 +4,13 @@
 
 通过桌面应用或终端，将本机 AI Agent 工具接入 Token Market。两端共用登录、当前空间和工具连接，可以随时切换使用。
 
-**当前版本 1.1.1** · [下载桌面端](https://github.com/FitBBC/token-market-cli/releases/tag/v1.1.1) · [npm 包](https://www.npmjs.com/package/tokenmarket)
+**最新已发布版本 1.1.1** · [下载桌面端](https://github.com/FitBBC/token-market-cli/releases/tag/v1.1.1) · [npm 包](https://www.npmjs.com/package/tokenmarket)
+
+**未发布的源码流程：** 下文的一键工具安装和新增工具接入面向本分支构建，尚未包含在已发布的 1.1.1 安装包中。使用 1.1.1 时仍需先自行安装 Agent 工具。
 
 ## 安装
 
-开始前，请准备好 Token Market 账号，并安装要接入的 AI Agent 工具。
+开始前，请准备好 Token Market 账号。下方下载方式安装的是已发布的 Token Market 客户端。
 
 ### 桌面端
 
@@ -38,19 +40,25 @@ npm 包内置全部五个平台的原生二进制，启动器会自动选择当�
 
 ## 接入第一个工具
 
+本节中的工具安装步骤需要使用本分支构建的桌面端或 CLI。
+
 ### 使用桌面端
 
 1. 打开 Token Market，点击 **使用浏览器登录**。
 2. 在浏览器完成登录，点击 **Open Application** 返回应用。
 3. 确认当前空间，新连接使用这个空间计费。
-4. 找到目标工具，点击 **接入**。刚安装的工具可以点击 **重新检测**。
-5. 重新打开工具，按提示选择 Token Market 模型。
+4. 工具未安装时点击 **安装**，按需完成原生安装器步骤，客户端会自动检测结果。安装按钮禁用时会说明原因。
+5. 安装完成后，另行点击 **接入**。
+6. 重新打开工具，按提示选择 Token Market 模型。
 
 ### 使用终端
+
+以下使用本分支构建的 CLI；已发布的 1.1.1 二进制尚无 `install` 命令。
 
 ```bash
 tokenmarket login
 tokenmarket workspace
+tokenmarket install claude-code
 tokenmarket connect claude-code
 tokenmarket status
 ```
@@ -75,13 +83,41 @@ tokenmarket workspace <workspace-id>
 | DeepSeek Harness | `deepseek-harness` |
 | OpenClaw | `openclaw` |
 | OpenCode | `opencode` |
+| Grok Build | `grok-build` |
+| Hermes | `hermes` |
+| Pi | `pi` |
+| MiniMax Code | `minimax-code` |
+| Oh My Pi | `oh-my-pi` |
+| Kimi Code | `kimi-code` |
 
 Claude Code、Codex 在正式环境使用 `glm-5.3`，测试包使用 `glm-5.2`。其他工具会配置兼容的文本生成模型目录。
+
+Grok Build 可在应用中点击 **安装**，或运行 `tokenmarket install grok-build`。
+安装完成后由你另行接入和测试。接入后重新启动 Grok，通过 `/model` 选择导入的
+Token Market 模型，原有默认模型保持不变。
+
+Pi 可点击 **安装**，或运行 `tokenmarket install pi`。接入后在 Pi 的 `/model`
+中选择导入的模型，保留原有默认设置和其他 provider。若 `auth.json` 已保存
+`tokenmarket` 凭据，请先在 Pi 中退出该 provider 后再接入；Token Market 不覆盖
+原 API Key 或 OAuth 信息。详见 [Pi 接入说明](docs/pi.md)。
+
+MiniMax Code 固定使用官方 0.7.2 发布包，安装目录与活动数据/profile 配置分开处理。详见 [MiniMax Code 接入说明](docs/minimax-code.md)。
+
+Oh My Pi 可独立点击 **安装**，或运行 `tokenmarket install oh-my-pi`。接入使用
+当前 OMP profile 的 `models.yml`/`models.yaml`，保留模型角色和已有认证。
+在 `/model` 中选择 Token Market 模型。详见 [Oh My Pi 接入说明](docs/oh-my-pi.md)。
+
+Kimi Code 可点击 **安装**，或运行 `tokenmarket install kimi-code`，使用官方
+TypeScript 版 **2.4.1** 独立二进制，并准备或复用 Windows Git Bash。接入保留
+默认模型和 Thinking 设置，每个导入模型均需真实上下文数据。详见 [Kimi Code 接入说明](docs/kimi-code.md)。
 
 ## 管理连接
 
 | 操作 | 桌面端 | CLI |
 | --- | --- | --- |
+| 安装缺失工具（未发布） | 点击 **安装**，按需完成原生步骤 | 源码构建中运行 `tokenmarket install <tool>` |
+| 在当前终端运行（未发布） | **打开工具** | 源码构建中运行 `tokenmarket run <tool>` |
+| 刷新安装状态 | 自动刷新或 **重新检测** | `tokenmarket status [tool]` |
 | 查看归属、模型和状态 | 打开工具详情 | `tokenmarket status [tool]` |
 | 更新连接或更换计费空间 | 切换空间后，点击 **重新接入** | `tokenmarket reconnect <tool>` |
 | 恢复接入前的配置 | **取消接入** | `tokenmarket disconnect <tool>` |
@@ -89,6 +125,8 @@ Claude Code、Codex 在正式环境使用 `glm-5.3`，测试包使用 `glm-5.2`�
 | 退出两端共用的登录 | 账号菜单 → **退出登录** | `tokenmarket logout` |
 
 接入和重新接入只配置工具，不发送模型请求。**测试会发送一次可能产生费用的模型请求。** 工具配置了多个模型时，通过 `--model <id>` 指定其中一个。
+
+安装也不会发送模型请求或自动接入。源码 CLI 会显示 `tokenmarket run <tool>`，可在当前终端运行私有目录中的工具，不更改持久 PATH。客户端安装中断后可重试安装，重启客户端后也会恢复未完成步骤。已有兼容安装会直接复用，不自动升级。图形安装器需在其自身界面取消；**停止等待** 只停止客户端监控。WorkBuddy、Harness 的具体流程见 [图形安装说明](docs/gui-installation.md)。
 
 重新接入时，如果账号或计费空间发生变化，会要求确认。取消接入会恢复本次连接接管的字段，遇到后续手动修改时询问处理方式。退出登录会保留工具配置和保存的凭证。
 

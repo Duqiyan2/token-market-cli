@@ -1,4 +1,5 @@
 mod connections;
+mod installation;
 mod workspace;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -231,6 +232,7 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .manage(tokenmarket_core::connections::ConnectionManager::current())
+        .manage(tokenmarket_core::installation::InstallationManager::current())
         .manage(workspace::WorkspaceState::new())
         .setup(|app| {
             let api_base = tokenmarket_core::config::console_api_base_url();
@@ -276,6 +278,9 @@ pub fn run() {
             desktop_tool_inventory,
             prepare_tool_connect,
             download_tool,
+            installation::start_tool_installation,
+            installation::tool_installation_status,
+            installation::cancel_tool_installation,
             desktop_login_status,
             refresh_desktop_session,
             logout_desktop_session,

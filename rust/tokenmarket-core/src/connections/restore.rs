@@ -353,7 +353,7 @@ fn set_path(value: &mut Value, path: &[String], replacement: Option<Value>) -> R
     }
     Ok(())
 }
-enum Format {
+pub(super) enum Format {
     Json,
     Jsonc,
     Toml,
@@ -367,7 +367,7 @@ impl Format {
             Self::for_path(path)
         }
     }
-    fn for_path(path: &Path) -> Result<Self> {
+    pub(super) fn for_path(path: &Path) -> Result<Self> {
         match path.extension().and_then(|v| v.to_str()) {
             Some("json") => Ok(Self::Json),
             Some("jsonc") => Ok(Self::Jsonc),
@@ -376,14 +376,24 @@ impl Format {
             _ => bail!("不支持安全恢复此配置格式"),
         }
     }
-    fn parse(&self, bytes: Option<&[u8]>) -> Result<Value> {
+    pub(super) fn parse(&self, bytes: Option<&[u8]>) -> Result<Value> {
         let Some(bytes) = bytes else {
             return Ok(json!({}));
         };
         let result: Value = match self {
             Self::Jsonc => super::jsonc::parse(bytes)?,
             Self::Json => serde_json::from_slice(bytes).context("配置不是有效 JSON，未执行恢复")?,
-            Self::Yaml => serde_yaml::from_slice(bytes).context("配置不是有效 YAML，未执行恢复")?,
+            Self::Yaml => {
+                let value: Value =
+                    serde_yaml::from_slice(bytes).context("配置不是有效 YAML，未执行恢复")?;
+                // YAML's empty/null document represents an empty config mapping.
+                // Keep the original bytes when no owned fields need restoration.
+                if value.is_null() {
+                    json!({})
+                } else {
+                    value
+                }
+            }
             Self::Toml => {
                 toml_edit::de::from_str(std::str::from_utf8(bytes).context("配置编码无效")?)
                     .context("配置不是有效 TOML，未执行恢复")?
@@ -394,7 +404,12 @@ impl Format {
         }
         Ok(result)
     }
-    fn render(&self, bytes: Option<&[u8]>, value: &Value, touched: &[String]) -> Result<Vec<u8>> {
+    pub(super) fn render(
+        &self,
+        bytes: Option<&[u8]>,
+        value: &Value,
+        touched: &[String],
+    ) -> Result<Vec<u8>> {
         match self {
             Self::Json => Ok(serde_json::to_vec_pretty(value)?),
             Self::Jsonc => super::jsonc::render(bytes, value),
@@ -534,6 +549,9 @@ fn rollback(written: &[&Change]) -> Result<()> {
 
 /// Check actual owned fields before billable traffic; diagnostics never include values.
 pub(super) fn verify_applied(record: &ConnectionRecord) -> Result<()> {
+    if let Some(location) = &record.configuration_location {
+        location.verify(record.tool)?;
+    }
     if record.receipts.is_empty()
         || record.receipts.iter().all(|receipt| {
             receipt.fields.iter().all(|field| {
