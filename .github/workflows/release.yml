@@ -56,11 +56,19 @@ jobs:
           cargo test --manifest-path rust/tokenmarket-cli/Cargo.toml --all-targets
           cargo check --manifest-path src-tauri/Cargo.toml
 
+      - name: Configure macOS ad-hoc signing
+        if: runner.os == 'macOS'
+        run: echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
+
       - name: Build desktop installers
         uses: tauri-apps/tauri-action@v0
         with:
           projectPath: src-tauri
           args: ${{ matrix.args }}
+
+      - name: Verify macOS app signature
+        if: runner.os == 'macOS'
+        run: codesign --verify --deep --strict "src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Token Market.app"
 
       - name: Preserve desktop installers
         uses: actions/upload-artifact@v4
