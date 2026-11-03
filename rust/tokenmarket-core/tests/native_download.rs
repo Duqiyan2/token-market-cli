@@ -10,8 +10,55 @@ use tokenmarket_core::installation::{
     InstallExecutor, InstallStage, InstallStep, NativeInstallExecutor,
 };
 
+#[cfg(unix)]
+struct Peer(std::process::Child);
+#[cfg(unix)]
+impl Drop for Peer {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
 #[test]
 fn cancelling_a_native_download_stops_a_live_curl_without_executing_the_next_step() {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        const ISOLATED_CHILD: &str = "TOKENMARKET_NATIVE_CANCEL_ISOLATED_CHILD";
+        if std::env::var_os(ISOLATED_CHILD).is_none() {
+            // Keep a cancellation regression confined to a test-owned group,
+            // even if a broken kill implementation signals the helper itself.
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "cancelling_a_native_download_stops_a_live_curl_without_executing_the_next_step",
+                    "--nocapture",
+                ])
+                .env(ISOLATED_CHILD, "1")
+                .process_group(0)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "cancellation killed or failed its parent helper: {}\n{}\n{}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+    }
+    #[cfg(unix)]
+    let mut peer = Peer(
+        std::process::Command::new("/bin/sleep")
+            .arg("60")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
     // A real local socket accepts curl's connection but deliberately withholds
     // its TLS handshake. No Agent, network origin or replacement curl is used.
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -58,4 +105,9 @@ fn cancelling_a_native_download_stops_a_live_curl_without_executing_the_next_ste
     );
     assert!(started_cancel.elapsed() < Duration::from_secs(10));
     assert!(result.unwrap_err().to_string().contains("安装已取消"));
+    #[cfg(unix)]
+    assert!(
+        peer.0.try_wait().unwrap().is_none(),
+        "cancelling an installer must not signal an unrelated peer process"
+    );
 }
