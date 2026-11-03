@@ -245,13 +245,20 @@ fn finished(
     manager: &tokenmarket_core::installation::InstallationManager,
     tool: tokenmarket_core::ToolId,
 ) -> tokenmarket_core::installation::InstallStatus {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    finished_with_timeout(manager, tool, std::time::Duration::from_secs(3))
+}
+fn finished_with_timeout(
+    manager: &tokenmarket_core::installation::InstallationManager,
+    tool: tokenmarket_core::ToolId,
+    timeout: std::time::Duration,
+) -> tokenmarket_core::installation::InstallStatus {
+    let deadline = std::time::Instant::now() + timeout;
     loop {
         let s = manager.status(tool).unwrap();
         if s.stage.is_terminal() {
             return s;
         }
-        assert!(std::time::Instant::now() < deadline);
+        assert!(std::time::Instant::now() < deadline, "{s:?}");
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
 }
@@ -684,7 +691,9 @@ fn minimax_native_verifier_rejects_a_corrupt_package_before_node_preparation_or_
         std::sync::Arc::new(Corrupt),
     );
     manager.start(tool).unwrap();
-    let s = finished(&manager, tool);
+    // Real PowerShell startup and built-in module loading can exceed the fake
+    // executor's three-second budget on a busy native runner.
+    let s = finished_with_timeout(&manager, tool, std::time::Duration::from_secs(30));
     assert_eq!(s.stage, InstallStage::Failed);
     assert!(
         s.output
