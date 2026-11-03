@@ -117,12 +117,9 @@ async fn saved(
     records[0]["protocol"] = json!(protocol);
     records[0]["models"] = models;
     std::fs::write(&path, records.to_string()).unwrap();
-    // After logout/account changes, current dashboard URLs cannot replace the saved route.
-    support::manager(
-        directory,
-        "http://127.0.0.1:1".into(),
-        "http://127.0.0.1:1".into(),
-    )
+    // Reopening the same environment uses the saved connection credentials,
+    // independently of the dashboard login. Other environments require reconnect.
+    support::manager(directory, url.into(), url.into())
 }
 fn inventory(root: &std::path::Path) -> ToolInventory {
     ToolInventory::new(InstallationEnvironment {

@@ -57,6 +57,13 @@ struct SavedTest {
     result: ConnectionTestResult,
 }
 impl ConnectionManager {
+    fn matches_environment(&self, record: &ConnectionRecord) -> bool {
+        record.gateway_url.trim_end_matches('/') == self.gateway_url.trim_end_matches('/')
+            && (record.platform_url.is_empty()
+                || record.platform_url.trim_end_matches('/')
+                    == self.platform_url.trim_end_matches('/'))
+    }
+
     fn saved_tests(&self) -> Result<Vec<SavedTest>> {
         match fs::read(self.directory.join("test-results.json")) {
             Ok(bytes) => serde_json::from_slice(&bytes).context("无法读取连接测试结果"),
@@ -71,7 +78,9 @@ impl ConnectionManager {
             .into_iter()
             .map(|record| {
                 let mut summary = record.summary();
-                if super::restore::verify_applied(&record).is_err() {
+                if !self.matches_environment(&record) {
+                    summary.state = "environment_mismatch";
+                } else if super::restore::verify_applied(&record).is_err() {
                     summary.state = "configuration_changed";
                 } else if let Some(test) = tests.iter().find(|test| {
                     test.tool == record.tool
@@ -108,6 +117,9 @@ impl ConnectionManager {
             .into_iter()
             .find(|record| record.tool == tool && record.key_id == expected_key_id)
             .context("连接已改变，请刷新后重试")?;
+        if !self.matches_environment(&record) {
+            bail!("此连接属于其他环境，请先在当前环境重新接入后再测试")
+        }
         super::restore::verify_applied(&record)?;
         let single = matches!(tool, ToolId::ClaudeCode | ToolId::Codex | ToolId::DuMate);
         let model = if single {

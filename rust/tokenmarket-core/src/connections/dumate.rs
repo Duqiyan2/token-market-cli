@@ -39,8 +39,8 @@ pub(super) fn select(value: &Value, models: &[Value]) -> Result<Vec<Value>> {
     let existing = value["customLLMProvider"]["model"].as_str();
     let default = option_env!("TOKEN_MARKET_BUILD_DESKTOP_DEFAULT_MODEL").unwrap_or("glm-5.3");
     let eligible = |row: &&Value| limits(row).is_some();
-    let selected = models.iter().filter(eligible).find(|row| row["id"].as_str() == existing)
-        .or_else(|| models.iter().filter(eligible).find(|row| row["id"] == default))
+    let selected = models.iter().filter(eligible).find(|row| row["id"] == default)
+        .or_else(|| models.iter().filter(eligible).find(|row| row["id"].as_str() == existing))
         .or_else(|| models.iter().find(eligible))
         .context("DuMate 个人版需要一个具有 context_window_tokens 和 max_output_tokens 正整数元数据的文本模型；原配置已保留")?;
     Ok(vec![selected.clone()])

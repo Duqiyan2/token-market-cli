@@ -41,8 +41,10 @@
   }
   function connectionLabel(entry) {
     if (!entry.connection) return entry.installed ? '已安装，尚未接入' : '未安装';
-    return ({configuration_changed:'配置已改变或不可用', configured_untested:'已配置，未测试', test_passed:'接口文本测试通过', test_failed:'接口文本测试失败'})[entry.connection.state] || '已配置，未测试';
+    return ({environment_mismatch:'已接入其他环境', configuration_changed:'配置已改变或不可用', configured_untested:'已配置，未测试', test_passed:'接口文本测试通过', test_failed:'接口文本测试失败'})[entry.connection.state] || '已配置，未测试';
   }
+  const currentConnection = entry => Boolean(entry.connection) && entry.connection.state !== 'environment_mismatch';
+  const testBlocked = entry => ['configuration_changed','environment_mismatch'].includes(entry.connection?.state);
   function stateBadge(entry) { return text('span', connectionLabel(entry), `tool-state ${entry.connection?.state || 'unconnected'}`); }
   function toolIcon(entry) {
     const icon = text('div', '', 'tool-icon'); const image = document.createElement('img');
@@ -113,8 +115,8 @@
     if (entry.connection) {
       group.append(actionButton('打开工具', 'primary tool-launch', () => launch(entry), !entry.installed || locked));
       if (detailed) {
-        const test = actionButton('测试连接', 'tool-test', () => window.dispatchEvent(new CustomEvent('tokenmarket-test-request', {detail:{id:entry.id,name:entry.name,connection:entry.connection}})), locked || entry.connection.state === 'configuration_changed');
-        if (entry.connection.state === 'configuration_changed') test.title = '请先检查配置或重新接入';
+        const test = actionButton('测试连接', 'tool-test', () => window.dispatchEvent(new CustomEvent('tokenmarket-test-request', {detail:{id:entry.id,name:entry.name,connection:entry.connection}})), locked || testBlocked(entry));
+        if (testBlocked(entry)) test.title = '请先检查配置或重新接入';
         group.append(test);
         const menu = text('details', '', 'tool-menu'); menu.append(text('summary', '管理连接'));
         const options = text('div', '', 'tool-menu-options');
@@ -148,9 +150,9 @@
     const title = text('div', '', 'tool-detail-title'); const names = text('div'); names.append(text('h1', entry.name), text('p', entry.installed ? '已检测到本机安装' : '尚未安装')); title.append(toolIcon(entry), names);
     const back = actionButton('返回工具列表', 'quiet', () => window.TokenMarketShell.show('tools')); header.append(title, back); detailRoot.append(header); const operation = text('div', message.textContent, `tools-feedback tool-operation-status${message.classList.contains('error') ? ' error' : ''}`); operation.setAttribute('role', 'status'); detailRoot.append(operation);
     if (connection) {
-      const notice = text('div', '', `notice ${connection.state === 'configuration_changed' ? 'warning' : connection.state === 'test_failed' ? 'error' : connection.state === 'test_passed' ? 'success' : ''}`);
+      const notice = text('div', '', `notice ${testBlocked(entry) ? 'warning' : connection.state === 'test_failed' ? 'error' : connection.state === 'test_passed' ? 'success' : ''}`);
       notice.append(text('h3', connectionLabel(entry)));
-      const note = connection.state === 'configuration_changed' ? '当前配置与接入记录不一致，测试已停用。请检查配置或重新接入。' : connection.state === 'test_passed' ? window.TokenMarketConnectionTests.scope : connection.state === 'test_failed' ? `未通过接口文本测试。请检查权限、余额与模型可用性后重试。${window.TokenMarketConnectionTests.scope}` : '配置已保存，尚未发起模型测试。可以先打开工具；需要时再确认费用并测试。';
+      const note = connection.state === 'environment_mismatch' ? '当前工具使用其他环境的连接，尚未接入当前环境，测试已停用。请通过“管理连接 → 重新接入”切换到当前环境。' : connection.state === 'configuration_changed' ? '当前配置与接入记录不一致，测试已停用。请检查配置或重新接入。' : connection.state === 'test_passed' ? window.TokenMarketConnectionTests.scope : connection.state === 'test_failed' ? `未通过接口文本测试。请检查权限、余额与模型可用性后重试。${window.TokenMarketConnectionTests.scope}` : '配置已保存，尚未发起模型测试。可以先打开工具；需要时再确认费用并测试。';
       notice.append(text('p', note)); detailRoot.append(notice);
     } else detailRoot.append(text('p', entry.id === 'dumate' ? 'DuMate 个人版一次配置一个模型。请先在 DuMate 登录个人版，再完全退出应用后接入；重新打开后生效。' : entry.installed ? '工具已安装，接入后即可使用 Token Market 模型。' : '先安装工具，再返回重新检测和接入。', 'notice'));
     detailRoot.append(actions(entry, true));
@@ -173,10 +175,10 @@
   }
   function render() {
     list.replaceChildren();
-    const visible = entries.filter(entry => (filter === 'all' || filter === 'connected' && Boolean(entry.connection) || filter === 'available' && entry.installed && !entry.connection) && `${entry.name} ${(entry.connection?.models || []).join(' ')}`.toLowerCase().includes(search));
+    const visible = entries.filter(entry => (filter === 'all' || filter === 'connected' && currentConnection(entry) || filter === 'available' && entry.installed && !currentConnection(entry)) && `${entry.name} ${(entry.connection?.models || []).join(' ')}`.toLowerCase().includes(search));
     root.querySelectorAll('[data-tool-filter]').forEach(button => {
       const kind = button.dataset.toolFilter;
-      const count = entries.filter(entry => kind === 'all' || kind === 'connected' && Boolean(entry.connection) || kind === 'available' && entry.installed && !entry.connection).length;
+      const count = entries.filter(entry => kind === 'all' || kind === 'connected' && currentConnection(entry) || kind === 'available' && entry.installed && !currentConnection(entry)).length;
       button.textContent = `${({all:'全部',connected:'已接入',available:'待接入'})[kind]} ${count}`;
       button.classList.toggle('selected', filter === kind); button.setAttribute('aria-pressed', String(filter === kind));
     });
@@ -372,7 +374,7 @@
         workbuddy:'请完全退出并重新打开 WorkBuddy，在模型列表中选择导入模型。',
         openclaw:'请重启 OpenClaw Gateway 并重新打开会话。原有模型白名单或 agent 专属配置仍可能限制可选模型，请在 OpenClaw 中检查。',
         opencode:'请退出并重新启动 OpenCode，在模型列表中选择导入模型。项目或运行时的配置覆盖仍按 OpenCode 自身规则生效。',
-        dumate:'请完全退出并重新打开 DuMate。个人版一次配置一个模型；优先保留当前可用模型，否则选择默认或目录中的首个可用模型。取消接入前也请先完全退出 DuMate。',
+        dumate:'请完全退出并重新打开 DuMate。个人版一次配置一个模型；接入时优先使用当前环境默认模型，不可用时保留有效原模型或选择目录中的首个可用模型。取消接入前也请先完全退出 DuMate。',
         'kimi-code':'在 Kimi Code 的模型选择器中选择 Token Market 模型；已有默认模型和 Thinking 设置保持不变。',
         'oh-my-pi':'在 Oh My Pi 中用 /model 选择 Token Market 模型；当前 profile 的既有模型角色保持不变。',
         pi:'在 Pi 中打开 /model 选择 Token Market 模型；已有默认模型保持不变。',

@@ -13,6 +13,33 @@ async function detail(page,id) { await page.locator(`[data-tool="${id}"] .tool-d
 async function switchTeam(page) { await page.locator('.workspace-switch').click();await page.locator('dialog[open] [data-workspace-id="team"]').click();await page.locator('.workspace-switch').filter({hasText:'团队空间'}).waitFor(); }
 async function manage(page) { await page.locator('.tool-menu summary').click(); }
 
+test('other-environment connections require reconnect and cannot start a paid test', async () => {
+  const f = await openFixture(); try {
+    const p = f.page;
+    await p.evaluate(() => {
+      const entry = window.__fixture.entries.find(e => e.id === 'dumate');
+      entry.installed = true; entry.canConnect = true;
+      entry.connection = {...window.__fixture.entries[0].connection, state:'environment_mismatch',models:['glm-5.2'],testResult:null};
+    });
+    await p.evaluate(() => window.TokenMarketTools.refresh(true));
+    await p.locator('[data-tool-filter="available"]').click();
+    assert.equal(await p.locator('[data-tool="dumate"]').count(), 1);
+    await p.locator('[data-tool-filter="connected"]').click();
+    assert.equal(await p.locator('[data-tool="dumate"]').count(), 0);
+    await p.locator('[data-tool-filter="all"]').click();
+    await detail(p, 'dumate');
+    assert.match(await p.locator('#tool-detail-region .notice').innerText(), /已接入其他环境/);
+    assert.equal(await p.locator('#tool-detail-region .tool-test').isDisabled(), true);
+    await p.evaluate(() => window.dispatchEvent(new CustomEvent('tokenmarket-test-request', {detail:{id:'dumate',connection:window.__fixture.entries.find(e=>e.id==='dumate').connection}})));
+    assert.equal(await p.locator('.connection-test-dialog[open]').count(), 0);
+    await manage(p);
+    await p.locator('#tool-detail-region .tool-connect').click();
+    await p.locator('.reconnect-dialog[open]').waitFor();
+    assert.equal((await calls(p, 'test_tool_connection')).length, 0);
+    assert.deepEqual(f.errors, []);
+  } finally { await f.close(); }
+});
+
 test('DuMate personal installs separately, configures one model, and tests only on request', async () => {
   const f=await openFixture(); try {
     const p=f.page; const row=p.locator('[data-tool="dumate"]');

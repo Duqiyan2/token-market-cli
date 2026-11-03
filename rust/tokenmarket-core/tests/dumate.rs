@@ -168,7 +168,7 @@ fn dumate_uses_personal_account_preferences_and_gui_installation() {
 }
 
 #[tokio::test]
-async fn personal_connection_preserves_model_restores_provider_and_never_tests_implicitly() {
+async fn personal_connection_prefers_default_restores_provider_and_never_tests_implicitly() {
     let root = tempfile::tempdir().unwrap();
     let inventory = fixture(root.path());
     let path = inventory.config_path(ToolId::DuMate);
@@ -187,7 +187,7 @@ async fn personal_connection_preserves_model_restores_provider_and_never_tests_i
         .connect(context(), ToolId::DuMate, &inventory, path.clone())
         .await
         .unwrap();
-    assert_eq!(connection.models, ["existing"]);
+    assert_eq!(connection.models, ["glm-5.3"]);
     assert_eq!(connection.protocol, "OPENAI_CHAT_COMPLETIONS");
     let mut configured: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     assert_eq!(
@@ -198,7 +198,7 @@ async fn personal_connection_preserves_model_restores_provider_and_never_tests_i
         configured["customLLMProvider"]["apiKey"],
         "sk-dumate-fixture"
     );
-    assert_eq!(configured["customLLMProvider"]["contextLimit"], 65536);
+    assert_eq!(configured["customLLMProvider"]["contextLimit"], 200000);
     assert_eq!(configured["customLLMProvider"]["futureOption"], true);
     let replaced = manager
         .reconnect(
@@ -224,7 +224,7 @@ async fn personal_connection_preserves_model_restores_provider_and_never_tests_i
         .await
         .unwrap();
     assert!(tested.passed);
-    assert_eq!(tested.model, "existing");
+    assert_eq!(tested.model, "glm-5.3");
     configured["theme"] = json!("light");
     write(&path, &configured);
     manager
@@ -356,4 +356,138 @@ async fn wrong_account_version_or_malformed_preferences_fail_before_key_issuance
         .to_string()
         .contains("1.0.89"));
     assert!(!root.path().join("state/keys.json").exists());
+}
+
+async fn environment_switch_fixture() -> (
+    tempfile::TempDir,
+    ToolInventory,
+    PathBuf,
+    tokenmarket_core::connections::ConnectionManager,
+    tokenmarket_core::connections::ConnectionManager,
+    String,
+    tokio::task::JoinHandle<()>,
+    tokio::task::JoinHandle<()>,
+) {
+    let root = tempfile::tempdir().unwrap();
+    let inventory = fixture(root.path());
+    let path = inventory.config_path(ToolId::DuMate);
+    let mut test_catalogue = catalogue();
+    test_catalogue["data"][1]["id"] = json!("glm-5.2");
+    let (test_url, _, test_task) = server(test_catalogue).await;
+    let mut production_catalogue = catalogue();
+    production_catalogue["data"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({
+            "id":"glm-5.2", "model_types":["TEXT_GENERATION"],
+            "context_window_tokens":128000, "max_output_tokens":32000
+        }));
+    let (production_url, _, production_task) = server(production_catalogue).await;
+    let directory = root.path().join("state");
+    let test_manager = support::manager(directory.clone(), test_url.clone(), test_url);
+    let production_manager = support::manager(directory, production_url.clone(), production_url);
+    let connected = test_manager
+        .connect(context(), ToolId::DuMate, &inventory, path.clone())
+        .await
+        .unwrap();
+    assert_eq!(connected.models, ["glm-5.2"]);
+    (
+        root,
+        inventory,
+        path,
+        test_manager,
+        production_manager,
+        connected.key_id,
+        test_task,
+        production_task,
+    )
+}
+
+#[tokio::test]
+async fn other_environment_connection_is_identified_and_cannot_be_tested() {
+    let (_root, _inventory, _path, test_manager, production, key_id, test_task, production_task) =
+        environment_switch_fixture().await;
+    assert_eq!(
+        test_manager.summaries().unwrap()[0].1.state,
+        "configured_untested"
+    );
+    assert!(
+        test_manager
+            .test_connection(
+                ToolId::DuMate,
+                &key_id,
+                ConnectionTestRequest {
+                    confirmed: true,
+                    model: None
+                }
+            )
+            .await
+            .unwrap()
+            .passed
+    );
+    assert_eq!(
+        production.summaries().unwrap()[0].1.state,
+        "environment_mismatch"
+    );
+    assert!(production.summaries().unwrap()[0].1.test_result.is_none());
+    let error = production
+        .test_connection(
+            ToolId::DuMate,
+            &key_id,
+            ConnectionTestRequest {
+                confirmed: true,
+                model: None,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("环境"));
+    test_task.abort();
+    production_task.abort();
+}
+
+#[tokio::test]
+async fn unavailable_default_preserves_a_valid_existing_model() {
+    let root = tempfile::tempdir().unwrap();
+    let inventory = fixture(root.path());
+    let path = inventory.config_path(ToolId::DuMate);
+    write(&path, &json!({"customLLMProvider":{"model":"existing"}}));
+    let mut catalog = catalogue();
+    // A listed default without limits is unavailable for DuMate.
+    catalog["data"][1]
+        .as_object_mut()
+        .unwrap()
+        .remove("max_output_tokens");
+    let (url, _, task) = server(catalog).await;
+    let manager = support::manager(root.path().join("state"), url.clone(), url);
+    let connection = manager
+        .connect(context(), ToolId::DuMate, &inventory, path)
+        .await
+        .unwrap();
+    assert_eq!(connection.models, ["existing"]);
+    task.abort();
+}
+
+#[tokio::test]
+async fn reconnect_from_test_environment_selects_production_default_model() {
+    let (_root, inventory, path, test_manager, production, key_id, test_task, production_task) =
+        environment_switch_fixture().await;
+    let result = production
+        .reconnect(context(), ToolId::DuMate, &key_id, &inventory, path.clone())
+        .await
+        .unwrap();
+    assert!(!result.key_reused);
+    assert_eq!(result.connection.models, ["glm-5.3"]);
+    let configured: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(configured["customLLMProvider"]["model"], "glm-5.3");
+    assert_eq!(
+        production.summaries().unwrap()[0].1.state,
+        "configured_untested"
+    );
+    assert_eq!(
+        test_manager.summaries().unwrap()[0].1.state,
+        "environment_mismatch"
+    );
+    test_task.abort();
+    production_task.abort();
 }
