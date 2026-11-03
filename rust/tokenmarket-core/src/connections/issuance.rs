@@ -100,6 +100,17 @@ impl ConnectionManager {
         }
         let payload: Value = response.json().await.context("连接服务响应无效")?;
         if payload["success"] == false {
+            // Older platforms reject newly registered tools before any Key operation.
+            // Only classify known scope errors; arbitrary backend text can contain
+            // private details and must never be echoed into the desktop UI.
+            if matches!(
+                payload["message"].as_str(),
+                Some("desktop client cannot manage this tool" | "client tool mismatch")
+            ) {
+                bail!(
+                    "当前服务尚不支持此工具接入，请联系管理员更新服务后再接入；原配置和凭据已保留"
+                )
+            }
             let stage = match action {
                 "inspect" => "凭证校验",
                 "issue" => "凭证签发",

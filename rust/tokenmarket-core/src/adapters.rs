@@ -47,6 +47,8 @@ pub enum ToolId {
     MiniMaxCode,
     OhMyPi,
     KimiCode,
+    #[serde(rename = "dumate")]
+    DuMate,
 }
 
 impl ToolId {
@@ -65,6 +67,7 @@ impl ToolId {
             Self::MiniMaxCode => "mcode",
             Self::OhMyPi => "omp",
             Self::KimiCode => "kimi",
+            Self::DuMate => "dumate",
         }
     }
 }
@@ -84,6 +87,7 @@ impl std::fmt::Display for ToolId {
             ToolId::MiniMaxCode => "minimax-code",
             ToolId::OhMyPi => "oh-my-pi",
             ToolId::KimiCode => "kimi-code",
+            ToolId::DuMate => "dumate",
         };
         f.write_str(value)
     }
@@ -142,12 +146,16 @@ enum PathKind {
     MiniMaxCode,
     OhMyPi,
     KimiCode,
+    DuMate,
 }
 
 impl Adapter {
     pub fn config_path(&self) -> PathBuf {
         let home = home_dir();
         match self.path_kind {
+            PathKind::DuMate => {
+                crate::inventory::ToolInventory::current().config_path(ToolId::DuMate)
+            }
             PathKind::ClaudeSettings => std::env::var_os("CLAUDE_CONFIG_DIR")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| home.join(".claude"))
@@ -206,6 +214,7 @@ impl Adapter {
 
     pub fn read_config(&self) -> Result<Option<ToolConfig>> {
         match self.id {
+            ToolId::DuMate => bail!("请使用共享客户端连接状态查看 DuMate 个人版配置"),
             ToolId::KimiCode => bail!("请使用共享客户端连接状态查看 Kimi Code 配置"),
             ToolId::Hermes => {
                 let Some(text) = read_file_if_exists(&self.config_path())? else {
@@ -484,6 +493,7 @@ impl Adapter {
         let backup_path = create_backup(&config_path)?;
 
         match self.id {
+            ToolId::DuMate => bail!("请使用共享客户端接入流程配置 DuMate 个人版"),
             ToolId::KimiCode => bail!("请使用共享客户端接入流程配置 Kimi Code"),
             ToolId::MiniMaxCode => bail!("请使用共享客户端接入流程配置 MiniMax Code"),
             ToolId::OhMyPi => bail!("请使用共享客户端接入流程配置 Oh My Pi"),
@@ -765,6 +775,13 @@ pub fn adapters() -> Vec<Adapter> {
             protocol: Protocol::OpenAiCompatible,
             requires_restart: false,
             path_kind: PathKind::KimiCode,
+        },
+        Adapter {
+            id: ToolId::DuMate,
+            name: "百度搭子 DuMate（个人版）",
+            protocol: Protocol::OpenAiCompatible,
+            requires_restart: true,
+            path_kind: PathKind::DuMate,
         },
     ]
 }

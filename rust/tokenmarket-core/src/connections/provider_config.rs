@@ -148,6 +148,7 @@ impl ProviderConfig {
             bail!("工具 provider 配置必须是对象")
         }
         match tool {
+            ToolId::DuMate => super::dumate::validate(&value)?,
             ToolId::GrokBuild => super::grok::validate(&value)?,
             ToolId::KimiCode => super::kimi::validate(&value, path)?,
             ToolId::Hermes => super::hermes::validate(&value, path)?,
@@ -170,6 +171,7 @@ impl ProviderConfig {
 
     pub fn credential(&self, gateway: &str) -> Result<Option<String>> {
         match self.tool {
+            ToolId::DuMate => super::dumate::credential(&self.document.value, gateway),
             ToolId::GrokBuild => super::grok::credential(&self.document.value, gateway),
             ToolId::KimiCode => super::kimi::credential(&self.document.value, gateway),
             ToolId::Hermes => super::hermes::credential(&self.document.value, gateway),
@@ -180,6 +182,13 @@ impl ProviderConfig {
         }
     }
 
+    pub fn select_models(&self, models: &[Value]) -> Result<Vec<Value>> {
+        if self.tool == ToolId::DuMate {
+            return super::dumate::select(&self.document.value, models);
+        }
+        Ok(models.to_vec())
+    }
+
     pub fn apply(
         &mut self,
         gateway: &str,
@@ -187,6 +196,7 @@ impl ProviderConfig {
         models: &[Value],
     ) -> Result<PreparedConfiguration> {
         match self.tool {
+            ToolId::DuMate => super::dumate::apply(&mut self.document, gateway, key, models)?,
             ToolId::GrokBuild => super::grok::apply(&mut self.document, gateway, key, models)?,
             ToolId::KimiCode => {
                 super::kimi::validate(&self.document.value, &self.document.path)?;

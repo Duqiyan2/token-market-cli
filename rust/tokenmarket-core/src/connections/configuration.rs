@@ -31,6 +31,12 @@ pub(super) struct PreparedConfiguration {
 }
 
 impl ConfigDocument {
+    pub fn select_models(&self, models: &[Value]) -> Result<Vec<Value>> {
+        match self {
+            Self::Provider(provider) => provider.select_models(models),
+            _ => Ok(models.to_vec()),
+        }
+    }
     pub fn credential(&self, gateway: &str) -> Result<Option<String>> {
         let (base, key) = match self {
             Self::Claude(value) => (
@@ -72,6 +78,7 @@ impl ConfigDocument {
         if matches!(
             tool,
             ToolId::Hermes
+                | ToolId::DuMate
                 | ToolId::GrokBuild
                 | ToolId::Pi
                 | ToolId::MiniMaxCode

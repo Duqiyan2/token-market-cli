@@ -229,6 +229,12 @@ impl ToolInventory {
     }
     /// Desktop discovery and desktop writes share this path. Terminal CLI paths are unchanged.
     pub fn config_path(&self, tool: ToolId) -> PathBuf {
+        if tool == ToolId::DuMate {
+            return crate::dumate::display_config(
+                &self.environment.home,
+                self.environment.platform,
+            );
+        }
         if tool == ToolId::KimiCode {
             return std::env::var_os("KIMI_CODE_HOME")
                 .filter(|v| !v.is_empty())
@@ -326,6 +332,11 @@ impl ToolInventory {
         Ok(())
     }
     pub fn connection_guard(&self, tool: ToolId) -> Result<crate::installation::InstallationGuard> {
+        if tool == ToolId::DuMate {
+            let path =
+                crate::dumate::personal_config(&self.environment.home, self.environment.platform)?;
+            crate::dumate::require_stopped(&path)?;
+        }
         crate::installation::InstallationManager::new(
             self.environment.clone(),
             std::env::consts::ARCH.into(),
@@ -334,6 +345,9 @@ impl ToolInventory {
         .connection_guard(tool)
     }
     pub fn is_installed(&self, tool: ToolId) -> bool {
+        if tool == ToolId::DuMate {
+            return self.application_path(tool).is_some();
+        }
         self.environment
             .command_path(tool.command())
             .is_some_and(|path| {
@@ -344,6 +358,7 @@ impl ToolInventory {
     /// Verified application launch target; command launchers are handled separately.
     pub fn application_path(&self, tool: ToolId) -> Option<PathBuf> {
         let (folders, files): (&[&str], &[&str]) = match tool {
+            ToolId::DuMate => (&["DuMate", "dumate"], &["DuMate.exe"]),
             ToolId::WorkBuddy => (&["WorkBuddy"], &["WorkBuddy.exe"]),
             ToolId::DeepSeekHarness => (
                 &["DeepSeek Harness", "deepseek-harness"],
@@ -360,7 +375,18 @@ impl ToolInventory {
             if self.environment.platform == HostPlatform::MacOs {
                 for name in folders {
                     let bundle = directory.join(format!("{name}.app"));
-                    if macos_bundle_installed(&bundle) {
+                    let identified = tool != ToolId::DuMate
+                        || plist::Value::from_file(bundle.join("Contents/Info.plist"))
+                            .ok()
+                            .and_then(|v| {
+                                v.as_dictionary()
+                                    .and_then(|d| d.get("CFBundleIdentifier"))
+                                    .and_then(plist::Value::as_string)
+                                    .map(str::to_owned)
+                            })
+                            .as_deref()
+                            == Some("com.baidu.qianfan.desktop");
+                    if identified && macos_bundle_installed(&bundle) {
                         return Some(bundle);
                     }
                 }
@@ -405,6 +431,7 @@ pub fn official_download_url(tool: ToolId) -> &'static str {
         ToolId::MiniMaxCode => "https://github.com/MiniMax-AI/minimax-code/releases/tag/v0.7.2",
         ToolId::OhMyPi => "https://omp.sh/",
         ToolId::KimiCode => "https://github.com/MoonshotAI/kimi-code",
+        ToolId::DuMate => "https://www.dumate.cn/",
     }
 }
 
@@ -514,9 +541,16 @@ fn registered_application_directories() -> Vec<PathBuf> {
                 let Ok(name) = app.get_value::<String, _>("DisplayName") else {
                     continue;
                 };
-                if !["workbuddy", "deepseek harness", "opencode", "openclaw"]
-                    .iter()
-                    .any(|product| name.to_ascii_lowercase().contains(product))
+                if ![
+                    "workbuddy",
+                    "deepseek harness",
+                    "opencode",
+                    "openclaw",
+                    "dumate",
+                    "百度搭子",
+                ]
+                .iter()
+                .any(|product| name.to_ascii_lowercase().contains(product))
                 {
                     continue;
                 }
@@ -589,6 +623,9 @@ impl ToolInventory {
     /// are required for a private wrapper; execution remains an explicit action.
     pub fn terminal_launch_plan(&self, tool: ToolId) -> Result<ToolLaunchPlan> {
         self.require_installed(tool)?;
+        if tool == ToolId::DuMate {
+            return self.launch_plan(tool);
+        }
         let command = tool.command();
         let target = self
             .environment

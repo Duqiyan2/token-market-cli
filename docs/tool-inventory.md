@@ -31,7 +31,7 @@ Windows home discovery uses `USERPROFILE`.
   `hermes`, `pi`, `mcode`, `omp`.
   Unix discovery requires an executable file, including a valid symlink target.
   Search includes PATH and common user/package-manager binary directories.
-- macOS desktop applications: WorkBuddy, DeepSeek Harness, OpenClaw and OpenCode
+- macOS desktop applications: WorkBuddy, DeepSeek Harness, OpenClaw, OpenCode and DuMate
   under `/Applications` and `~/Applications`. A readable XML/binary Info.plist
   must declare a CFBundleExecutable that exists and has executable permission
   inside Contents/MacOS. A bundle directory alone is insufficient. Claude.app

@@ -12,10 +12,15 @@ use std::{
 };
 
 pub(super) fn is_gui(tool: ToolId) -> bool {
-    matches!(tool, ToolId::WorkBuddy | ToolId::DeepSeekHarness)
+    matches!(
+        tool,
+        ToolId::WorkBuddy | ToolId::DeepSeekHarness | ToolId::DuMate
+    )
 }
 pub(super) fn instructions(tool: ToolId, platform: HostPlatform) -> &'static str {
-    if tool == ToolId::DeepSeekHarness && platform == HostPlatform::MacOs {
+    if tool == ToolId::DuMate && platform == HostPlatform::MacOs {
+        "请将已打开文件夹中的 DuMate.app 拖入 Applications。安装完成后请先登录个人版；接入前完全退出 DuMate"
+    } else if tool == ToolId::DeepSeekHarness && platform == HostPlatform::MacOs {
         "请将已打开文件夹中的 DeepSeek Harness.app 移入 Applications。dsh 命令注册可在工具内另行操作；取消请关闭原生安装窗口"
     } else if platform == HostPlatform::MacOs {
         "请在原生安装器中将应用拖入 Applications。取消安装请在原生安装器中操作；关闭此窗口会继续等待实际安装"
@@ -34,6 +39,9 @@ pub(super) fn plan(
     environment: &InstallationEnvironment,
     architecture: &str,
 ) -> Result<InstallPlan> {
+    if tool == ToolId::DuMate {
+        return super::dumate::plan(environment, architecture);
+    }
     if tool == ToolId::DeepSeekHarness {
         return harness_plan(environment, architecture);
     }

@@ -109,7 +109,7 @@ impl ConnectionManager {
             .find(|record| record.tool == tool && record.key_id == expected_key_id)
             .context("连接已改变，请刷新后重试")?;
         super::restore::verify_applied(&record)?;
-        let single = matches!(tool, ToolId::ClaudeCode | ToolId::Codex);
+        let single = matches!(tool, ToolId::ClaudeCode | ToolId::Codex | ToolId::DuMate);
         let model = if single {
             request
                 .model

@@ -17,4 +17,5 @@ pub mod installation;
 pub mod inventory;
 
 pub mod connections;
+mod dumate;
 mod yaml;

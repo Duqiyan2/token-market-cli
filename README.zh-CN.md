@@ -89,8 +89,15 @@ tokenmarket workspace <workspace-id>
 | MiniMax Code | `minimax-code` |
 | Oh My Pi | `oh-my-pi` |
 | Kimi Code | `kimi-code` |
+| 百度搭子 DuMate 个人版 | `dumate` |
 
-Claude Code、Codex 在正式环境使用 `glm-5.3`，测试包使用 `glm-5.2`。其他工具会配置兼容的文本生成模型目录。
+Claude Code、Codex 在正式环境使用 `glm-5.3`，测试包使用 `glm-5.2`。DuMate 个人版一次配置一个模型，其他工具会配置兼容的文本生成模型目录。
+
+DuMate 个人版试用适配官方 **1.0.89**。先在 DuMate 登录个人版，再完全退出应用，
+使用源码构建的 `tokenmarket connect dumate` 或桌面端接入，重新打开 DuMate 后生效。
+优先保留可用的原模型，否则选择默认模型或首个能力元数据齐全的文本模型。
+取消接入也须先退出 DuMate；会恢复原自定义模型并保留其他偏好。
+平台服务需包含 `dumate` 工具注册；本地实现不代表已部署或发布。详见 [DuMate 接入说明](docs/dumate.md)。
 
 Grok Build 可在应用中点击 **安装**，或运行 `tokenmarket install grok-build`。
 安装完成后由你另行接入和测试。接入后重新启动 Grok，通过 `/model` 选择导入的

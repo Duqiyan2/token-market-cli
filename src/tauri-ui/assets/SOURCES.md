@@ -10,3 +10,7 @@ Official public site marks retrieved 2026-10-29 during the approved UI design:
 - deepseek: https://www.deepseek.com/favicon.ico
 - openclaw: https://openclaw.ai/favicon.svg
 - opencode: https://opencode.ai/favicon-96x96-v3.png
+
+DuMate: extracted from `Contents/Resources/icon.icns` in the official 1.0.89
+macOS package on 2026-11-03; resized to 128 px.
+https://dumate-app-public.cdn.bcebos.com/release-info/artifacts/Dumate-mac-arm64-latest.dmg

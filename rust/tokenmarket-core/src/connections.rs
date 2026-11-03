@@ -2,6 +2,7 @@
 mod configuration;
 mod issuance;
 pub use issuance::CredentialLoss;
+mod dumate;
 mod grok;
 mod harness;
 mod hermes;
@@ -424,6 +425,9 @@ impl ConnectionManager {
             .map_err(|_| anyhow::anyhow!("接入正在进行，请稍候"))?;
         inventory.require_installed(tool)?;
         let _installation_guard = inventory.connection_guard(tool)?;
+        if tool == ToolId::DuMate && path != inventory.config_path(tool) {
+            bail!("DuMate 活动个人账号已改变，请重新检测后接入")
+        }
         if !matches!(
             tool,
             ToolId::ClaudeCode
@@ -438,6 +442,7 @@ impl ConnectionManager {
                 | ToolId::MiniMaxCode
                 | ToolId::OhMyPi
                 | ToolId::KimiCode
+                | ToolId::DuMate
         ) {
             bail!("此工具的桌面接入尚未开放")
         }
@@ -611,7 +616,7 @@ impl ConnectionManager {
             .json()
             .await
             .context("模型目录无效，原配置已保留")?;
-        let models = model_plan::select(tool, &catalogue)?;
+        let models = config.select_models(&model_plan::select(tool, &catalogue)?)?;
         let prepared = config.apply(&self.gateway_url, &key.api_key, &models)?;
         let mut files = vec![PreparedFile {
             path: path.into(),
@@ -645,6 +650,9 @@ impl ConnectionManager {
         self.validate_for_apply(context, tool, device_id, key)
             .await?;
         configuration_location.verify(tool)?;
+        if tool == ToolId::DuMate {
+            crate::dumate::require_stopped(path)?;
+        }
         let mut receipts = vec![];
         for file in &files {
             let current = match fs::read(&file.path) {
@@ -815,6 +823,11 @@ impl ConnectionManager {
             )?;
         }
         records.remove(index);
+        if tool == ToolId::DuMate {
+            if let Some(receipt) = record.receipts.first() {
+                crate::dumate::require_stopped(&receipt.path)?;
+            }
+        }
         plan.commit(
             &store,
             &original_store,

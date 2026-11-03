@@ -1,0 +1,22 @@
+{
+  "date": "2026-11-03",
+  "platform": "macOS arm64",
+  "product": "DuMate Personal",
+  "version": "1.0.89.447",
+  "backend_commit": "e35aadb162c15ad1c7c449d4754a11b1dd4e3a49",
+  "binary": "/Applications/DuMate.app/Contents/Resources/extra-resource/backend/bin/dumate-main-server",
+  "scope": "Official backend with isolated temporary XDG preferences and a localhost OpenAI mock",
+  "preferences_loaded": true,
+  "model_overridden": true,
+  "credential_overridden": true,
+  "chat_relay": true,
+  "stream_relay": true,
+  "requests_to_local_mock": 2,
+  "external_network": "denied by macOS sandbox",
+  "real_user_data": "filesystem reads under /Users denied by macOS sandbox",
+  "actual_agent_tool_loop": false,
+  "actual_token_market_model_call": false,
+  "real_user_configuration_changed": false,
+  "windows_native_acceptance": false,
+  "published_or_deployed": false
+}

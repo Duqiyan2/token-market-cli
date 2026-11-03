@@ -1,5 +1,6 @@
 //! Explicit tool installation, independent of credentials and Tool Connections.
 pub(crate) mod attempt;
+mod dumate;
 mod gui;
 mod harness_cli;
 mod hermes;
@@ -396,6 +397,14 @@ impl InstallationManager {
     /// Adapters can compare this with their documented supported version range
     /// before configuration mutation; the installer pin is not that whole range.
     pub fn installed_version(&self, tool: ToolId) -> Result<Option<String>> {
+        // Installed GUI metadata is readable even on a fixture host without a
+        // matching installer architecture. DuMate has no official CLI identity.
+        if tool == ToolId::DuMate {
+            return ToolInventory::new(self.environment.clone())
+                .application_path(tool)
+                .map(|path| self.executor.tool_application_version(tool, &path))
+                .transpose();
+        }
         let plan = recipes::plan(tool, &self.environment, &self.architecture)?;
         if gui::is_gui(tool) {
             if let Some(path) = ToolInventory::new(self.environment.clone()).application_path(tool)
@@ -415,6 +424,14 @@ impl InstallationManager {
     /// with configuration mutation. This is never part of read-only discovery.
     pub fn connection_guard(&self, tool: ToolId) -> Result<InstallationGuard> {
         let guard = installation_lock(&self.environment, tool)?;
+        if tool == ToolId::DuMate {
+            let version = self
+                .installed_version(tool)?
+                .context("无法确认 DuMate 版本，请先安装官方 1.0.89 客户端")?;
+            if !gui::matches_version(tool, &version, dumate::VERSION) {
+                bail!("当前 DuMate 接入仅验证 1.0.89（检测到 {version}），请按官方说明选择该版本；未修改配置或自动升级")
+            }
+        }
         if tool == ToolId::KimiCode {
             if let Some(version) = self
                 .installed_version(tool)
@@ -530,7 +547,12 @@ impl InstallationManager {
             }
         }
         let repairing_owned;
-        if let Some(path) = self.environment.command_path(&plan.command) {
+        let command = if plan.tool == ToolId::DuMate {
+            None
+        } else {
+            self.environment.command_path(&plan.command)
+        };
+        if let Some(path) = command {
             let repair = attempt::repair(&self.environment, plan, &path)?;
             let version = self.executor.version(&path);
             if repair {

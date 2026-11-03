@@ -89,8 +89,15 @@ Choose a tool in the app, or use its ID in CLI commands:
 | MiniMax Code | `minimax-code` |
 | Oh My Pi | `oh-my-pi` |
 | Kimi Code | `kimi-code` |
+| Baidu DuMate Personal | `dumate` |
 
-Claude Code and Codex use `glm-5.3` in production (`glm-5.2` in test builds). Other tools receive the compatible text-generation model catalogue.
+Claude Code and Codex use `glm-5.3` in production (`glm-5.2` in test builds). DuMate Personal configures one model; other tools receive the compatible text-generation model catalogue.
+
+DuMate Personal support targets official **1.0.89**. Sign in to DuMate Personal,
+fully quit it, then connect with a source build using `tokenmarket connect dumate`
+or the desktop action. Reopen DuMate to apply the configuration. Disconnect also
+requires quitting DuMate and restores the original custom provider. The platform
+must register the `dumate` tool ID before live connection. See [DuMate notes](docs/dumate.md).
 
 Grok Build can be installed with **安装** in the app or `tokenmarket install grok-build`.
 Installation does not connect or test a model. After connecting, restart Grok and

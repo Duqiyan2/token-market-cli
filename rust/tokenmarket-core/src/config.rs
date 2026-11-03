@@ -169,6 +169,7 @@ pub fn parse_tool_id(value: &str) -> Result<ToolId> {
         "minimax-code" => Ok(ToolId::MiniMaxCode),
         "oh-my-pi" => Ok(ToolId::OhMyPi),
         "kimi-code" => Ok(ToolId::KimiCode),
+        "dumate" => Ok(ToolId::DuMate),
         other => bail!("unsupported tool: {other}"),
     }
 }

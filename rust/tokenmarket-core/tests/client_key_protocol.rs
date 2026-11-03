@@ -31,6 +31,7 @@ struct State {
     fail_catalogue: bool,
     fail_inspect: bool,
     inspect_business_failure: bool,
+    inspect_tool_error: Option<&'static str>,
     block_cache: Option<PathBuf>,
     logout_on_catalogue: Option<Arc<support::Credentials>>,
 }
@@ -187,7 +188,9 @@ impl Platform {
                         if status == "ISSUED" {
                             reply["api_key"] = json!(s.secret);
                         }
-                        if action == "inspect" && s.inspect_business_failure {
+                        if action == "inspect" && s.inspect_tool_error.is_some() {
+                            json!({"success":false,"message":s.inspect_tool_error})
+                        } else if action == "inspect" && s.inspect_business_failure {
                             json!({"success":false,"message":"connection operation unavailable; retry without changing credentials"})
                         } else {
                             json!({"success":!failure,"data":reply})
@@ -273,6 +276,50 @@ async fn server_inspection_failure_does_not_misdiagnose_login_or_issue_a_key() {
     assert!(!error.contains("刷新登录"));
     assert_eq!(api.state.lock().unwrap().issues, 0);
     assert!(!path.exists());
+}
+
+#[tokio::test]
+async fn unsupported_server_tool_explains_service_update_and_preserves_existing_credentials() {
+    for message in [
+        "desktop client cannot manage this tool",
+        "client tool mismatch",
+    ] {
+        let root = tempdir().unwrap();
+        let api = Platform::start().await;
+        let manager = api.manager(root.path());
+        let path = root.path().join("settings.json");
+        let inv = inventory(root.path());
+        let connected = manager
+            .connect(context(), ToolId::ClaudeCode, &inv, path.clone())
+            .await
+            .unwrap();
+        let config_before = std::fs::read(&path).unwrap();
+        let keys_before = support::read_private(&root.path().join("state/keys.json"));
+        api.state.lock().unwrap().inspect_tool_error = Some(message);
+        let error = manager
+            .reconnect(
+                context(),
+                ToolId::ClaudeCode,
+                &connected.key_id,
+                &inv,
+                path.clone(),
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("当前服务尚不支持此工具"),
+            "unexpected error: {error}"
+        );
+        assert!(!error.contains("稍后重试"));
+        assert_eq!(std::fs::read(&path).unwrap(), config_before);
+        assert!(
+            support::read_private(&root.path().join("state/keys.json")) == keys_before,
+            "saved credential contents changed after a scope rejection"
+        );
+        assert_eq!(api.state.lock().unwrap().issues, 1);
+        assert_eq!(api.state.lock().unwrap().rotations, 0);
+    }
 }
 
 #[tokio::test]

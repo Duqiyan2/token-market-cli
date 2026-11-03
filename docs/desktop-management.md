@@ -18,6 +18,13 @@ Changing workspace or logging out does not rewrite existing Agent configuration.
 | DeepSeek Harness | `OPENAI_CHAT_COMPLETIONS` | All key-visible text-generation models; profile and credential file are restored together |
 | OpenClaw | `OPENAI_CHAT_COMPLETIONS` | All key-visible text-generation models; existing agent selection/allowlists stay in place |
 | OpenCode | `OPENAI_CHAT_COMPLETIONS` | All key-visible text-generation models; root model selections stay in place; JSONC comments/trailing commas retained |
+| DuMate Personal 1.0.89 | `OPENAI_CHAT_COMPLETIONS` | One text model with context/output metadata; preserves an eligible current model, then prefers the build default, then the first eligible model |
+
+DuMate Personal uses the active personal account's `desktop-main/dumate-app.json`
+preference, with restoration scoped to `customLLMProvider`. Completely quit DuMate
+before Connect/Reconnect/Disconnect, then reopen it; running processes cache the
+preference document. Its generated `opencode.json` and login/whitelist fields
+are not managed. See [DuMate notes](dumate.md) for version and verification limits.
 
 Connect reuses the saved account/workspace/device/tool key, or creates one on
 first use, then obtains its catalogue and atomically publishes

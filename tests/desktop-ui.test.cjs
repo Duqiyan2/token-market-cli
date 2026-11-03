@@ -13,6 +13,32 @@ async function detail(page,id) { await page.locator(`[data-tool="${id}"] .tool-d
 async function switchTeam(page) { await page.locator('.workspace-switch').click();await page.locator('dialog[open] [data-workspace-id="team"]').click();await page.locator('.workspace-switch').filter({hasText:'团队空间'}).waitFor(); }
 async function manage(page) { await page.locator('.tool-menu summary').click(); }
 
+test('DuMate personal installs separately, configures one model, and tests only on request', async () => {
+  const f=await openFixture(); try {
+    const p=f.page; const row=p.locator('[data-tool="dumate"]');
+    await row.locator('img').evaluate(image=>image.decode());
+    await row.locator('.tool-install').click();
+    await p.locator('.tool-install-status').filter({hasText:'安装完成'}).waitFor();
+    await p.locator('.tool-install-close').click();
+    assert.equal((await calls(p,'connect_tool')).length,0);
+    await detail(p,'dumate');
+    assert.match(await p.locator('#tool-detail-region').innerText(),/一次配置一个模型/);
+    await p.locator('#tool-detail-region .tool-connect').click();
+    await p.locator('.connect-confirm-dialog[open] .connect-confirm').click();
+    await p.getByRole('heading',{name:'百度搭子 DuMate（个人版） 已接入'}).waitFor();
+    assert.match(await p.locator('.restart-notice').innerText(),/完全退出并重新打开 DuMate/);
+    assert.equal((await calls(p,'test_tool_connection')).length,0);
+    await p.locator('dialog[open] .close').click();
+    await p.locator('#tool-detail-region .tool-test').click();
+    const selector=p.locator('.connection-test-dialog select');
+    assert.equal(await selector.isDisabled(),true);
+    assert.equal(await selector.locator('option').count(),1);
+    assert.equal((await calls(p,'test_tool_connection')).length,0);
+    assert.deepEqual((await calls(p,'connect_tool'))[0].args,{tool:'dumate',recovery:null});
+    assert.deepEqual(f.errors,[]);
+  } finally { await f.close(); }
+});
+
 test('Kimi Code installs and connects separately with its own tool identity', async () => {
   const f=await openFixture(); try {
     const p=f.page;
@@ -261,12 +287,12 @@ test('installation failure preserves the error and offers a retry', async () => 
 
 test('real UI renders safe native summaries, searches, navigates and fits desktop/mobile', async () => {
   const f = await openFixture();try {
-    const p=f.page;assert.equal(await p.locator('.tool-row').count(),12);
+    const p=f.page;assert.equal(await p.locator('.tool-row').count(),13);
     assert.equal((await calls(p,'test_tool_connection')).length,0);
     assert.equal((await calls(p,'connect_tool')).length,0);
     await p.locator('.tools-search').fill('Codex');assert.equal(await p.locator('.tool-row').count(),1);
     await p.locator('.tools-search').fill('no-match');await p.getByRole('heading',{name:'没有匹配的工具'}).waitFor();
-    await p.getByRole('button',{name:'查看全部工具'}).click();assert.equal(await p.locator('.tool-row').count(),12);
+    await p.getByRole('button',{name:'查看全部工具'}).click();assert.equal(await p.locator('.tool-row').count(),13);
     await p.locator('[data-tool-filter="available"]').click();assert.equal(await p.locator('.tool-row').count(),1);
     await p.locator('[data-tool-filter="all"]').click();
     for(const width of [1440,900,375]) { await p.setViewportSize({width,height:width===1440?1000:760});assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);assert.equal(await p.locator('#signed-in').isVisible(),true); }

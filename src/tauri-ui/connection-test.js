@@ -26,7 +26,7 @@
     pending = entry;
     dialog.querySelector('.test-context').textContent = `${entry.name} · 所属账号：${entry.connection.owner.name} · 计费空间：${entry.connection.boundWorkspace.name} · 协议：${entry.connection.protocol}`;
     selector.replaceChildren();
-    const single = entry.id === 'claude-code' || entry.id === 'codex';
+    const single = ['claude-code','codex','dumate'].includes(entry.id);
     if (!single) { const option = text('option', '请选择一个已配置模型'); option.value = ''; selector.append(option); }
     (single ? entry.connection.models.slice(0, 1) : entry.connection.models).forEach(model => { const option = text('option', model); option.value = model; selector.append(option); });
     selector.disabled = single;
