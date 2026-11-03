@@ -536,9 +536,7 @@ impl InstallationManager {
             if repair {
                 repairing_owned = true;
                 if version.as_ref().is_ok_and(|version| {
-                    !version
-                        .split_whitespace()
-                        .any(|part| part.trim_start_matches('v') == plan.version)
+                    !recipes::matches_pinned_version(plan.tool, version, &plan.version)
                 }) {
                     bail!("未完成安装的版本已改变；请按官方说明处理，未自动升级或覆盖")
                 }
@@ -634,10 +632,7 @@ impl InstallationManager {
             .command_path(&plan.command)
             .context("安装程序已结束，但未检测到有效工具；请查看输出并重试")?;
         let version = self.executor.version(&path)?;
-        if !version
-            .split_whitespace()
-            .any(|part| part.trim_start_matches('v') == plan.version)
-        {
+        if !recipes::matches_pinned_version(plan.tool, &version, &plan.version) {
             bail!(
                 "安装后的版本 {version} 与已验证版本 {} 不符，请检查安装渠道",
                 plan.version

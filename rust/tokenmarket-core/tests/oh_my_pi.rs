@@ -207,6 +207,18 @@ async fn oh_my_pi_imports_all_models_with_inline_key_and_preserves_oauth_store_a
 struct Installer {
     executable: PathBuf,
     steps: std::sync::Mutex<Vec<tokenmarket_core::installation::InstallStep>>,
+    version: std::sync::Mutex<String>,
+    fail_after_publish: std::sync::atomic::AtomicBool,
+}
+impl Installer {
+    fn new(executable: PathBuf) -> Self {
+        Self {
+            executable,
+            steps: Default::default(),
+            version: std::sync::Mutex::new("omp/18.15.0".into()),
+            fail_after_publish: Default::default(),
+        }
+    }
 }
 impl tokenmarket_core::installation::InstallExecutor for Installer {
     fn execute(
@@ -218,11 +230,17 @@ impl tokenmarket_core::installation::InstallExecutor for Installer {
         self.steps.lock().unwrap().push(step.clone());
         if !step.program.is_empty() {
             executable(&self.executable);
+            if self
+                .fail_after_publish
+                .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                anyhow::bail!("fixture failed after publishing an incomplete runtime")
+            }
         }
         Ok(())
     }
     fn version(&self, _: &Path) -> anyhow::Result<String> {
-        Ok("omp 18.15.0".into())
+        Ok(self.version.lock().unwrap().clone())
     }
 }
 
@@ -255,13 +273,11 @@ fn oh_my_pi_installs_the_official_pinned_native_binary_without_bun_or_shell_depe
     ] {
         let root = tempfile::tempdir().unwrap();
         let tool = tool_id("oh-my-pi").unwrap();
-        let executor = Arc::new(Installer {
-            executable: root
-                .path()
+        let executor = Arc::new(Installer::new(
+            root.path()
                 .join(".tokenmarket/tools/oh-my-pi/bin")
                 .join(command),
-            steps: Default::default(),
-        });
+        ));
         let manager = InstallationManager::new(
             environment(root.path(), platform),
             architecture.into(),
@@ -304,12 +320,116 @@ fn oh_my_pi_installs_the_official_pinned_native_binary_without_bun_or_shell_depe
     let manager = InstallationManager::new(
         environment(root.path(), HostPlatform::MacOs),
         "riscv64".into(),
-        Arc::new(Installer {
-            executable: root.path().join("unused"),
-            steps: Default::default(),
-        }),
+        Arc::new(Installer::new(root.path().join("unused"))),
     );
     assert!(!manager.availability(tool_id("oh-my-pi").unwrap()).supported);
+}
+
+fn installation_finished(
+    manager: &tokenmarket_core::installation::InstallationManager,
+) -> tokenmarket_core::installation::InstallStatus {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    loop {
+        let status = manager.status(tool_id("oh-my-pi").unwrap()).unwrap();
+        if status.stage.is_terminal() {
+            return status;
+        }
+        assert!(std::time::Instant::now() < deadline, "{status:?}");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+}
+
+#[test]
+fn oh_my_pi_reuses_its_exact_official_version_and_refuses_other_identities_or_versions() {
+    use std::sync::Arc;
+    use tokenmarket_core::installation::{InstallStage, InstallationManager};
+    for (version, compatible) in [
+        ("omp/18.15.0", true),
+        ("omp/18.14.0", false),
+        ("omp/18.15.1", false),
+        ("omp/18.15.0-rc.1", false),
+        ("other/18.15.0", false),
+        ("wrapperomp/18.15.0", false),
+        ("omp/18.15.0 extra", false),
+        ("omp/118.15.0", false),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let existing = root.path().join("bin/omp");
+        executable(&existing);
+        let before = std::fs::read(&existing).unwrap();
+        let executor = Arc::new(Installer::new(root.path().join("unused")));
+        *executor.version.lock().unwrap() = version.into();
+        let manager = InstallationManager::new(
+            environment(root.path(), HostPlatform::MacOs),
+            "aarch64".into(),
+            executor.clone(),
+        );
+        let tool = tool_id("oh-my-pi").unwrap();
+        manager.start(tool).unwrap();
+        let done = installation_finished(&manager);
+        assert_eq!(
+            done.stage,
+            if compatible {
+                InstallStage::Succeeded
+            } else {
+                InstallStage::Failed
+            },
+            "{version}: {done:?}"
+        );
+        if !compatible {
+            assert!(done.detail.contains("未自动升级"));
+        }
+        assert_eq!(
+            manager.installed_version(tool).unwrap().as_deref(),
+            Some(version)
+        );
+        assert_eq!(std::fs::read(existing).unwrap(), before);
+        assert!(executor.steps.lock().unwrap().is_empty());
+        assert!(!root.path().join(".omp").exists());
+    }
+}
+
+#[test]
+fn oh_my_pi_repairs_only_its_owned_incomplete_pinned_version_after_restart() {
+    use std::sync::{atomic::Ordering, Arc};
+    use tokenmarket_core::installation::{InstallStage, InstallationManager};
+    for version_changed in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let mut env = environment(root.path(), HostPlatform::MacOs);
+        env.command_directories.extend(
+            tokenmarket_core::installation::recipes::managed_command_directories(root.path()),
+        );
+        let tool = tool_id("oh-my-pi").unwrap();
+        let executor = Arc::new(Installer::new(
+            root.path().join(".tokenmarket/tools/oh-my-pi/bin/omp"),
+        ));
+        executor.fail_after_publish.store(true, Ordering::SeqCst);
+        let manager = InstallationManager::new(env.clone(), "aarch64".into(), executor.clone());
+        manager.start(tool).unwrap();
+        assert_eq!(installation_finished(&manager).stage, InstallStage::Failed);
+        assert!(ToolInventory::new(env.clone())
+            .require_installed(tool)
+            .is_err());
+        let failed_steps = executor.steps.lock().unwrap().len();
+        executor.fail_after_publish.store(false, Ordering::SeqCst);
+        if version_changed {
+            *executor.version.lock().unwrap() = "omp/18.15.1".into();
+        }
+        let restarted = InstallationManager::new(env.clone(), "aarch64".into(), executor.clone());
+        restarted.start(tool).unwrap();
+        let repaired = installation_finished(&restarted);
+        if version_changed {
+            assert_eq!(repaired.stage, InstallStage::Failed);
+            assert!(repaired.detail.contains("未完成安装的版本已改变"));
+            assert_eq!(executor.steps.lock().unwrap().len(), failed_steps);
+            assert!(ToolInventory::new(env).require_installed(tool).is_err());
+        } else {
+            assert_eq!(repaired.stage, InstallStage::Succeeded, "{repaired:?}");
+            assert!(executor.steps.lock().unwrap().len() > failed_steps);
+            ToolInventory::new(env).require_installed(tool).unwrap();
+        }
+        assert!(!root.path().join(".omp").exists());
+    }
 }
 
 #[tokio::test]
