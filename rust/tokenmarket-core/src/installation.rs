@@ -246,6 +246,22 @@ impl InstallExecutor for NativeInstallExecutor {
     }
 }
 
+fn background_command(program: &str) -> Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let mut command = Command::new(program);
+        // The desktop has no console. Piped output alone still lets Windows
+        // create one for EXE, CMD/BAT and PowerShell version probes.
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        command
+    }
+    #[cfg(not(windows))]
+    {
+        Command::new(program)
+    }
+}
+
 fn run_process(
     program: &str,
     args: &[String],
@@ -257,7 +273,7 @@ fn run_process(
     if cancelled.load(Ordering::SeqCst) {
         bail!("安装已取消")
     }
-    let mut command = Command::new(program);
+    let mut command = background_command(program);
     command
         .args(args)
         .envs(environment.iter().map(|(key, value)| (key, value)))
@@ -323,7 +339,7 @@ fn run_process(
             }
             #[cfg(windows)]
             {
-                let _ = Command::new("taskkill.exe")
+                let _ = background_command("taskkill.exe")
                     .args(["/PID", &child.id().to_string(), "/T", "/F"])
                     .output();
             }
