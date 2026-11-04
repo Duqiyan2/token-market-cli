@@ -1,0 +1,66 @@
+name: Desktop packages
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows x64 production installers
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      TOKEN_MARKET_BUILD_CONSOLE_API_BASE_URL: https://console-api.tokensapi.cn
+      TOKEN_MARKET_BUILD_GATEWAY_API_BASE_URL: https://api.tokensapi.cn
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build production installers
+        uses: tauri-apps/tauri-action@v0
+        with:
+          projectPath: src-tauri
+          args: --target x86_64-pc-windows-msvc --bundles msi,nsis
+      - name: Verify and collect installers
+        shell: python
+        run: |
+          import hashlib, json, os, pathlib, shutil, struct, subprocess
+
+          config = json.loads(pathlib.Path("src-tauri/tauri.conf.json").read_text())
+          assert config["productName"] == "Token Market"
+          assert config["identifier"] == "cn.tokenmarket.setup"
+          target = pathlib.Path("src-tauri/target/x86_64-pc-windows-msvc/release")
+          binary = (target / "app.exe").read_bytes()
+          pe = struct.unpack_from("<I", binary, 0x3c)[0]
+          assert binary[pe:pe+4] == b"PE\0\0"
+          assert struct.unpack_from("<H", binary, pe+4)[0] == 0x8664
+          endpoints = [os.environ["TOKEN_MARKET_BUILD_CONSOLE_API_BASE_URL"], os.environ["TOKEN_MARKET_BUILD_GATEWAY_API_BASE_URL"]]
+          assert all(url.encode() in binary for url in endpoints)
+          installers = sorted((target / "bundle").rglob("*.msi")) + sorted((target / "bundle/nsis").glob("*-setup.exe"))
+          assert len(installers) == 2
+          assert {p.suffix for p in installers} == {".exe", ".msi"}
+          assert all(p.name.startswith("Token Market_") and "Local" not in p.name for p in installers)
+          output = pathlib.Path("dist/windows-x64")
+          output.mkdir(parents=True)
+          hashes = {}
+          for installer in installers:
+              shutil.copy2(installer, output / installer.name)
+              hashes[installer.name] = hashlib.sha256(installer.read_bytes()).hexdigest()
+          (output / "SHA256SUMS").write_text("".join(f"{digest}  {name}\n" for name, digest in hashes.items()))
+          record = dict(sourceCommit=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(), productName=config["productName"], bundleIdentifier=config["identifier"], version=config["version"], arch="x86_64", productionEndpoints=endpoints, artifacts=hashes)
+          (output / "build-verification.json").write_text(json.dumps(record, indent=2) + "\n")
+          print(json.dumps(record, indent=2))
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Token-Market-Windows-x64
+          path: dist/windows-x64/*
+          if-no-files-found: error
