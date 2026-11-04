@@ -168,26 +168,8 @@ impl InstallExecutor for NativeInstallExecutor {
     }
     fn version(&self, command: &Path) -> Result<String> {
         let mut lines = vec![];
-        #[cfg(windows)]
-        let (program, args) = if command
-            .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat"))
-        {
-            (
-                "cmd.exe".to_string(),
-                vec![
-                    "/d".into(),
-                    "/c".into(),
-                    format!("\"{}\" --version", command.display()),
-                ],
-            )
-        } else {
-            (
-                command.to_string_lossy().into_owned(),
-                vec!["--version".into()],
-            )
-        };
-        #[cfg(not(windows))]
+        // Rust handles Windows CMD/BAT launchers and their nonstandard quoting.
+        // Manually embedding a quoted script in `cmd /c` breaks paths with spaces.
         let (program, args) = (
             command.to_string_lossy().into_owned(),
             vec!["--version".into()],
@@ -246,6 +228,22 @@ impl InstallExecutor for NativeInstallExecutor {
     }
 }
 
+fn background_command(program: &str) -> Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let mut command = Command::new(program);
+        // The desktop has no console. Piped output alone still lets Windows
+        // create one for EXE, CMD/BAT and PowerShell version probes.
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        command
+    }
+    #[cfg(not(windows))]
+    {
+        Command::new(program)
+    }
+}
+
 fn run_process(
     program: &str,
     args: &[String],
@@ -257,7 +255,7 @@ fn run_process(
     if cancelled.load(Ordering::SeqCst) {
         bail!("安装已取消")
     }
-    let mut command = Command::new(program);
+    let mut command = background_command(program);
     command
         .args(args)
         .envs(environment.iter().map(|(key, value)| (key, value)))
@@ -323,7 +321,7 @@ fn run_process(
             }
             #[cfg(windows)]
             {
-                let _ = Command::new("taskkill.exe")
+                let _ = background_command("taskkill.exe")
                     .args(["/PID", &child.id().to_string(), "/T", "/F"])
                     .output();
             }
