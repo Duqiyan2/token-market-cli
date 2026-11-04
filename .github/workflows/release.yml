@@ -21,7 +21,7 @@ jobs:
       matrix:
         include:
           - platform: macos-latest
-            args: --target aarch64-apple-darwin
+            args: --target aarch64-apple-darwin --bundles app
           - platform: windows-latest
             args: ""
     runs-on: ${{ matrix.platform }}
@@ -56,9 +56,13 @@ jobs:
           cargo test --manifest-path rust/tokenmarket-cli/Cargo.toml --all-targets
           cargo check --manifest-path src-tauri/Cargo.toml
 
-      - name: Configure macOS ad-hoc signing
+      - name: Validate persistent macOS signing identity and keychain sharing
         if: runner.os == 'macOS'
-        run: echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
+        env:
+          MACOS_SIGNING_CERTIFICATE: ${{ secrets.MACOS_SIGNING_CERTIFICATE }}
+          MACOS_SIGNING_PASSWORD: ${{ secrets.MACOS_SIGNING_PASSWORD }}
+          MACOS_SIGNING_CERTIFICATE_SHA1: ${{ vars.MACOS_SIGNING_CERTIFICATE_SHA1 }}
+        run: python3 scripts/macos-local-signing.py --profile production --ci smoke
 
       - name: Build desktop installers
         uses: tauri-apps/tauri-action@v0
@@ -66,16 +70,28 @@ jobs:
           projectPath: src-tauri
           args: ${{ matrix.args }}
 
-      - name: Verify macOS app signature
+      - name: Build matching macOS CLI
         if: runner.os == 'macOS'
-        run: codesign --verify --deep --strict "src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Token Market.app"
+        run: cargo build --release --locked --manifest-path rust/tokenmarket-cli/Cargo.toml --target aarch64-apple-darwin
+
+      - name: Sign macOS clients with the persistent shared identity and create DMG
+        if: runner.os == 'macOS'
+        env:
+          MACOS_SIGNING_CERTIFICATE: ${{ secrets.MACOS_SIGNING_CERTIFICATE }}
+          MACOS_SIGNING_PASSWORD: ${{ secrets.MACOS_SIGNING_PASSWORD }}
+          MACOS_SIGNING_CERTIFICATE_SHA1: ${{ vars.MACOS_SIGNING_CERTIFICATE_SHA1 }}
+        run: >-
+          python3 scripts/macos-local-signing.py --profile production --ci package
+          --app "src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Token Market.app"
+          --cli rust/tokenmarket-cli/target/aarch64-apple-darwin/release/tokenmarket
+          --output dist/macos-release
 
       - name: Preserve desktop installers
         uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ runner.os }}
           path: |
-            src-tauri/target/**/bundle/dmg/*.dmg
+            dist/macos-release/**
             src-tauri/target/**/bundle/msi/*.msi
             src-tauri/target/**/bundle/nsis/*.exe
           if-no-files-found: error
@@ -96,17 +112,19 @@ jobs:
           tag = os.environ["RELEASE_TAG"]
           assert tag.startswith("v"), "Desktop release must use a version tag"
           macos = os.environ["RUNNER_OS"] == "macOS"
-          bundle = pathlib.Path("src-tauri/target") / ("aarch64-apple-darwin/release/bundle" if macos else "release/bundle")
+          bundle = pathlib.Path("dist/macos-release") if macos else pathlib.Path("src-tauri/target/release/bundle")
           suffixes = [".dmg"] if macos else [".msi", ".exe"]
           installers = [p for p in bundle.rglob("*") if p.is_file() and p.suffix in suffixes]
           for suffix in suffixes:
               assert any(p.suffix == suffix for p in installers), "Missing installer: " + suffix
           if macos:
-              app, = bundle.glob("macos/*.app")
+              app, = bundle.glob("*.app")
               archive = app.with_suffix(".app.tar.gz")
               with tarfile.open(archive, "w:gz") as output:
                   output.add(app, arcname=app.name)
               installers.append(archive)
+              installers.extend(bundle.glob("tokenmarket-*-macos-*"))
+              installers.append(bundle / "signing-manifest.json")
           if subprocess.run(["gh", "release", "view", tag, "--repo", repo], stdout=subprocess.DEVNULL).returncode:
               created = subprocess.run(["gh", "release", "create", tag, "--repo", repo, "--verify-tag", "--title", "Token Market " + tag, "--notes", "Desktop installers and CLI share this version."])
               if created.returncode:

@@ -172,6 +172,10 @@ xattr -cr "/Applications/Token Market.app"
 
 然后重新打开应用。
 
+正常升级保留固定签名身份，App 与 CLI 可复用钥匙串凭据，无需反复授权。
+从旧临时签名包迁移时可能需要一次授权。构建与发布配置见
+[macOS 签名说明](docs/macos-local-signing.md)。
+
 ## 问题反馈
 
 请通过 [GitHub Issues](https://github.com/FitBBC/token-market-cli/issues) 反馈问题，附上操作系统、Token Market 版本、工具名称和复现步骤。提交截图或日志前，请移除 API Key、登录凭据等敏感信息。

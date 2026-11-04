@@ -164,13 +164,18 @@ Run `tokenmarket --help` or `tokenmarket <command> --help` for command details.
 
 ### macOS blocks the first launch
 
-The installer uses ad-hoc signing and is not signed and notarized with an Apple Developer ID. After verifying that the installer came from this repository's Releases, run:
+Builds signed with the fixed local certificate are not Developer ID signed or notarized. After verifying the source of such an installer, run:
 
 ```bash
 xattr -cr "/Applications/Token Market.app"
 ```
 
 Then reopen the app.
+
+Normal upgrades preserve the signing identity so the app and CLI can reuse their
+Keychain items without repeated access prompts. Older ad-hoc builds may require
+a one-time authorization when migrating. See [macOS signing](docs/macos-local-signing.md)
+for build and release configuration.
 
 ## Feedback
 
