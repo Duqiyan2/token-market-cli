@@ -27,8 +27,14 @@ fn version_and_shell_probes_do_not_allocate_a_console() {
             "1.2.3 console=0"
         );
         let executor = NativeInstallExecutor;
-        for command in [fixture.to_path_buf(), fixture.with_extension("cmd")] {
-            let version = executor.version(&command).unwrap();
+        for command in [
+            fixture.to_path_buf(),
+            fixture.with_extension("cmd"),
+            fixture.with_extension("bat"),
+        ] {
+            let version = executor
+                .version(&command)
+                .unwrap_or_else(|error| panic!("{}: {error}", command.display()));
             assert_eq!(version, "1.2.3 console=0", "probe: {}", command.display());
         }
         let script = format!("& '{}'", fixture.to_string_lossy().replace('\'', "''"));
@@ -78,7 +84,13 @@ fn version_and_shell_probes_do_not_allocate_a_console() {
         "{}",
         String::from_utf8_lossy(&compiler.stderr)
     );
-    std::fs::write(fixture.with_extension("cmd"), "@\"%~dp0probe.exe\" %*\r\n").unwrap();
+    for extension in ["cmd", "bat"] {
+        std::fs::write(
+            fixture.with_extension(extension),
+            "@\"%~dp0probe.exe\" %*\r\n",
+        )
+        .unwrap();
+    }
     let output = Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",

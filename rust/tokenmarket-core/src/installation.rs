@@ -168,26 +168,8 @@ impl InstallExecutor for NativeInstallExecutor {
     }
     fn version(&self, command: &Path) -> Result<String> {
         let mut lines = vec![];
-        #[cfg(windows)]
-        let (program, args) = if command
-            .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat"))
-        {
-            (
-                "cmd.exe".to_string(),
-                vec![
-                    "/d".into(),
-                    "/c".into(),
-                    format!("\"{}\" --version", command.display()),
-                ],
-            )
-        } else {
-            (
-                command.to_string_lossy().into_owned(),
-                vec!["--version".into()],
-            )
-        };
-        #[cfg(not(windows))]
+        // Rust handles Windows CMD/BAT launchers and their nonstandard quoting.
+        // Manually embedding a quoted script in `cmd /c` breaks paths with spaces.
         let (program, args) = (
             command.to_string_lossy().into_owned(),
             vec!["--version".into()],
