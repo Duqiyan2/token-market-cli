@@ -1,0 +1,80 @@
+[
+  {
+    "theme": "light",
+    "width": 900,
+    "overflow": false,
+    "detailsOverflow": false,
+    "menu": {
+      "x": 10,
+      "y": 407.4375,
+      "width": 276,
+      "height": 268.578125
+    },
+    "errors": []
+  },
+  {
+    "theme": "light",
+    "width": 1440,
+    "overflow": false,
+    "detailsOverflow": false,
+    "menu": {
+      "x": 12,
+      "y": 547.4375,
+      "width": 276,
+      "height": 268.578125
+    },
+    "errors": []
+  },
+  {
+    "theme": "light",
+    "width": 375,
+    "overflow": false,
+    "detailsOverflow": false,
+    "menu": {
+      "x": 91,
+      "y": 64,
+      "width": 276,
+      "height": 268.578125
+    },
+    "errors": []
+  },
+  {
+    "theme": "dark",
+    "width": 900,
+    "overflow": false,
+    "detailsOverflow": false,
+    "menu": {
+      "x": 10,
+      "y": 407.4375,
+      "width": 276,
+      "height": 268.578125
+    },
+    "errors": []
+  },
+  {
+    "theme": "dark",
+    "width": 1440,
+    "overflow": false,
+    "detailsOverflow": false,
+    "menu": {
+      "x": 12,
+      "y": 547.4375,
+      "width": 276,
+      "height": 268.578125
+    },
+    "errors": []
+  },
+  {
+    "theme": "dark",
+    "width": 375,
+    "overflow": false,
+    "detailsOverflow": false,
+    "menu": {
+      "x": 91,
+      "y": 64,
+      "width": 276,
+      "height": 268.578125
+    },
+    "errors": []
+  }
+]

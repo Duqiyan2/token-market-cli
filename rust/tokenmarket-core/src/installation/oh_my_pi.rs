@@ -14,6 +14,14 @@ pub(super) fn plan(
     environment: &InstallationEnvironment,
     architecture: &str,
 ) -> Result<InstallPlan> {
+    plan_release(environment, architecture, VERSION, None)
+}
+pub(super) fn plan_release(
+    environment: &InstallationEnvironment,
+    architecture: &str,
+    version: &str,
+    digest: Option<&str>,
+) -> Result<InstallPlan> {
     // Read-only libc detection: inventory never launches ldd or another executable.
     let musl = environment.platform == HostPlatform::Unix
         && (cfg!(target_env = "musl")
@@ -55,6 +63,7 @@ pub(super) fn plan(
         ),
         _ => bail!("Oh My Pi 官方独立二进制不支持当前架构 {architecture}"),
     };
+    let hash = digest.unwrap_or(hash);
     let windows = environment.platform == HostPlatform::Windows;
     let binary = environment
         .home
@@ -103,7 +112,7 @@ chmod u+x "$2/omp"
     };
     Ok(InstallPlan {
         tool: ToolId::OhMyPi,
-        version: VERSION.into(),
+        version: version.into(),
         command: "omp".into(),
         steps: vec![
             InstallStep {
@@ -113,7 +122,7 @@ chmod u+x "$2/omp"
                 environment: vec![],
                 download: Some((
                     format!(
-                        "https://github.com/can1357/oh-my-pi/releases/download/v{VERSION}/{asset}"
+                        "https://github.com/can1357/oh-my-pi/releases/download/v{version}/{asset}"
                     ),
                     binary,
                 )),

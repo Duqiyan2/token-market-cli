@@ -112,6 +112,7 @@ pub fn show_main_window(app: &AppHandle) {
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
+        let _ = window.emit("desktop-check-tool-updates", ());
     }
 }
 
@@ -140,7 +141,6 @@ fn create_tray(app: &AppHandle) -> tauri::Result<()> {
     let quit = MenuItem::with_id(app, "desktop-quit", "退出应用", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let menu = Menu::with_items(app, &[&show, &settings, &separator, &quit])?;
-    // This is the existing brand icon, not a monochrome macOS template image.
     let mut tray = TrayIconBuilder::with_id("tokenmarket")
         .tooltip("Token Market")
         .menu(&menu)
@@ -164,8 +164,22 @@ fn create_tray(app: &AppHandle) -> tauri::Result<()> {
                 show_main_window(tray.app_handle());
             }
         });
-    if let Some(icon) = app.default_window_icon() {
-        tray = tray.icon(icon.clone());
+    #[cfg(target_os = "macos")]
+    {
+        // A transparent 18 pt @2x mask, tinted by macOS for the menu bar appearance.
+        // Keep this separate from the colored Dock icon and independent of app theme.
+        let icon = tauri::image::Image::new_owned(
+            include_bytes!("../icons/tray-template.rgba").to_vec(),
+            36,
+            36,
+        );
+        tray = tray.icon(icon).icon_as_template(true);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        if let Some(icon) = app.default_window_icon() {
+            tray = tray.icon(icon.clone());
+        }
     }
     tray.build(app)?;
     Ok(())

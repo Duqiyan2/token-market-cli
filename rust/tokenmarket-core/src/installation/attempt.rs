@@ -61,6 +61,28 @@ pub(super) fn repair(
     }
     Ok(true)
 }
+pub(super) fn upgrade_pending(
+    environment: &InstallationEnvironment,
+    plan: &InstallPlan,
+    command: &Path,
+) -> Result<bool> {
+    let Some(attempt) = read(environment, plan.tool)? else {
+        return Ok(false);
+    };
+    if !attempt
+        .commands
+        .iter()
+        .any(|p| matches(environment, p, command))
+    {
+        return Ok(false);
+    }
+    if super::updates::compare_versions(&plan.version, &attempt.version)
+        == Some(std::cmp::Ordering::Less)
+    {
+        bail!("未完成升级的目标版本更高，不会自动降级");
+    }
+    Ok(true)
+}
 /// Read-only and path-scoped: a newly discovered external install is still usable.
 pub(crate) fn incomplete(
     environment: &InstallationEnvironment,
@@ -78,12 +100,21 @@ pub(crate) fn incomplete(
             .any(|p| matches(environment, p, command)),
     }
 }
-pub(super) fn begin(environment: &InstallationEnvironment, plan: &InstallPlan) -> Result<()> {
+pub(super) fn begin_operation(
+    environment: &InstallationEnvironment,
+    plan: &InstallPlan,
+    upgrading: bool,
+) -> Result<()> {
     if let Some(attempt) = read(environment, plan.tool)? {
-        if attempt.version != plan.version {
-            bail!("上次安装尚未完成且目标版本已改变；未自动升级，请先检查现有安装")
+        if attempt.version == plan.version {
+            return Ok(());
         }
-        return Ok(());
+        if !upgrading
+            || super::updates::compare_versions(&plan.version, &attempt.version)
+                != Some(std::cmp::Ordering::Greater)
+        {
+            bail!("上次安装尚未完成且目标版本已改变；请先检查现有安装")
+        }
     }
     let destination = path(environment, plan.tool);
     let temporary = destination.with_extension("tmp");
@@ -91,7 +122,7 @@ pub(super) fn begin(environment: &InstallationEnvironment, plan: &InstallPlan) -
         version: plan.version.clone(),
         commands: super::recipes::owned_command_paths(plan.tool, environment)
             .into_iter()
-            .filter(|p| !p.exists())
+            .filter(|p| upgrading || !p.exists())
             .collect(),
     };
     crate::config::write_private_json(&temporary, &attempt)?;

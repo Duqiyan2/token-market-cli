@@ -14,13 +14,26 @@ pub(super) fn plan(
     environment: &InstallationEnvironment,
     architecture: &str,
 ) -> Result<InstallPlan> {
+    let version = match tool {
+        ToolId::ClaudeCode => CLAUDE_VERSION,
+        ToolId::Codex => CODEX_VERSION,
+        _ => bail!("该工具没有原生 CLI 安装方案"),
+    };
+    plan_version(tool, environment, architecture, version)
+}
+pub(super) fn plan_version(
+    tool: ToolId,
+    environment: &InstallationEnvironment,
+    architecture: &str,
+    version: &str,
+) -> Result<InstallPlan> {
     if !matches!(architecture, "aarch64" | "x86_64") {
         bail!("官方安装方案不支持当前架构 {architecture}")
     }
     let windows = environment.platform == HostPlatform::Windows;
-    let (command, version, origin) = match tool {
-        ToolId::ClaudeCode => ("claude", CLAUDE_VERSION, "https://claude.ai"),
-        ToolId::Codex => ("codex", CODEX_VERSION, "https://chatgpt.com/codex"),
+    let (command, origin) = match tool {
+        ToolId::ClaudeCode => ("claude", "https://claude.ai"),
+        ToolId::Codex => ("codex", "https://chatgpt.com/codex"),
         _ => bail!("该工具没有原生 CLI 安装方案"),
     };
     let extension = if windows { "ps1" } else { "sh" };

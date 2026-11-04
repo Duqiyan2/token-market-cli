@@ -1,0 +1,143 @@
+[
+  {
+    "name": "dir-1",
+    "width": 1440,
+    "height": 900,
+    "errors": [],
+    "overflow": false,
+    "broken": [],
+    "headings": [
+      "工具管理"
+    ],
+    "buttons": 43
+  },
+  {
+    "name": "dir-1",
+    "width": 900,
+    "height": 760,
+    "errors": [],
+    "overflow": false,
+    "broken": [],
+    "headings": [
+      "工具管理"
+    ],
+    "buttons": 43
+  },
+  {
+    "name": "dir-1",
+    "width": 375,
+    "height": 812,
+    "errors": [],
+    "overflow": false,
+    "broken": [],
+    "headings": [
+      "工具管理"
+    ],
+    "buttons": 43
+  },
+  {
+    "name": "dir-2",
+    "width": 1440,
+    "height": 900,
+    "errors": [],
+    "overflow": false,
+    "broken": [],
+    "headings": [
+      "Claude Code"
+    ],
+    "buttons": 39
+  },
+  {
+    "name": "dir-2",
+    "width": 900,
+    "height": 760,
+    "errors": [],
+    "overflow": false,
+    "broken": [],
+    "headings": [
+      "Claude Code"
+    ],
+    "buttons": 39
+  },
+  {
+    "name": "dir-2",
+    "width": 375,
+    "height": 812,
+    "errors": [],
+    "overflow": false,
+    "broken": [],
+    "headings": [
+      "Claude Code"
+    ],
+    "buttons": 39
+  },
+  {
+    "name": "dir-3",
+    "width": 1440,
+    "height": 900,
+    "errors": [],
+    "overflow": false,
+    "broken": [],
+    "headings": [
+      "工具库",
+      "账号与空间",
+      "使用帮助",
+      "应用设置"
+    ],
+    "buttons": 62
+  },
+  {
+    "name": "dir-3",
+    "width": 900,
+    "height": 760,
+    "errors": [],
+    "overflow": false,
+    "broken": [],
+    "headings": [
+      "工具库",
+      "账号与空间",
+      "使用帮助",
+      "应用设置"
+    ],
+    "buttons": 62
+  },
+  {
+    "name": "dir-3",
+    "width": 375,
+    "height": 812,
+    "errors": [],
+    "overflow": false,
+    "broken": [],
+    "headings": [
+      "工具库",
+      "账号与空间",
+      "使用帮助",
+      "应用设置"
+    ],
+    "buttons": 62
+  },
+  {
+    "name": "logo-board",
+    "width": 1440,
+    "height": 900,
+    "errors": [],
+    "overflow": false,
+    "broken": [],
+    "headings": [
+      "一个标志，两种使用场景。"
+    ],
+    "buttons": 0
+  },
+  {
+    "name": "index",
+    "width": 1440,
+    "height": 900,
+    "errors": [],
+    "overflow": false,
+    "broken": [],
+    "headings": [
+      "更从容地，管理你的 Agent。"
+    ],
+    "buttons": 0
+  }
+]

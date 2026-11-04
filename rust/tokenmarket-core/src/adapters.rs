@@ -709,7 +709,7 @@ pub fn adapters() -> Vec<Adapter> {
         },
         Adapter {
             id: ToolId::Codex,
-            name: "Codex CLI",
+            name: "Codex",
             protocol: Protocol::OpenAiCompatible,
             requires_restart: true,
             path_kind: PathKind::CodexConfig,

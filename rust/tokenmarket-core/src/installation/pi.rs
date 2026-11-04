@@ -23,6 +23,14 @@ pub(super) fn plan(
     environment: &InstallationEnvironment,
     architecture: &str,
 ) -> Result<InstallPlan> {
+    plan_release(environment, architecture, VERSION, None)
+}
+pub(super) fn plan_release(
+    environment: &InstallationEnvironment,
+    architecture: &str,
+    version: &str,
+    digest: Option<&str>,
+) -> Result<InstallPlan> {
     let (platform, arch, hash) = match (environment.platform, architecture) {
         (HostPlatform::MacOs, "aarch64") => (
             "darwin",
@@ -56,6 +64,7 @@ pub(super) fn plan(
         ),
         _ => bail!("Pi 官方独立安装包不支持当前架构 {architecture}"),
     };
+    let hash = digest.unwrap_or(hash);
     let windows = environment.platform == HostPlatform::Windows;
     let runtime = environment.home.join(".tokenmarket/tools/pi/runtime");
     let installers = environment.home.join(".tokenmarket/installers/pi");
@@ -66,7 +75,7 @@ pub(super) fn plan(
     let archive = installers.join(&asset);
     let mut steps = super::portable_git::steps(environment, architecture, "pi")?;
     steps.push(download(
-        format!("https://github.com/earendil-works/pi/releases/download/v{VERSION}/{asset}"),
+        format!("https://github.com/earendil-works/pi/releases/download/v{version}/{asset}"),
         archive.clone(),
     ));
     let (program, args) = if windows {
@@ -113,7 +122,7 @@ chmod u+x "$2/pi"
     });
     Ok(InstallPlan {
         tool: ToolId::Pi,
-        version: VERSION.into(),
+        version: version.into(),
         command: "pi".into(),
         steps,
     })

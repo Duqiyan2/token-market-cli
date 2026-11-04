@@ -13,6 +13,14 @@ pub(super) fn plan(
     environment: &InstallationEnvironment,
     architecture: &str,
 ) -> Result<InstallPlan> {
+    plan_release(environment, architecture, "2.4.1", None)
+}
+pub(super) fn plan_release(
+    environment: &InstallationEnvironment,
+    architecture: &str,
+    version: &str,
+    digest: Option<&str>,
+) -> Result<InstallPlan> {
     let (platform, arch, hash) = match (environment.platform, architecture) {
         (HostPlatform::MacOs, "aarch64") => (
             "darwin",
@@ -46,6 +54,7 @@ pub(super) fn plan(
         ),
         _ => bail!("Kimi Code 官方独立安装包不支持当前架构 {architecture}"),
     };
+    let hash = digest.unwrap_or(hash);
     let windows = environment.platform == HostPlatform::Windows;
     let shell = std::env::var_os("KIMI_SHELL_PATH")
         .filter(|v| !v.is_empty())
@@ -110,7 +119,7 @@ chmod u+x "$3/kimi"
             ],
         )
     };
-    steps.push(InstallStep{stage:InstallStage::Downloading,program:String::new(),args:vec![],environment:vec![],download:Some((format!("https://github.com/MoonshotAI/kimi-code/releases/download/%40moonshot-ai/kimi-code%402.4.1/{asset}"),archive))});
+    steps.push(InstallStep{stage:InstallStage::Downloading,program:String::new(),args:vec![],environment:vec![],download:Some((format!("https://github.com/MoonshotAI/kimi-code/releases/download/%40moonshot-ai/kimi-code%40{version}/{asset}"),archive))});
     let process_environment = if windows {
         vec![(
             "KIMI_SHELL_PATH".into(),
@@ -136,7 +145,7 @@ chmod u+x "$3/kimi"
     });
     Ok(InstallPlan {
         tool: ToolId::KimiCode,
-        version: "2.4.1".into(),
+        version: version.into(),
         command: "kimi".into(),
         steps,
     })

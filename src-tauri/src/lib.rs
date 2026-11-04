@@ -274,6 +274,8 @@ pub fn run() {
             prepare_tool_connect,
             download_tool,
             installation::start_tool_installation,
+            installation::check_tool_updates,
+            installation::start_tool_upgrade,
             installation::tool_installation_status,
             installation::cancel_tool_installation,
             desktop_login_status,

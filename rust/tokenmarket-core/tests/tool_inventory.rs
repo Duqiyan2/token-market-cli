@@ -25,7 +25,7 @@ fn missing_tools_offer_official_downloads_and_refuse_connection_even_with_leftov
         entries.iter().map(|e| e.name).collect::<Vec<_>>(),
         [
             "Claude Code",
-            "Codex CLI",
+            "Codex",
             "WorkBuddy",
             "DeepSeek Harness",
             "OpenClaw",
@@ -220,4 +220,115 @@ fn linux_terminal_launch_resolves_private_wrappers_and_process_environment_witho
         .environment
         .iter()
         .any(|(key, value)| key == "MINIMAX_DATA_DIR" && value.ends_with(".minimax")));
+}
+
+#[cfg(unix)]
+#[test]
+fn installation_locations_preserve_selection_and_deduplicate_aliases_without_running_tools() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join("home");
+    let (npm, local, alias) = (
+        home.join(".npm-global/bin"),
+        home.join(".local/bin"),
+        root.path().join("alias"),
+    );
+    let package = home.join(".npm-global/lib/node_modules/@openai/codex");
+    std::fs::create_dir_all(package.join("bin")).unwrap();
+    std::fs::create_dir_all(&npm).unwrap();
+    std::fs::create_dir_all(&local).unwrap();
+    std::fs::create_dir_all(&alias).unwrap();
+    let marker = root.path().join("should-not-run");
+    std::fs::write(
+        package.join("bin/codex.js"),
+        format!("#!/bin/sh\ntouch '{}'\n", marker.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(
+        package.join("bin/codex.js"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    std::fs::write(
+        package.join("package.json"),
+        r#"{"name":"@openai/codex","version":"0.163.0"}"#,
+    )
+    .unwrap();
+    symlink(package.join("bin/codex.js"), npm.join("codex")).unwrap();
+    symlink(npm.join("codex"), alias.join("codex")).unwrap();
+    std::fs::write(local.join("codex"), [0xcf, 0xfa, 0xed, 0xfe, 0, 0, 0, 0]).unwrap();
+    std::fs::set_permissions(local.join("codex"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let env = InstallationEnvironment {
+        home: home.clone(),
+        platform: HostPlatform::MacOs,
+        command_directories: vec![npm.clone(), local.clone(), npm.clone(), alias],
+        application_directories: vec![],
+        executable_extensions: vec![],
+    };
+    let inventory = ToolInventory::new(env);
+    let entries = inventory.list().unwrap();
+    let codex = entries.iter().find(|e| e.id == ToolId::Codex).unwrap();
+    assert_eq!(codex.installations.len(), 2);
+    assert_eq!(
+        codex.installations[0].path,
+        npm.join("codex").display().to_string()
+    );
+    assert!(codex.installations[0].selected);
+    assert_eq!(codex.installations[0].method, "npm");
+    assert_eq!(codex.installations[1].method, "原生程序");
+    assert!(!codex.installations[1].selected);
+    assert_eq!(
+        inventory
+            .terminal_launch_plan(ToolId::Codex)
+            .unwrap()
+            .program,
+        codex.installations[0].path
+    );
+    assert!(!marker.exists());
+    assert!(!home.join(".tokenmarket").exists());
+}
+#[test]
+fn config_directory_is_the_effective_config_parent_and_missing_tools_describe_their_recipe() {
+    let root = tempfile::tempdir().unwrap();
+    let inventory = ToolInventory::new(environment(root.path(), HostPlatform::MacOs));
+    let entries = inventory.list().unwrap();
+    for entry in &entries {
+        assert_eq!(
+            std::path::Path::new(&entry.config_path)
+                .parent()
+                .unwrap()
+                .display()
+                .to_string(),
+            entry.config_directory
+        );
+        assert_eq!(
+            std::path::Path::new(&entry.config_path).is_file(),
+            entry.config_exists
+        );
+        assert!(entry.installations.is_empty());
+    }
+    assert!(entries
+        .iter()
+        .find(|e| e.id == ToolId::Codex)
+        .unwrap()
+        .installation_method
+        .contains("官方安装器"));
+    assert!(entries
+        .iter()
+        .find(|e| e.id == ToolId::Pi)
+        .unwrap()
+        .installation_method
+        .contains("独立安装包"));
+    assert!(entries
+        .iter()
+        .find(|e| e.id == ToolId::GrokBuild)
+        .unwrap()
+        .installation_method
+        .contains("npm"));
+    assert!(entries
+        .iter()
+        .find(|e| e.id == ToolId::Hermes)
+        .unwrap()
+        .installation_method
+        .contains("安装脚本"));
 }

@@ -1,0 +1,41 @@
+[
+  {
+    "direction": 1,
+    "search": true,
+    "empty": true,
+    "totalTools": 14,
+    "connectedFilter": 4,
+    "details": true,
+    "testConfirmation": true,
+    "noRealRequest": true,
+    "spacePreservesConnection": true,
+    "consoleErrors": [],
+    "navigation": true
+  },
+  {
+    "direction": 2,
+    "search": true,
+    "empty": true,
+    "totalTools": 14,
+    "connectedFilter": 4,
+    "details": true,
+    "testConfirmation": true,
+    "noRealRequest": true,
+    "spacePreservesConnection": true,
+    "consoleErrors": [],
+    "navigation": true
+  },
+  {
+    "direction": 3,
+    "search": true,
+    "empty": true,
+    "totalTools": 14,
+    "connectedFilter": 4,
+    "details": true,
+    "testConfirmation": true,
+    "noRealRequest": true,
+    "spacePreservesConnection": true,
+    "consoleErrors": [],
+    "navigation": true
+  }
+]

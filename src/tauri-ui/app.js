@@ -14,7 +14,7 @@ function render(status) {
   const signedIn = Boolean(status.context);
   window.TokenMarketShell?.setAuthenticated(status.context);
   window.TokenMarketWorkspace?.setAuthenticated(status.context);
-  el('login').hidden = signedIn;
+  el('login').hidden = signedIn || window.TokenMarketShell?.page === 'settings';
   el('signed-in').hidden = !signedIn;
   window.TokenMarketTools?.setAuthenticated(signedIn);
   el('waiting').hidden = !pending && !starting && !status.exchanging;

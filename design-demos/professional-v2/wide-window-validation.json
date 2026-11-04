@@ -1,0 +1,38 @@
+[
+  {
+    "theme": "light",
+    "page": "tools",
+    "overflow": false,
+    "errors": []
+  },
+  {
+    "theme": "light",
+    "page": "account",
+    "overflow": false,
+    "errors": []
+  },
+  {
+    "theme": "light",
+    "page": "settings",
+    "overflow": false,
+    "errors": []
+  },
+  {
+    "theme": "dark",
+    "page": "tools",
+    "overflow": false,
+    "errors": []
+  },
+  {
+    "theme": "dark",
+    "page": "account",
+    "overflow": false,
+    "errors": []
+  },
+  {
+    "theme": "dark",
+    "page": "settings",
+    "overflow": false,
+    "errors": []
+  }
+]

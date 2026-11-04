@@ -121,6 +121,15 @@ pub struct ConnectionProjection {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct InstallationLocation {
+    pub path: String,
+    pub resolved_path: Option<String>,
+    pub method: &'static str,
+    pub selected: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ToolInventoryEntry {
     pub id: ToolId,
     pub name: &'static str,
@@ -128,6 +137,11 @@ pub struct ToolInventoryEntry {
     pub can_connect: bool,
     pub download_url: &'static str,
     pub config_path: String,
+    pub config_directory: String,
+    pub config_exists: bool,
+    pub config_directory_exists: bool,
+    pub installation_method: &'static str,
+    pub installations: Vec<InstallationLocation>,
     pub connection: Option<ConnectionProjection>,
     pub installation: crate::installation::InstallationAvailability,
 }
@@ -241,6 +255,17 @@ impl ToolInventory {
             .into_iter()
             .map(|adapter| {
                 let installed = self.is_installed(adapter.id);
+                let installations = self.installation_locations(adapter.id);
+                let installation_method =
+                    installations.first().map(|p| p.method).unwrap_or_else(|| {
+                        crate::installation::discovery::planned_method(
+                            adapter.id,
+                            &self.environment,
+                        )
+                    });
+                let config = absolute_config_path(&self.config_path(adapter.id))
+                    .unwrap_or_else(|_| self.config_path(adapter.id));
+                let directory = config.parent().unwrap_or(&config);
                 ToolInventoryEntry {
                     id: adapter.id,
                     name: adapter.name,
@@ -252,7 +277,12 @@ impl ToolInventory {
                     ),
                     can_connect: installed,
                     download_url: official_download_url(adapter.id),
-                    config_path: self.config_path(adapter.id).display().to_string(),
+                    config_path: config.display().to_string(),
+                    config_directory: directory.display().to_string(),
+                    config_exists: config.is_file(),
+                    config_directory_exists: directory.is_dir(),
+                    installation_method,
+                    installations,
                     connection: desktop.iter().find(|(tool, _)| *tool == adapter.id).map(
                         |(_, r)| ConnectionProjection {
                             state: r.state,
@@ -267,6 +297,75 @@ impl ToolInventory {
                 }
             })
             .collect())
+    }
+    /// List distinct artifacts in resolver order. Duplicate PATH entries and
+    /// symlink aliases for the same artifact do not become extra installations.
+    pub fn installation_locations(&self, tool: ToolId) -> Vec<InstallationLocation> {
+        let commands = if matches!(tool, ToolId::DuMate | ToolId::DuMateEnterprise) {
+            vec![]
+        } else {
+            self.environment.command_paths(tool.command())
+        };
+        let applications = self
+            .environment
+            .application_directories
+            .iter()
+            .filter_map(|directory| {
+                let mut environment = self.environment.clone();
+                environment.application_directories = vec![directory.clone()];
+                Self::new(environment).application_path(tool)
+            })
+            .collect::<Vec<_>>();
+        let prefer_application = matches!(
+            tool,
+            ToolId::WorkBuddy | ToolId::DeepSeekHarness | ToolId::DuMate | ToolId::DuMateEnterprise
+        );
+        let candidates = if prefer_application {
+            applications
+                .into_iter()
+                .map(|p| (p, true))
+                .chain(commands.into_iter().map(|p| (p, false)))
+                .collect::<Vec<_>>()
+        } else {
+            commands
+                .into_iter()
+                .map(|p| (p, false))
+                .chain(applications.into_iter().map(|p| (p, true)))
+                .collect::<Vec<_>>()
+        };
+        let mut seen = std::collections::BTreeSet::new();
+        let mut result = vec![];
+        for (path, application) in candidates {
+            let path = absolute_config_path(&path).unwrap_or(path);
+            let resolved = path.canonicalize().ok();
+            let identity = resolved
+                .as_ref()
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .into_owned();
+            let identity = if self.environment.platform == HostPlatform::Windows {
+                identity.to_lowercase()
+            } else {
+                identity
+            };
+            if !seen.insert(identity) {
+                continue;
+            }
+            result.push(InstallationLocation {
+                method: crate::installation::discovery::method(
+                    tool,
+                    &path,
+                    &self.environment,
+                    application,
+                ),
+                selected: result.is_empty(),
+                resolved_path: resolved
+                    .filter(|p| p != &path)
+                    .map(|p| p.display().to_string()),
+                path: path.display().to_string(),
+            });
+        }
+        result
     }
     /// Desktop discovery and desktop writes share this path. Terminal CLI paths are unchanged.
     pub fn config_path(&self, tool: ToolId) -> PathBuf {
@@ -488,35 +587,49 @@ impl InstallationEnvironment {
         self.command_path(command).is_some()
     }
     pub(crate) fn command_path(&self, command: &str) -> Option<PathBuf> {
+        self.command_paths(command).into_iter().next()
+    }
+    pub(crate) fn command_paths(&self, command: &str) -> Vec<PathBuf> {
+        let mut result = vec![];
+        let mut seen = std::collections::BTreeSet::new();
         for directory in &self.command_directories {
-            if self.platform != HostPlatform::Windows {
-                let path = directory.join(command);
-                if is_executable(&path, self.platform) {
-                    return Some(path);
-                }
+            let candidates = if self.platform != HostPlatform::Windows {
+                vec![directory.join(command)]
             } else {
-                for ext in &self.executable_extensions {
-                    if ![".exe", ".com", ".bat", ".cmd"]
-                        .contains(&ext.to_ascii_lowercase().as_str())
-                    {
-                        continue;
-                    }
-                    if let Ok(entries) = fs::read_dir(directory) {
-                        for entry in entries.flatten() {
-                            if entry
-                                .file_name()
-                                .to_string_lossy()
-                                .eq_ignore_ascii_case(&format!("{command}{ext}"))
-                                && is_executable(&entry.path(), self.platform)
-                            {
-                                return Some(entry.path());
-                            }
-                        }
-                    }
+                let files = fs::read_dir(directory)
+                    .map(|items| items.flatten().map(|e| e.path()).collect::<Vec<_>>())
+                    .unwrap_or_default();
+                self.executable_extensions
+                    .iter()
+                    .filter(|ext| {
+                        [".exe", ".com", ".bat", ".cmd"]
+                            .contains(&ext.to_ascii_lowercase().as_str())
+                    })
+                    .flat_map(|ext| {
+                        files
+                            .iter()
+                            .filter(move |p| {
+                                p.file_name().is_some_and(|n| {
+                                    n.to_string_lossy()
+                                        .eq_ignore_ascii_case(&format!("{command}{ext}"))
+                                })
+                            })
+                            .cloned()
+                    })
+                    .collect()
+            };
+            for path in candidates {
+                let identity = if self.platform == HostPlatform::Windows {
+                    path.to_string_lossy().to_lowercase()
+                } else {
+                    path.to_string_lossy().into_owned()
+                };
+                if is_executable(&path, self.platform) && seen.insert(identity) {
+                    result.push(path);
                 }
             }
         }
-        None
+        result
     }
 }
 

@@ -13,6 +13,142 @@ async function detail(page,id) { await page.locator(`[data-tool="${id}"] .tool-d
 async function switchTeam(page) { await page.locator('.workspace-switch').click();await page.locator('dialog[open] [data-workspace-id="team"]').click();await page.locator('.workspace-switch').filter({hasText:'团队空间'}).waitFor(); }
 async function manage(page) { await page.locator('.tool-menu summary').click(); }
 
+test('settings uses a full page from sidebar, login and native menu, including after session polling', async () => {
+  for(const signedIn of [true,false]) {
+    const f=await openFixture({signedIn});try {
+      const p=f.page;await p.locator(`${signedIn?'#signed-in':'#login'} [data-desktop-settings]`).click();
+      await p.locator('#desktop-run-in-background:enabled').waitFor();
+      assert.equal(await p.locator('#settings-page').evaluate(node=>node.tagName),'SECTION');
+      assert.equal(await p.locator('dialog[open]').count(),0);
+      await p.evaluate(()=>window.__fixture.emit('desktop-login-status',window.__fixture.loginStatus()));
+      assert.equal(await p.locator('#settings-page').isVisible(),true);assert.equal(await p.locator('#login').isVisible(),false);
+      if(signedIn) { assert.equal(await p.locator('#tools-page').isVisible(),false);assert.equal(await p.locator('#signed-in [data-desktop-settings]').getAttribute('aria-current'),'page');await p.locator('.primary-nav [data-page="tools"]').click(); }
+      else await p.locator('#settings-return-login').click();
+      assert.equal(await p.locator('#settings-page').isVisible(),false);
+      await p.evaluate(()=>window.__fixture.emit('desktop-show-preferences'));
+      await p.locator('#desktop-run-in-background:enabled').waitFor();assert.equal(await p.locator('#settings-page').isVisible(),true);
+      assert.deepEqual(f.errors,[]);
+    }finally{await f.close();}
+  }
+});
+
+test('theme segments support arrow keys and leaving settings discards unsaved appearance', async () => {
+  const f=await openFixture();try {
+    const p=f.page;await p.locator('#signed-in [data-desktop-settings]').click();await p.locator('#desktop-run-in-background:enabled').waitFor();
+    await p.locator('[data-theme-preference="system"]').focus();await p.keyboard.press('ArrowLeft');
+    assert.equal(await p.locator('[data-theme-preference="dark"]').getAttribute('aria-checked'),'true');
+    assert.equal(await p.locator('html').getAttribute('data-theme'),'dark');
+    await p.locator('#desktop-run-in-background').uncheck();await p.locator('.primary-nav [data-page="account"]').click();
+    assert.equal(await p.locator('html').getAttribute('data-theme'),'light');assert.equal((await calls(p,'save_desktop_window_preferences')).length,0);
+    await p.locator('#signed-in [data-desktop-settings]').click();await p.locator('#desktop-run-in-background:enabled').waitFor();
+    assert.equal(await p.locator('#desktop-run-in-background').isChecked(),true);
+    assert.equal(await p.locator('[data-theme-preference="system"]').getAttribute('aria-checked'),'true');assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('a late settings read cannot reopen the page after navigating away', async () => {
+  const f=await openFixture();try {
+    const p=f.page;await p.evaluate(()=>window.__fixture.deferPreferences=true);
+    await p.locator('#signed-in [data-desktop-settings]').click();await p.waitForFunction(()=>Boolean(window.__fixture.resolvePreferences));
+    await p.locator('.primary-nav [data-page="tools"]').click();await p.evaluate(()=>{window.__fixture.deferPreferences=false;window.__fixture.resolvePreferences();});
+    assert.equal(await p.locator('#settings-page').isVisible(),false);assert.equal(await p.locator('#tools-page').isVisible(),true);
+    await p.locator('#signed-in [data-desktop-settings]').click();await p.locator('#desktop-run-in-background:enabled').waitFor();assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('account menu is anchored, compact, keyboard accessible and dismisses without a modal backdrop', async () => {
+  const f=await openFixture();try {
+    const p=f.page;
+    for (const width of [900,375]) {
+      await p.setViewportSize({width,height:760});
+      const trigger=p.locator('.workspace-profile-button');await trigger.click();
+      const menu=p.locator('#account-menu');assert.equal(await menu.isVisible(),true);
+      assert.equal(await p.evaluate(()=>Boolean(document.querySelector('#account-menu:modal'))),false);
+      const box=await menu.boundingBox();assert.ok(box.width<=300 && box.height<370);
+      assert.ok(box.x>=0 && box.y>=0 && box.x+box.width<=width && box.y+box.height<=760);
+      assert.equal(await trigger.getAttribute('aria-expanded'),'true');
+      await p.keyboard.press('ArrowDown');
+      assert.equal(await p.evaluate(()=>document.activeElement.textContent),'账号与空间');
+      await p.keyboard.press('Escape');assert.equal(await menu.isVisible(),false);
+      assert.equal(await trigger.getAttribute('aria-expanded'),'false');
+      await trigger.click();await p.locator('#account-menu').getByRole('button',{name:'账号与空间',exact:true}).click();
+      await p.getByRole('heading',{name:'可切换空间'}).waitFor();assert.equal(await menu.isVisible(),false);
+      await trigger.click();await p.locator('#signed-in .brand').click();assert.equal(await menu.isVisible(),false);
+    }
+    assert.equal((await calls(p,'logout_desktop_session')).length,0);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('tool details replace the list and return to the active search without overlay fragments', async () => {
+  const f=await openFixture();try {
+    const p=f.page;await p.locator('.tools-search').fill('Claude');await detail(p,'claude-code');
+    assert.equal(await p.locator('#tools-page').isVisible(),false);
+    assert.equal(await p.locator('#tool-detail-page').isVisible(),true);
+    assert.ok((await p.locator('.tool-detail-close').boundingBox()).y >= 62);
+    assert.equal(await p.locator('#tool-detail-page').evaluate(node=>getComputedStyle(node).position),'static');
+    await p.locator('.tool-detail-close').click();assert.equal(await p.locator('#tools-page').isVisible(),true);
+    assert.equal(await p.locator('.tools-search').inputValue(),'Claude');assert.equal(await p.locator('.tool-row').count(),1);
+    assert.equal((await calls(p,'test_tool_connection')).length,0);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('appearance follows OS changes, explicit selection overrides OS, and saved preference survives reload', async () => {
+  const f = await openFixture({colorScheme:'dark'}); try {
+    const p=f.page;
+    const theme=()=>p.locator('html').getAttribute('data-theme');
+    assert.equal(await theme(),'dark');
+    await p.emulateMedia({colorScheme:'light'}); await p.waitForFunction(()=>document.documentElement.dataset.theme==='light'); assert.equal(await theme(),'light');
+    await p.locator('#signed-in [data-desktop-settings]').click();
+    await p.locator('#desktop-run-in-background:enabled').waitFor();
+    assert.equal(await p.locator('[data-theme-preference][aria-checked="true"]').getAttribute('data-theme-preference'),'system');
+    await p.locator('[data-theme-preference=\"dark\"]').click();
+    assert.equal(await theme(),'dark');
+    await p.emulateMedia({colorScheme:'light'}); assert.equal(await theme(),'dark');
+    await p.locator('#desktop-preferences-save').click();
+    await p.locator('#desktop-preferences-feedback').filter({hasText:'已保存'}).waitFor();
+    await p.reload(); await p.locator('.tool-row').first().waitFor();
+    assert.equal(await theme(),'dark');
+    assert.equal(await p.evaluate(()=>window.__fixture.nativeTheme),'dark');
+    await p.locator('#signed-in [data-desktop-settings]').click();
+    await p.locator('#desktop-run-in-background:enabled').waitFor();
+    await p.locator('[data-theme-preference=\"system\"]').click();
+    await p.locator('#desktop-preferences-save').click();
+    await p.locator('#desktop-preferences-feedback').filter({hasText:'已保存'}).waitFor();
+    await p.emulateMedia({colorScheme:'dark'}); await p.waitForFunction(()=>document.documentElement.dataset.theme==='dark'); assert.equal(await theme(),'dark');
+    await p.emulateMedia({colorScheme:'light'}); await p.waitForFunction(()=>document.documentElement.dataset.theme==='light'); assert.equal(await theme(),'light');
+    assert.equal(await p.evaluate(()=>window.__fixture.nativeTheme),null);
+    assert.equal(await p.evaluate(()=>localStorage.getItem('tokenmarket.theme')),'system');
+    assert.equal((await calls(p,'test_tool_connection')).length,0);
+    assert.deepEqual(f.errors,[]);
+  } finally { await f.close(); }
+});
+
+test('signed-out theme preview cancels without replacing the saved preference', async () => {
+  const f=await openFixture({signedIn:false,storedTheme:'dark'});try {
+    const p=f.page;await p.locator('#login [data-desktop-settings]').click();
+    await p.locator('#desktop-run-in-background:enabled').waitFor();
+    await p.locator('[data-theme-preference=\"light\"]').click();
+    assert.equal(await p.locator('html').getAttribute('data-theme'),'light');
+    await p.locator('#settings-return-login').click();await p.locator('#settings-page').waitFor({state:'hidden'});
+    assert.equal(await p.locator('html').getAttribute('data-theme'),'dark');
+    assert.equal(await p.evaluate(()=>localStorage.getItem('tokenmarket.theme')),'dark');
+    assert.equal(await p.evaluate(()=>window.__fixture.nativeTheme),'dark');
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('invalid theme falls back to system; failed settings save leaves theme uncommitted', async () => {
+  const f=await openFixture({storedTheme:'invalid',preferenceSaveError:true});try {
+    const p=f.page;assert.equal(await p.locator('html').getAttribute('data-theme'),'light');
+    await p.locator('#signed-in [data-desktop-settings]').click();await p.locator('#desktop-run-in-background:enabled').waitFor();
+    await p.locator('[data-theme-preference=\"dark\"]').click();await p.locator('#desktop-preferences-save').click();
+    await p.locator('#desktop-preferences-feedback').filter({hasText:'无法保存'}).waitFor();
+    assert.equal(await p.evaluate(()=>localStorage.getItem('tokenmarket.theme')),'invalid');
+    await p.locator('#desktop-preferences-cancel').click();
+    assert.equal(await p.locator('html').getAttribute('data-theme'),'light');assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
 test('window preferences are available before login and saving does not log out or disconnect', async () => {
   const f = await openFixture({signedIn:false}); try {
     const p = f.page;
@@ -21,8 +157,9 @@ test('window preferences are available before login and saving does not log out 
     assert.equal(await p.locator('#desktop-run-in-background').isChecked(), true);
     await p.locator('#desktop-run-in-background').uncheck();
     await p.locator('#desktop-preferences-save').click();
-    await p.locator('#desktop-preferences-dialog').waitFor({state:'hidden'});
+    await p.locator('#desktop-preferences-feedback').filter({hasText:'已保存'}).waitFor();
     assert.deepEqual((await calls(p, 'save_desktop_window_preferences'))[0].args, {runInBackground:false});
+    await p.locator('#settings-return-login').click();
     await p.locator('#login [data-desktop-settings]').click();
     await p.locator('#desktop-run-in-background:enabled').waitFor();
     assert.equal(await p.locator('#desktop-run-in-background').isChecked(), false);
@@ -79,7 +216,7 @@ test('failed preference persistence keeps the first-close notice visible and doe
     await p.locator('#desktop-run-in-background').uncheck();
     await p.locator('#desktop-preferences-save').click();
     await p.locator('#desktop-preferences-feedback').filter({hasText:'无法保存'}).waitFor();
-    assert.equal(await p.locator('#desktop-preferences-dialog').isVisible(), true);
+    assert.equal(await p.locator('#settings-page').isVisible(), true);
     assert.equal(await p.evaluate(() => window.__fixture.windowPreferences.run_in_background), true);
     assert.deepEqual(f.errors, []);
   } finally { await f.close(); }
@@ -413,6 +550,7 @@ test('real UI renders safe native summaries, searches, navigates and fits deskto
     assert.equal(await p.getByText('查看接入信息',{exact:true}).count(),0);
     assert.equal(await p.locator('.configuration-editor').count(),0);
     assert.equal((await calls(p,'tool_configuration_files')).length,0);
+    await p.locator('.tool-detail-close').click();
     await p.locator('.primary-nav [data-page="account"]').click();await p.getByRole('heading',{name:'可切换空间'}).waitFor();
     await p.locator('.primary-nav [data-page="help"]').click();await p.getByRole('heading',{name:'常见问题'}).waitFor();assert.deepEqual(f.errors,[]);
   } finally { await f.close(); }
@@ -560,4 +698,227 @@ test('DuMate enterprise imports a catalogue with separate selection and DuMate c
     assert.equal(await selector.locator('option').count(),3);
     assert.deepEqual(f.errors,[]);
   }finally {await f.close();}
+});
+
+test('one update action detects installs and versions on startup, explicit check and native reopen', async () => {
+  const f=await openFixture();try {
+    await f.page.waitForFunction(()=>window.__fixture.calls.some(c=>c.command==='check_tool_updates'));
+    await f.page.getByRole('button',{name:'检查更新',exact:true}).waitFor();
+    assert.equal((await calls(f.page,'check_tool_updates')).length,1);
+    assert.equal(await f.page.getByRole('button',{name:'重新检测',exact:true}).count(),0);
+    const before=(await calls(f.page,'desktop_tool_inventory')).length;
+    await f.page.locator('#detect-tools').click();
+    await f.page.waitForFunction(()=>window.__fixture.calls.filter(c=>c.command==='check_tool_updates').length===2);
+    assert.ok((await calls(f.page,'desktop_tool_inventory')).length>before);
+    assert.equal(await f.page.locator('dialog[open]').count(),0);
+    await f.page.evaluate(()=>window.dispatchEvent(new Event('focus')));
+    await f.page.waitForTimeout(50);assert.equal((await calls(f.page,'check_tool_updates')).length,2);
+    await f.page.evaluate(()=>window.__fixture.emit('desktop-check-tool-updates'));
+    await f.page.waitForFunction(()=>window.__fixture.calls.filter(c=>c.command==='check_tool_updates').length===3);
+    assert.match(await f.page.locator('.tools-updates-status').textContent(),/3 个已安装工具/);
+    assert.deepEqual(f.errors,[]);
+  } finally {await f.close();}
+});
+test('latest release upgrade has current and target versions, explicit confirmation and preserves the connection', async () => {
+  const f=await openFixture({upgradeTool:'codex',updateVersions:{codex:'0.150.0'}});try {
+    const row=f.page.locator('[data-tool="codex"]');await row.locator('.install-column .tool-upgrade').waitFor();
+    assert.equal(await row.locator('.tool-actions .tool-upgrade').count(),0);
+    await row.locator('.tool-upgrade').click();assert.equal((await calls(f.page,'start_tool_upgrade')).length,0);
+    assert.match(await f.page.locator('.tool-upgrade-confirm').textContent(),/0\.150\.0 → 0\.166\.0/);
+    await f.page.locator('.tool-upgrade-confirm').getByRole('button',{name:'取消',exact:true}).click();
+    assert.equal((await calls(f.page,'start_tool_upgrade')).length,0);
+    await row.locator('.tool-upgrade').click();
+    await f.page.locator('.tool-upgrade-confirm').getByRole('button',{name:'确认升级'}).click();
+    await f.page.waitForFunction(()=>window.__fixture.installation?.stage==='succeeded');
+    await f.page.locator('.tool-install-close').click();
+    await f.page.waitForFunction(()=>window.__fixture.calls.filter(c=>c.command==='check_tool_updates').length===2);
+    assert.equal((await calls(f.page,'start_tool_upgrade')).length,1);
+    for(const command of ['start_tool_installation','connect_tool','reconnect_tool','disconnect_tool','test_tool_connection'])assert.equal((await calls(f.page,command)).length,0);
+    assert.equal(await row.locator('.tool-upgrade').count(),0);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+test('official latest releases are directly upgradeable without a compatibility pin', async () => {
+  const f=await openFixture({newerRelease:'codex',updateFailure:'workbuddy'});try {
+    const p=f.page;await p.waitForFunction(()=>document.querySelector('.tools-updates-status').textContent.includes('检查未完成'));
+    const row=p.locator('[data-tool="codex"]');assert.match(await row.locator('.tool-version-target').textContent(),/99\.0\.0/);assert.equal(await row.locator('.tool-upgrade').isVisible(),true);
+    await detail(p,'codex');assert.match(await p.locator('.tool-version-sheet').textContent(),/99\.0\.0/);assert.doesNotMatch(await p.locator('.tool-version-sheet').textContent(),/已验证兼容版|待验证/);
+    assert.equal((await calls(p,'start_tool_upgrade')).length,0);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+test('pending checks are coalesced and late update results cannot restore logged-out UI', async () => {
+  const f=await openFixture({deferUpdates:true});try {
+    await f.page.waitForFunction(()=>Boolean(window.__fixture.resolveUpdates));
+    await f.page.evaluate(()=>{window.__fixture.emit('desktop-check-tool-updates');window.__fixture.emit('desktop-check-tool-updates');});
+    assert.equal((await calls(f.page,'check_tool_updates')).length,1);
+    assert.equal(await f.page.locator('#detect-tools').isDisabled(),true);
+    await f.page.locator('.workspace-profile-button').click();await f.page.locator('#account-menu').getByRole('button',{name:'退出登录'}).click();
+    await f.page.evaluate(()=>window.__fixture.resolveUpdates());await f.page.waitForTimeout(50);
+    assert.equal(await f.page.locator('.tool-row').count(),0);assert.equal(await f.page.locator('dialog[open]').count(),0);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+test('upgrade can be cancelled and retried through the shared progress dialog', async () => {
+  const f=await openFixture({upgradeTool:'codex',updateVersions:{codex:'0.150.0'},installPending:true});try {
+    await f.page.locator('[data-tool="codex"] .tool-upgrade').click();await f.page.getByRole('button',{name:'确认升级'}).click();
+    await f.page.getByRole('button',{name:'取消升级'}).click();await f.page.getByRole('button',{name:'重试升级'}).waitFor();
+    await f.page.getByRole('button',{name:'重试升级'}).click();await f.page.waitForFunction(()=>window.__fixture.calls.filter(c=>c.command==='start_tool_upgrade').length===2);
+    assert.equal((await calls(f.page,'start_tool_installation')).length,0);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+
+test('installation column owns upgrade and original-channel guidance at desktop widths', async () => {
+  const f=await openFixture({upgradeTool:'codex',updateVersions:{codex:'0.150.0'},manualUpgrade:'workbuddy'});try {
+    for(const width of [1280,900]) {
+      await f.page.setViewportSize({width,height:800});
+      assert.equal(await f.page.locator('[data-tool="codex"] .install-column .tool-upgrade').isVisible(),true);
+      assert.equal(await f.page.locator('[data-tool="codex"] .tool-actions .tool-upgrade').count(),0);
+      assert.equal(await f.page.locator('[data-tool="workbuddy"] .install-column .tool-upgrade-guide').isVisible(),true);
+      assert.equal(await f.page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+    }
+    await f.page.locator('[data-tool="workbuddy"] .tool-upgrade-guide').click();
+    assert.equal(await f.page.locator('.tool-version-sheet').isVisible(),true);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('reference version column pairs numeric versions and actions and owns missing-tool installation', async () => {
+  const f=await openFixture({upgradeTool:'codex',updateVersions:{codex:'codex-cli 0.150.0'}});try {
+    const row=f.page.locator('[data-tool="codex"]');await row.locator('.tool-upgrade').waitFor();
+    assert.equal(await row.locator('.tool-version').textContent(),'0.150.0');assert.match(await row.locator('.tool-version-target').textContent(),/0\.166\.0/);
+    const geometry=await row.locator('.install-column').evaluate(cell=>{const a=cell.querySelector('.tool-version-copy').getBoundingClientRect(),b=cell.querySelector('.tool-upgrade').getBoundingClientRect();return {alongside:b.left>=a.right,sameRow:Math.max(a.top,b.top)<Math.min(a.bottom,b.bottom)};});
+    assert.deepEqual(geometry,{alongside:true,sameRow:true});
+    assert.equal(await f.page.locator('[data-tool="openclaw"] .install-column .tool-install').count(),1);
+    assert.equal(await f.page.locator('[data-tool="openclaw"] > .tool-actions .tool-install').count(),0);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+test('upgrade all counts official latest targets, confirms once and upgrades them sequentially', async () => {
+  const f=await openFixture({upgradeTools:['claude-code','codex'],updateVersions:{'claude-code':'2.1.300',codex:'0.150.0'},manualUpgrade:'workbuddy'});try {
+    const p=f.page;await p.getByRole('button',{name:'全部升级（2）',exact:true}).waitFor();
+    await p.locator('#upgrade-all-tools').click();assert.equal((await calls(p,'start_tool_upgrade')).length,0);
+    assert.equal(await p.locator('.batch-upgrade-row').count(),2);
+    await p.getByRole('button',{name:'取消',exact:true}).click();assert.equal((await calls(p,'start_tool_upgrade')).length,0);
+    await p.locator('#upgrade-all-tools').click();await p.getByRole('button',{name:'确认全部升级'}).click();
+    await p.locator('.batch-upgrade-summary').filter({hasText:'已升级 2 个 · 未完成 0 个'}).waitFor();
+    assert.deepEqual((await calls(p,'start_tool_upgrade')).map(call=>call.args.tool),['claude-code','codex']);
+    const commands=await p.evaluate(()=>window.__fixture.calls.filter(c=>['start_tool_upgrade','tool_installation_status'].includes(c.command)));
+    const second=commands.findIndex(c=>c.command==='start_tool_upgrade'&&c.args.tool==='codex');assert.ok(commands.slice(0,second).some(c=>c.command==='tool_installation_status'&&c.args.tool==='claude-code'));
+    for(const cmd of ['start_tool_installation','connect_tool','reconnect_tool','disconnect_tool','test_tool_connection'])assert.equal((await calls(p,cmd)).length,0);
+    await p.getByRole('button',{name:'完成',exact:true}).click();assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+test('upgrade all continues after a tool failure and reports individual outcomes', async () => {
+  const f=await openFixture({upgradeTools:['claude-code','codex'],updateVersions:{'claude-code':'2.1.300',codex:'0.150.0'},upgradeFailTool:'claude-code'});try {
+    const p=f.page;await p.getByRole('button',{name:'全部升级（2）',exact:true}).click();await p.getByRole('button',{name:'确认全部升级'}).click();
+    await p.locator('.batch-upgrade-summary').filter({hasText:'已升级 1 个 · 未完成 1 个'}).waitFor();
+    assert.equal((await calls(p,'start_tool_upgrade')).length,2);assert.match(await p.locator('.batch-upgrade-row').first().textContent(),/升级失败/);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+test('stopping upgrade all cancels the active job and skips the remaining queue', async () => {
+  const f=await openFixture({upgradeTools:['claude-code','codex'],updateVersions:{'claude-code':'2.1.300',codex:'0.150.0'},installPending:true});try {
+    const p=f.page;await p.getByRole('button',{name:'全部升级（2）',exact:true}).click();await p.getByRole('button',{name:'确认全部升级'}).click();
+    await p.waitForFunction(()=>window.__fixture.calls.some(c=>c.command==='start_tool_upgrade'));
+    await p.getByRole('button',{name:'停止全部升级'}).click();
+    await p.locator('.batch-upgrade-summary').filter({hasText:'未执行 1 个'}).waitFor();
+    assert.equal((await calls(p,'start_tool_upgrade')).length,1);assert.equal((await calls(p,'cancel_tool_installation')).length,1);assert.match(await p.locator('.batch-upgrade-row').last().textContent(),/未执行/);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+test('logging out during batch progress prevents later tools from starting', async () => {
+  const f=await openFixture({upgradeTools:['claude-code','codex'],updateVersions:{'claude-code':'2.1.300',codex:'0.150.0'},installPending:true});try {
+    const p=f.page;await p.getByRole('button',{name:'全部升级（2）',exact:true}).click();await p.getByRole('button',{name:'确认全部升级'}).click();
+    await p.waitForFunction(()=>window.__fixture.calls.some(c=>c.command==='start_tool_upgrade'));
+    await p.evaluate(()=>window.TokenMarketTools.setAuthenticated(false));await p.waitForTimeout(400);
+    assert.equal((await calls(p,'start_tool_upgrade')).length,1);assert.equal(await p.locator('dialog[open]').count(),0);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+
+test('batch upgrades count shared DuMate personal and enterprise installations once', async () => {
+  const f=await openFixture({installedTools:['dumate','dumate-enterprise'],upgradeTools:['dumate','dumate-enterprise'],updateVersions:{dumate:'1.0.88','dumate-enterprise':'1.0.88'}});try {
+    await f.page.getByRole('button',{name:'全部升级（1）',exact:true}).click();
+    assert.equal(await f.page.locator('.batch-upgrade-row').count(),1);
+    assert.equal((await calls(f.page,'start_tool_upgrade')).length,0);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('tool list keeps installation and connection separate without duplicated missing-state labels', async () => {
+  const f=await openFixture();try {
+    const p=f.page;await p.getByRole('button',{name:'检查更新',exact:true}).waitFor();
+    const missing=p.locator('[data-tool="openclaw"]');
+    assert.equal(((await missing.textContent()).match(/未安装/g)||[]).length,1);
+    assert.equal(await missing.locator('.tool-state').textContent(),'—');assert.equal(await missing.locator('.tool-state').getAttribute('title'),'安装后可接入');
+    assert.equal(await p.locator('[data-tool="workbuddy"] .tool-state').textContent(),'未接入');
+    assert.equal(await p.locator('.tools-group').count(),0);
+    assert.equal(await p.locator('.tools-list > .tool-row').count(),14);
+    assert.equal(await p.locator('[data-tool="openclaw"] .tool-model-summary').count(),0);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+test('manual update clearly identifies the original channel and opens latest-version guidance without upgrading', async () => {
+  const f=await openFixture({manualUpgrade:'codex',updateVersions:{codex:'0.150.0'}});try {
+    const p=f.page;await p.locator('[data-tool="codex"]').getByRole('button',{name:'手动更新',exact:true}).click();
+    const guide=p.locator('.tool-manual-update');assert.equal(await guide.isVisible(),true);
+    assert.match(await guide.textContent(),/原安装渠道/);assert.match(await guide.textContent(),/目标版本 0\.166\.0/);
+    assert.equal(await guide.evaluate(element=>element===document.activeElement),true);
+    await guide.getByRole('button',{name:'打开官方更新指引'}).click();assert.equal((await calls(p,'download_tool')).length,1);
+    for(const cmd of ['start_tool_upgrade','start_tool_installation','connect_tool','test_tool_connection'])assert.equal((await calls(p,cmd)).length,0);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+test('missing application preserves its saved connection while installation remains independently available', async () => {
+  const f=await openFixture();try {
+    const p=f.page;await p.getByRole('button',{name:'检查更新',exact:true}).waitFor();
+    await p.evaluate(async()=>{window.__fixture.entries.find(e=>e.id==='codex').installed=false;await window.TokenMarketTools.refresh(true);});
+    const row=p.locator('[data-tool="codex"]');assert.equal(await row.locator('.tool-version-empty').textContent(),'未安装');
+    assert.match(await row.locator('.tool-state').textContent(),/已配置，未测试/);assert.equal(await row.locator('.tool-install').isEnabled(),true);
+    assert.equal(await row.locator('.tool-launch').isDisabled(),true);assert.equal((await calls(p,'disconnect_tool')).length,0);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('current-to-latest upgrade passes the exact official target and removes fixed-version certification language', async () => {
+  const f=await openFixture({upgradeTools:['claude-code','codex'],updateVersions:{'claude-code':'2.1.311',codex:'0.163.0'},latestVersions:{'claude-code':'2.1.318',codex:'0.166.0'}});try {
+    const p=f.page;await p.getByRole('button',{name:'全部升级（2）',exact:true}).waitFor();
+    const row=p.locator('[data-tool="claude-code"]');assert.match(await row.locator('.tool-version-target').textContent(),/2\.1\.318/);
+    await row.locator('.tool-upgrade').click();assert.match(await p.locator('.tool-upgrade-confirm').textContent(),/2\.1\.311 → 2\.1\.318/);
+    await p.getByRole('button',{name:'确认升级',exact:true}).click();await p.waitForFunction(()=>window.__fixture.installation?.stage==='succeeded');
+    assert.deepEqual((await calls(p,'start_tool_upgrade'))[0].args,{tool:'claude-code',targetVersion:'2.1.318'});
+    await p.locator('.tool-install-close').click();await detail(p,'claude-code');
+    assert.doesNotMatch(await p.locator('.tool-version-sheet').textContent(),/已验证兼容版|内置安装版本|待验证/);
+    assert.equal((await calls(p,'test_tool_connection')).length,0);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('installed tools show their method and selected path and expand additional installations without side effects', async () => {
+  const sources=[{path:'/Users/fixture/.npm-global/bin/codex',resolvedPath:'/Users/fixture/.npm-global/lib/node_modules/@openai/codex/bin/codex.js',method:'npm',selected:true},{path:'/Users/fixture/.local/bin/codex',resolvedPath:'/Users/fixture/.codex/packages/standalone/releases/0.145.0/bin/codex',method:'原生程序',selected:false}];
+  const f=await openFixture({installations:{codex:sources}});try {
+    const p=f.page,row=p.locator('[data-tool="codex"]');await p.getByRole('button',{name:'检查更新',exact:true}).waitFor();
+    assert.equal(await row.locator('.tool-location-path').textContent(),sources[0].path);assert.equal(await row.locator('.tool-install-method').textContent(),'npm');
+    const before=(await calls(p,'check_tool_updates')).length;
+    await row.getByRole('button',{name:'另有 1 处安装'}).click();
+    assert.equal(await row.locator('.tool-installations-toggle').getAttribute('aria-expanded'),'true');
+    assert.equal(await row.locator('.tool-installation-location').count(),2);assert.equal(await row.locator('.tool-current-installation').count(),1);
+    assert.match(await row.locator('.tool-installation-list').textContent(),/\.local\/bin\/codex/);
+    await p.evaluate(()=>window.TokenMarketTools.refresh(true));assert.equal(await row.locator('.tool-installation-list').isVisible(),true);
+    assert.equal((await calls(p,'check_tool_updates')).length,before);
+    await row.getByRole('button',{name:'另有 1 处安装'}).click();assert.equal(await row.locator('.tool-installation-list').count(),0);
+    for(const cmd of ['start_tool_installation','start_tool_upgrade','connect_tool','test_tool_connection'])assert.equal((await calls(p,cmd)).length,0);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+test('uninstalled tools describe the real installer and details distinguish program, config directory and config file', async () => {
+  const f=await openFixture({configPaths:{codex:'/Users/fixture/custom config/codex/config.toml'}});try {
+    const p=f.page;
+    assert.match(await p.locator('[data-tool="openclaw"] .tool-planned-method').textContent(),/官方脚本和 npm/);
+    assert.match(await p.locator('[data-tool="pi"] .tool-planned-method').textContent(),/官方独立安装包/);
+    await detail(p,'codex');const info=p.locator('.tool-files-sheet');
+    assert.match(await info.textContent(),/安装方式npm/);assert.match(await info.textContent(),/当前入口\/Users\/fixture\/\.npm-global\/bin\/codex/);
+    assert.equal(await info.locator('.tool-path-row').filter({hasText:'配置目录'}).locator('code').textContent(),'/Users/fixture/custom config/codex');
+    assert.equal(await info.locator('.tool-path-row').filter({hasText:'接入配置文件'}).locator('code').textContent(),'/Users/fixture/custom config/codex/config.toml');
+    assert.match(await info.textContent(),/尚未生成/);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+test('installation paths render as selectable text and cannot inject page markup', async () => {
+  const path='/Users/fixture/<img src=x onerror=alert(1)>/codex';
+  const f=await openFixture({installations:{codex:[{path,method:'命令行程序',selected:true}]}});try {
+    const row=f.page.locator('[data-tool="codex"]');assert.equal(await row.locator('.tool-location-path').textContent(),path);
+    assert.equal(await row.locator('img').count(),1);await detail(f.page,'codex');
+    assert.equal(await f.page.locator('.tool-files-sheet .tool-path-row').filter({hasText:'当前入口'}).locator('code').textContent(),path);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
 });

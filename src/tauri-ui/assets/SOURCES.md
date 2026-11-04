@@ -14,3 +14,13 @@ Official public site marks retrieved 2026-10-29 during the approved UI design:
 DuMate: extracted from `Contents/Resources/icon.icns` in the official 1.0.89
 macOS package on 2026-11-03; resized to 128 px.
 https://dumate-app-public.cdn.bcebos.com/release-info/artifacts/Dumate-mac-arm64-latest.dmg
+
+2026-11-04: User selected professional-v2 direction A for both UI and Logo.
+`token-market.svg` is the approved transparent monochrome T mark. `token-market.png`
+and native platform icons are generated from `src-tauri/icons/app-icon.svg` using
+Tauri CLI icon. `tray-template.svg` is the standalone transparent menu bar mask;
+`tray-template.png` and its 36×36 RGBA export are rasterized from that SVG.
+The macOS tray uses the RGBA mask with `icon_as_template(true)`, not the Dock icon.
+
+2026-11-04 refinement: Dock tile updated from blue to neutral graphite (#242830)
+following user feedback; approved A glyph and transparent tray mask unchanged.

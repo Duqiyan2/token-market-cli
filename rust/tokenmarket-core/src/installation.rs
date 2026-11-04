@@ -1,5 +1,6 @@
 //! Explicit tool installation, independent of credentials and Tool Connections.
 pub(crate) mod attempt;
+pub(crate) mod discovery;
 mod dumate;
 mod gui;
 mod harness_cli;
@@ -13,6 +14,8 @@ pub mod opencode;
 mod pi;
 pub(crate) mod portable_git;
 pub mod recipes;
+pub mod updates;
+mod upgrades;
 use crate::{
     inventory::{InstallationEnvironment, ToolInventory},
     ToolId,
@@ -366,6 +369,7 @@ pub struct InstallationManager {
     architecture: String,
     executor: Arc<dyn InstallExecutor>,
     jobs: Arc<Mutex<BTreeMap<String, Job>>>,
+    upgrade_plans: Arc<Mutex<BTreeMap<String, upgrades::UpgradePlan>>>,
 }
 impl InstallationManager {
     pub fn current() -> Self {
@@ -388,6 +392,7 @@ impl InstallationManager {
             architecture,
             executor,
             jobs: Arc::new(Mutex::new(BTreeMap::new())),
+            upgrade_plans: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
     pub fn availability(&self, tool: ToolId) -> InstallationAvailability {
@@ -481,6 +486,132 @@ impl InstallationManager {
         Ok(())
     }
     pub fn start(&self, tool: ToolId) -> Result<InstallStatus> {
+        self.start_operation(tool)
+    }
+    /// Targets come from the last successful official release check, never a UI command or URL.
+    pub fn start_upgrade(&self, tool: ToolId) -> Result<InstallStatus> {
+        let target = self
+            .upgrade_plans
+            .lock()
+            .unwrap()
+            .get(&tool.to_string())
+            .map(|p| p.plan.version.clone())
+            .context("请先检查更新，获取官方最新版本")?;
+        self.start_upgrade_to(tool, &target)
+    }
+    pub fn start_upgrade_to(&self, tool: ToolId, expected_version: &str) -> Result<InstallStatus> {
+        let target = self
+            .upgrade_plans
+            .lock()
+            .unwrap()
+            .get(&tool.to_string())
+            .cloned()
+            .context("更新信息不可用，请先检查更新")?;
+        if target.plan.version != expected_version {
+            bail!("官方版本信息已改变，请重新检查并确认升级");
+        }
+        let operation_lock = installation_lock(&self.environment, tool)?;
+        if self.environment.command_path(tool.command()).as_ref() != Some(&target.probe) {
+            bail!("工具安装路径已改变，请重新检查更新");
+        }
+        match upgrades::route(
+            tool,
+            expected_version,
+            &self.environment,
+            &self.architecture,
+            None,
+        )? {
+            upgrades::Route::Automatic(fresh)
+                if fresh.probe == target.probe
+                    && fresh
+                        .plan
+                        .steps
+                        .iter()
+                        .map(|s| (&s.program, &s.args))
+                        .eq(target.plan.steps.iter().map(|s| (&s.program, &s.args))) => {}
+            upgrades::Route::Archive if target.managed => {}
+            _ => bail!("工具安装渠道已改变，请重新检查更新"),
+        }
+        self.validate_upgrade(&target.plan)?;
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let status = InstallStatus {
+            tool,
+            stage: InstallStage::Preparing,
+            output: vec![],
+            output_sequence: 0,
+            detail: format!("正在准备升级至官方最新版 {}", target.plan.version),
+            installed: true,
+            version: Some(target.plan.version.clone()),
+        };
+        {
+            let mut jobs = self.jobs.lock().unwrap();
+            if jobs
+                .get(&tool.to_string())
+                .is_some_and(|j| !j.status.stage.is_terminal())
+            {
+                bail!("该工具正在安装或升级，请稍后重试");
+            }
+            jobs.insert(
+                tool.to_string(),
+                Job {
+                    status: status.clone(),
+                    cancelled: cancelled.clone(),
+                },
+            );
+        }
+        let manager = self.clone();
+        std::thread::spawn(move || {
+            let result = (|| -> Result<String> {
+                if target.managed {
+                    attempt::begin_operation(&manager.environment, &target.plan, true)?;
+                }
+                manager.execute_steps(&target.plan, &cancelled, true)?;
+                if cancelled.load(Ordering::SeqCst) {
+                    bail!("升级已取消；可以重新检查更新后重试");
+                }
+                manager.update(tool, |state| {
+                    state.stage = InstallStage::Detecting;
+                    state.detail = "正在检测升级后的实际版本".into();
+                });
+                let actual = manager.executor.version(&target.probe)?;
+                if !matches!(
+                    updates::compare_versions(&actual, &target.plan.version),
+                    Some(std::cmp::Ordering::Equal | std::cmp::Ordering::Greater)
+                ) {
+                    bail!(
+                        "更新程序结束后检测到 {actual}，尚未达到目标版本 {}，请检查更新输出",
+                        target.plan.version
+                    );
+                }
+                if target.managed {
+                    attempt::complete(&manager.environment, tool)?;
+                }
+                Ok(actual)
+            })();
+            let installed = ToolInventory::new(manager.environment.clone()).is_installed(tool);
+            drop(operation_lock);
+            manager.update(tool, |state| {
+                state.installed = installed;
+                match result {
+                    Ok(actual) => {
+                        state.stage = InstallStage::Succeeded;
+                        state.version = Some(actual);
+                        state.detail = "升级完成，请重新打开工具；原有连接保持不变".into();
+                    }
+                    Err(error) => {
+                        state.stage = if cancelled.load(Ordering::SeqCst) {
+                            InstallStage::Cancelled
+                        } else {
+                            InstallStage::Failed
+                        };
+                        state.detail = error.to_string();
+                    }
+                }
+            });
+        });
+        Ok(status)
+    }
+    fn start_operation(&self, tool: ToolId) -> Result<InstallStatus> {
         let plan = recipes::plan(tool, &self.environment, &self.architecture)?;
         let operation_lock = installation_lock(&self.environment, tool)?;
         let cancelled = Arc::new(AtomicBool::new(false));
@@ -519,7 +650,7 @@ impl InstallationManager {
                 match result {
                     Ok(()) => {
                         state.stage = InstallStage::Succeeded;
-                        state.detail = "已检测到兼容安装；请按需单独接入或打开工具".into();
+                        state.detail = "已检测到安装；请按需接入或打开工具".into();
                     }
                     Err(error) => {
                         state.stage = if cancelled.load(Ordering::SeqCst) {
@@ -589,52 +720,9 @@ impl InstallationManager {
             .iter()
             .any(|step| step.stage == InstallStage::WaitingForUser);
         if !native_gui {
-            attempt::begin(&self.environment, plan)?;
+            attempt::begin_operation(&self.environment, plan, false)?;
         }
-        for step in &plan.steps {
-            if cancelled.load(Ordering::SeqCst) {
-                bail!("安装已取消；已准备的依赖保留")
-            }
-            self.update(plan.tool, |state| {
-                state.stage = if step.download.is_some() {
-                    InstallStage::Downloading
-                } else {
-                    step.stage
-                };
-                state.detail = if step.stage == InstallStage::WaitingForUser {
-                    gui::instructions(plan.tool, self.environment.platform).into()
-                } else {
-                    "安装进行中，可查看输出".into()
-                };
-            });
-            // Native GUI installers own their own cancellation. Stopping this
-            // client's waiting must not terminate a detached installer process.
-            let native_handoff = AtomicBool::new(false);
-            let cancellation = if step.stage == InstallStage::WaitingForUser {
-                &native_handoff
-            } else {
-                cancelled
-            };
-            self.executor.execute(step, cancellation, &mut |line| {
-                self.update(plan.tool, |state| {
-                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) {
-                        if value["name"] == "openclaw" {
-                            state.stage = InstallStage::Installing;
-                        } else if value["name"]
-                            .as_str()
-                            .is_some_and(|name| name.contains("node") || name == "dependencies")
-                        {
-                            state.stage = InstallStage::Dependencies;
-                        }
-                    }
-                    state.output.push(safe_output(&line));
-                    state.output_sequence += 1;
-                    if state.output.len() > 200 {
-                        state.output.remove(0);
-                    }
-                });
-            })?;
-        }
+        self.execute_steps(plan, cancelled, false)?;
         if plan
             .steps
             .iter()
@@ -656,11 +744,79 @@ impl InstallationManager {
         let version = self.executor.version(&path)?;
         if !recipes::matches_pinned_version(plan.tool, &version, &plan.version) {
             bail!(
-                "安装后的版本 {version} 与已验证版本 {} 不符，请检查安装渠道",
+                "安装后的版本 {version} 与目标版本 {} 不符，请检查安装渠道",
                 plan.version
             )
         }
         attempt::complete(&self.environment, plan.tool)?;
+        Ok(())
+    }
+    fn execute_steps(
+        &self,
+        plan: &InstallPlan,
+        cancelled: &AtomicBool,
+        upgrading: bool,
+    ) -> Result<()> {
+        for step in &plan.steps {
+            if cancelled.load(Ordering::SeqCst) {
+                bail!("安装已取消；已准备的依赖保留")
+            }
+            self.update(plan.tool, |state| {
+                state.stage = if step.download.is_some() {
+                    InstallStage::Downloading
+                } else {
+                    step.stage
+                };
+                state.detail = if step.stage == InstallStage::WaitingForUser {
+                    gui::instructions(plan.tool, self.environment.platform).into()
+                } else {
+                    if upgrading {
+                        "升级进行中，可查看输出"
+                    } else {
+                        "安装进行中，可查看输出"
+                    }
+                    .into()
+                };
+            });
+            // Native GUI installers own their own cancellation. Stopping this
+            // client's waiting must not terminate a detached installer process.
+            let native_handoff = AtomicBool::new(false);
+            let cancellation = if step.stage == InstallStage::WaitingForUser {
+                &native_handoff
+            } else {
+                cancelled
+            };
+            if upgrading && !step.program.is_empty() {
+                if let Some(path) = self.environment.command_path(&plan.command) {
+                    if let Ok(actual) = self.executor.version(&path) {
+                        if updates::compare_versions(&actual, &plan.version)
+                            == Some(std::cmp::Ordering::Greater)
+                        {
+                            bail!("检测到更高版本 {actual}，已停止本次更新，请重新检查更新");
+                        }
+                    }
+                }
+            }
+            self.executor.execute(step, cancellation, &mut |line| {
+                self.update(plan.tool, |state| {
+                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) {
+                        if value["name"] == "openclaw" {
+                            state.stage = InstallStage::Installing;
+                        } else if value["name"]
+                            .as_str()
+                            .is_some_and(|name| name.contains("node") || name == "dependencies")
+                        {
+                            state.stage = InstallStage::Dependencies;
+                        }
+                    }
+                    state.output.push(safe_output(&line));
+                    state.output_sequence += 1;
+                    if state.output.len() > 200 {
+                        state.output.remove(0);
+                    }
+                });
+            })?;
+        }
         Ok(())
     }
     fn wait_for_application(&self, plan: &InstallPlan, cancelled: &AtomicBool) -> Result<()> {
@@ -673,10 +829,13 @@ impl InstallationManager {
                 ToolInventory::new(self.environment.clone()).application_path(plan.tool)
             {
                 if let Ok(version) = self.executor.tool_application_version(plan.tool, &path) {
-                    if !gui::matches_version(plan.tool, &version, &plan.version) {
-                        bail!("检测到应用版本 {version} 与已验证版本 {} 不匹配；未自动升级，请检查安装来源", plan.version)
+                    if gui::matches_version(plan.tool, &version, &plan.version) {
+                        return Ok(());
                     }
-                    return Ok(());
+                    bail!(
+                        "检测到应用版本 {version} 与目标版本 {} 不匹配，请检查安装来源",
+                        plan.version
+                    )
                 }
             }
             if Instant::now() >= deadline {

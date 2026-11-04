@@ -4,14 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Token Market</title>
+<script src="theme.js"></script>
 <link rel="stylesheet" href="app.css">
 <link rel="stylesheet" href="workspace.css">
 <link rel="stylesheet" href="tools.css">
+<link rel="stylesheet" href="settings.css">
 </head>
 <body>
 <section id="login" class="login-page" aria-labelledby="title">
   <div class="login-content">
-    <img class="login-logo" src="assets/token-market.png" alt="Token Market">
+    <img class="login-logo" src="assets/token-market.svg" alt="Token Market">
     <h1 id="title">连接你的 Agent</h1>
     <p id="intro">使用 Token Market 账号登录，<br>在一个地方管理本机工具。</p>
     <button id="begin" class="primary">使用浏览器登录</button>
@@ -29,21 +31,23 @@
 </section>
 <section id="signed-in" class="desktop-shell" hidden>
   <aside class="sidebar">
-    <div class="brand"><img src="assets/token-market.png" alt="">Token Market</div>
+    <div class="brand"><img src="assets/token-market.svg" alt="">Token Market</div>
+    <button id="focus-tool-search" class="sidebar-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg>搜索工具<kbd>⌘ K</kbd></button>
+    <span class="nav-caption">工作台</span>
     <nav class="primary-nav" aria-label="主导航">
-      <button data-page="tools" class="active"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>我的 Agent</button>
+      <button data-page="tools" class="active"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>工具管理</button>
       <button data-page="account"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7V5a2 2 0 0 1 2-2h13v4M4 7h15a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z"/><path d="M16 11h5v6h-5a2 2 0 0 1 0-6Z"/></svg>账号与空间</button>
       <button data-page="help"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9 9a3 3 0 0 1 6 0c0 2-3 2-3 4m0 3v1"/></svg>使用帮助</button>
     </nav>
-    <button class="quiet desktop-settings-button" data-desktop-settings>应用设置</button>
-    <div class="sidebar-note"><strong>连接你的 Agent</strong><p>在熟悉的工具里，<br>继续你的工作。</p></div>
+    <button class="quiet desktop-settings-button" data-desktop-settings><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h18M3 17h18"/><circle cx="8" cy="7" r="3"/><circle cx="16" cy="17" r="3"/></svg>应用设置</button>
+    <div class="sidebar-note"><span class="status-dot"></span>本机工作台</div>
     <div id="sidebar-profile"></div>
   </aside>
   <main id="app-content" class="app-content">
-    <header class="app-topbar"><span id="breadcrumb">工作台 / 我的 Agent</span><span>本机工具管理</span></header>
+    <header class="app-topbar"><span id="breadcrumb">工作台 / 工具管理</span><span class="topbar-caption">本机工具管理</span></header>
     <div id="session-feedback" class="notice" role="status" hidden></div>
     <section id="tools-page" data-view="tools">
-      <header class="page-heading"><div><h1>你的 Agent</h1><p>连接本机工具，在熟悉的地方开始工作。</p></div><button id="detect-tools">重新检测</button></header>
+      <header class="page-heading"><div><h1>工具管理</h1><p>管理本机 Agent 的安装、连接与模型配置。</p></div><div class="tools-header-actions"><button id="upgrade-all-tools" disabled><span>全部升级（0）</span></button><button id="detect-tools">检查更新</button></div></header>
       <div id="workspace-region"></div>
       <section id="tools-region" aria-label="本机 Agent 工具" hidden></section>
       <footer class="page-note">切换当前空间不会改变已有连接的计费空间。<button class="quiet" data-page="help">了解接入流程</button></footer>
@@ -52,11 +56,45 @@
       <header class="page-heading"><div><h1>账号与空间</h1><p>管理当前身份、空间和可用余额。</p></div></header>
       <div id="workspace-account-region"></div>
     </section>
-    <section id="tool-detail-page" data-view="detail" hidden><div id="tool-detail-region"></div></section>
+    <section id="tool-detail-page" class="tool-detail-page" data-view="detail" aria-label="工具详情" tabindex="-1" hidden><div id="tool-detail-region"></div></section>
+    <section id="settings-page" data-view="settings" aria-labelledby="settings-title" hidden>
+      <header class="page-heading"><div><h1 id="settings-title">应用设置</h1><p>调整外观与窗口行为，让工作台更顺手。</p></div></header>
+      <div class="settings-content">
+        <section class="settings-section" aria-labelledby="appearance-title">
+          <h2 id="appearance-title">外观</h2>
+          <div class="settings-group">
+            <div class="settings-row">
+              <div class="settings-copy"><h3>明暗主题</h3><p>选择外观，可实时预览界面效果。</p></div>
+              <div class="theme-segments" role="radiogroup" aria-label="外观主题">
+                <button type="button" role="radio" data-theme-preference="system" aria-checked="true"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></svg>跟随系统</button>
+                <button type="button" role="radio" data-theme-preference="light" aria-checked="false" tabindex="-1"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.4 1.4m11.2 11.2L19 19M5 19l1.4-1.4M17.6 6.4 19 5"/></svg>浅色</button>
+                <button type="button" role="radio" data-theme-preference="dark" aria-checked="false" tabindex="-1"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 13.1A9 9 0 0 1 10.9 3.2a9 9 0 1 0 9.9 9.9Z"/></svg>深色</button>
+              </div>
+            </div>
+          </div>
+        </section>
+        <section class="settings-section" aria-labelledby="window-settings-title">
+          <h2 id="window-settings-title">窗口行为</h2>
+          <div class="settings-group">
+            <div class="settings-row">
+              <div class="settings-copy"><h3 id="background-setting-label">关闭窗口后在后台运行</h3><p id="background-setting-description">通过 Dock 或状态栏重新打开窗口；关闭此项后，关闭窗口将退出应用。</p></div>
+              <label class="settings-toggle"><input id="desktop-run-in-background" type="checkbox" role="switch" aria-labelledby="background-setting-label" aria-describedby="background-setting-description"><span class="toggle-track" aria-hidden="true"></span></label>
+            </div>
+          </div>
+        </section>
+        <div class="settings-savebar">
+          <div><p class="settings-hint">设置仅保存在本机，退出登录后仍然保留。</p><p id="desktop-preferences-feedback" class="settings-feedback" role="status" aria-live="polite"></p><button id="desktop-preferences-retry" class="quiet" hidden>重新读取设置</button></div>
+          <div class="inline-actions"><button id="desktop-preferences-cancel">取消更改</button><button id="desktop-preferences-save" class="primary">保存更改</button></div>
+        </div>
+        <section class="settings-section settings-session">
+          <div class="settings-row"><div class="settings-copy"><h3>退出应用</h3><p>彻底退出 Token Market，已有工具连接保留。</p></div><button id="desktop-quit" class="quiet danger">退出应用</button></div>
+        </section>
+      </div>
+    </section>
     <section id="help-page" data-view="help" hidden>
       <header class="page-heading"><div><h1>使用帮助</h1><p>从接入到开始工作，只需要几步。</p></div></header>
       <div class="page-grid">
-        <section class="sheet"><h2>开始使用</h2><ol class="steps"><li><h3>安装你常用的工具</h3><p>安装完成后，返回首页点击“重新检测”。</p></li><li><h3>确认空间，然后接入</h3><p>接入会配置模型，当前空间用于这次新连接的计费归属。</p></li><li><h3>重新打开工具</h3><p>已有会话请先退出，让工具读取新的模型配置。</p></li><li><h3>需要时，测试一次</h3><p>连接详情中可发起文本测试，确认费用后才发送请求。</p></li></ol></section>
+        <section class="sheet"><h2>开始使用</h2><ol class="steps"><li><h3>安装你常用的工具</h3><p>安装完成后，返回首页点击“检查更新”。</p></li><li><h3>确认空间，然后接入</h3><p>接入会配置模型，当前空间用于这次新连接的计费归属。</p></li><li><h3>重新打开工具</h3><p>已有会话请先退出，让工具读取新的模型配置。</p></li><li><h3>需要时，测试一次</h3><p>连接详情中可发起文本测试，确认费用后才发送请求。</p></li></ol></section>
         <section class="sheet"><h2>常见问题</h2>
           <details class="faq" open><summary>接入后为什么显示“未测试”？</summary><p>接入只配置工具，不会自动发送模型请求。测试由你单独发起，可能产生费用。</p></details>
           <details class="faq"><summary>切换空间会影响已有工具吗？</summary><p>已有工具保持自己的计费空间。需要更换归属时，在连接详情中重新接入并确认目标空间；切回原空间后，可重新接入该空间的连接。</p></details>
@@ -69,14 +107,7 @@
   </main>
   <button id="change-account" hidden>切换账号</button><button id="logout" hidden>退出登录</button>
 </section>
-<dialog id="desktop-preferences-dialog" aria-labelledby="desktop-preferences-title">
-  <h2 id="desktop-preferences-title">应用设置</h2>
-  <label class="desktop-background-option"><input id="desktop-run-in-background" type="checkbox">关闭窗口后在后台运行</label>
-  <p>开启后，点击 × 会隐藏窗口。可通过 Dock／托盘图标或再次打开应用恢复窗口；关闭此选项后，点击 × 将退出应用。</p>
-  <p class="caption">此设置仅保存在本机，退出登录不会重置。</p>
-  <p id="desktop-preferences-feedback" class="error" role="status" aria-live="polite"></p>
-  <div class="inline-actions"><button id="desktop-quit">退出应用</button><button id="desktop-preferences-cancel">取消</button><button id="desktop-preferences-save" class="primary">保存</button></div>
-</dialog>
+<section id="settings-standalone" class="settings-standalone" hidden><header class="settings-standalone-header"><div class="brand"><img src="assets/token-market.svg" alt="">Token Market</div><button id="settings-return-login" class="quiet">返回登录</button></header><main id="settings-standalone-content"></main></section>
 <dialog id="desktop-close-dialog" aria-labelledby="desktop-close-title">
   <h2 id="desktop-close-title">关闭窗口后仍在后台运行</h2>
   <p>Token Market 将继续在后台运行。可通过 Dock／托盘图标或再次打开应用恢复窗口；彻底关闭请使用“退出应用”。</p>

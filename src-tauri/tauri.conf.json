@@ -10,8 +10,10 @@
     "windows": [
       {
         "title": "Token Market",
-        "width": 900,
-        "height": 760,
+        "width": 1280,
+        "height": 800,
+        "center": true,
+        "preventOverflow": true,
         "resizable": true,
         "fullscreen": false
       }
