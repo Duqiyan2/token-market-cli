@@ -24,6 +24,7 @@
       <button id="cancel" class="quiet">取消等待</button>
     </div>
     <div id="feedback" role="status" aria-live="polite"></div>
+    <button class="quiet" data-desktop-settings>应用设置</button>
   </div>
 </section>
 <section id="signed-in" class="desktop-shell" hidden>
@@ -34,6 +35,7 @@
       <button data-page="account"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7V5a2 2 0 0 1 2-2h13v4M4 7h15a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z"/><path d="M16 11h5v6h-5a2 2 0 0 1 0-6Z"/></svg>账号与空间</button>
       <button data-page="help"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9 9a3 3 0 0 1 6 0c0 2-3 2-3 4m0 3v1"/></svg>使用帮助</button>
     </nav>
+    <button class="quiet desktop-settings-button" data-desktop-settings>应用设置</button>
     <div class="sidebar-note"><strong>连接你的 Agent</strong><p>在熟悉的工具里，<br>继续你的工作。</p></div>
     <div id="sidebar-profile"></div>
   </aside>
@@ -67,10 +69,26 @@
   </main>
   <button id="change-account" hidden>切换账号</button><button id="logout" hidden>退出登录</button>
 </section>
+<dialog id="desktop-preferences-dialog" aria-labelledby="desktop-preferences-title">
+  <h2 id="desktop-preferences-title">应用设置</h2>
+  <label class="desktop-background-option"><input id="desktop-run-in-background" type="checkbox">关闭窗口后在后台运行</label>
+  <p>开启后，点击 × 会隐藏窗口。可通过 Dock／托盘图标或再次打开应用恢复窗口；关闭此选项后，点击 × 将退出应用。</p>
+  <p class="caption">此设置仅保存在本机，退出登录不会重置。</p>
+  <p id="desktop-preferences-feedback" class="error" role="status" aria-live="polite"></p>
+  <div class="inline-actions"><button id="desktop-quit">退出应用</button><button id="desktop-preferences-cancel">取消</button><button id="desktop-preferences-save" class="primary">保存</button></div>
+</dialog>
+<dialog id="desktop-close-dialog" aria-labelledby="desktop-close-title">
+  <h2 id="desktop-close-title">关闭窗口后仍在后台运行</h2>
+  <p>Token Market 将继续在后台运行。可通过 Dock／托盘图标或再次打开应用恢复窗口；彻底关闭请使用“退出应用”。</p>
+  <p class="caption">可以在“应用设置”中更改关闭窗口的行为。此说明仅在首次关闭时显示。</p>
+  <p id="desktop-close-feedback" class="error" role="status" aria-live="polite"></p>
+  <div class="inline-actions"><button id="desktop-close-cancel">取消</button><button id="desktop-close-confirm" class="primary">知道了，后台运行</button></div>
+</dialog>
 <script src="shell.js"></script>
 <script src="workspace.js"></script>
 <script src="tools.js"></script>
 <script src="connection-test.js"></script>
+<script src="window-lifecycle.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

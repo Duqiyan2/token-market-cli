@@ -81,6 +81,10 @@ jobs:
         if: ${{ !cancelled() && runner.os != 'Linux' }}
         run: cargo check --manifest-path src-tauri/Cargo.toml --locked
 
+      - name: Test desktop window lifecycle
+        if: ${{ !cancelled() && runner.os != 'Linux' }}
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib --locked
+
   desktop-ui:
     name: Desktop DOM/IPC fixtures
     runs-on: ubuntu-22.04

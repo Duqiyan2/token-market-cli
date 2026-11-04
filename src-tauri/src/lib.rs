@@ -1,5 +1,6 @@
 mod connections;
 mod installation;
+mod window_lifecycle;
 mod workspace;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -210,11 +211,7 @@ fn accept_desktop_callback(app: AppHandle, callback: String) {
                 }
             }
         }
-        if let Some(window) = app.get_webview_window("main") {
-            let _ = window.unminimize();
-            let _ = window.show();
-            let _ = window.set_focus();
-        }
+        window_lifecycle::show_main_window(&app);
         let _ = app.emit("desktop-login-status", desktop_value(&app));
     });
 }
@@ -223,18 +220,16 @@ fn accept_desktop_callback(app: AppHandle, callback: String) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.unminimize();
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            window_lifecycle::show_main_window(app);
         }))
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .manage(tokenmarket_core::connections::ConnectionManager::current())
         .manage(tokenmarket_core::installation::InstallationManager::current())
         .manage(workspace::WorkspaceState::new())
+        .on_window_event(window_lifecycle::on_window_event)
         .setup(|app| {
+            window_lifecycle::setup(app.handle());
             let api_base = tokenmarket_core::config::console_api_base_url();
             app.manage(DesktopState {
                 login: DesktopLogin::with_credentials(
@@ -287,7 +282,18 @@ pub fn run() {
             begin_desktop_login,
             cancel_desktop_login,
             reopen_desktop_login,
+            window_lifecycle::desktop_window_preferences,
+            window_lifecycle::save_desktop_window_preferences,
+            window_lifecycle::acknowledge_desktop_close,
+            window_lifecycle::cancel_desktop_close,
+            window_lifecycle::quit_desktop_app,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while building tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, _event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = _event {
+                window_lifecycle::show_main_window(_app);
+            }
+        });
 }

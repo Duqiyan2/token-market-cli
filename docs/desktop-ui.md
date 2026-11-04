@@ -28,3 +28,38 @@ signing, see [macOS local signing](macos-local-signing.md).
 Packaging verifies compilation. Installed login, browser return, OS credential
 access and model requests require separate native verification. Browser fixture
 screenshots and visual checks are in `design-demos/`.
+
+## Window lifecycle
+
+On macOS and Windows, clicking the window close button hides the main window and
+keeps the desktop application running. The normal minimize button retains its
+minimize behavior.
+
+On macOS, the Dock icon or menu bar icon restores the main window. On Windows,
+the system tray icon restores it. Opening the application again also restores
+the existing window. Restoration shows and focuses the window, including when
+it was previously minimized.
+
+An explicit Quit action ends the application. macOS also supports Command-Q;
+Windows exposes Quit in the tray menu. Quitting the desktop does not disconnect
+existing Tool Connections or revoke their Agent API Keys.
+
+The first close shows an explanation before hiding. Confirming it records that
+the explanation has been seen; cancelling keeps the window open. If preferences
+cannot be saved, the explanation remains visible and the window stays open.
+
+Application Settings is available before and after login, and from the tray
+menu. "关闭窗口后在后台运行" defaults to enabled and can be disabled to restore
+normal window-close exit behavior. It and the first-close acknowledgement are
+device preferences stored in `~/.tokenmarket/desktop-preferences.json`,
+independently of Client Session and account changes.
+
+If the tray cannot be initialized, closing exits normally and Application
+Settings explains that background operation is unavailable. Explicit Quit and
+system exit events are never intercepted. Linux retains its existing close
+behavior.
+
+Native regression checks: `cargo test --manifest-path src-tauri/Cargo.toml --lib --locked`.
+DOM/IPC fixtures cover settings, the first-close explanation, cancellation,
+save failures and tray unavailability. Actual macOS Dock/menu bar and Windows
+tray restoration, Command-Q, and OS shutdown require native verification.

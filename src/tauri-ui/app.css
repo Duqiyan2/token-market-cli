@@ -83,6 +83,11 @@ dialog p { font-size: 14px; overflow-wrap: anywhere; }
 dialog label { display: grid; gap: 8px; font-size: 14px; }
 dialog select { width: 100%; }
 dialog .tool-actions { justify-content: flex-end; margin-top: 22px; flex-wrap: wrap; }
+.desktop-settings-button { margin-top: 12px; text-align: left; }
+dialog .desktop-background-option { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+.desktop-background-option input { min-height: auto; width: 18px; height: 18px; flex-shrink: 0; }
+#desktop-preferences-dialog .inline-actions, #desktop-close-dialog .inline-actions { justify-content: flex-end; }
+dialog .error { color: var(--error); }
 .login-page { display: grid; place-items: center; min-height: 100dvh; padding: 32px 20px; }
 .login-content { max-width: 390px; width: 100%; text-align: center; }
 .login-logo { width: 90px; height: 90px; margin-bottom: 24px; }

@@ -13,6 +13,90 @@ async function detail(page,id) { await page.locator(`[data-tool="${id}"] .tool-d
 async function switchTeam(page) { await page.locator('.workspace-switch').click();await page.locator('dialog[open] [data-workspace-id="team"]').click();await page.locator('.workspace-switch').filter({hasText:'团队空间'}).waitFor(); }
 async function manage(page) { await page.locator('.tool-menu summary').click(); }
 
+test('window preferences are available before login and saving does not log out or disconnect', async () => {
+  const f = await openFixture({signedIn:false}); try {
+    const p = f.page;
+    await p.locator('#login [data-desktop-settings]').click();
+    await p.locator('#desktop-run-in-background:enabled').waitFor();
+    assert.equal(await p.locator('#desktop-run-in-background').isChecked(), true);
+    await p.locator('#desktop-run-in-background').uncheck();
+    await p.locator('#desktop-preferences-save').click();
+    await p.locator('#desktop-preferences-dialog').waitFor({state:'hidden'});
+    assert.deepEqual((await calls(p, 'save_desktop_window_preferences'))[0].args, {runInBackground:false});
+    await p.locator('#login [data-desktop-settings]').click();
+    await p.locator('#desktop-run-in-background:enabled').waitFor();
+    assert.equal(await p.locator('#desktop-run-in-background').isChecked(), false);
+    await p.locator('#desktop-quit').click();
+    assert.equal((await calls(p, 'quit_desktop_app')).length, 1);
+    assert.equal((await calls(p, 'logout_desktop_session')).length, 0);
+    assert.equal((await calls(p, 'disconnect_tool')).length, 0);
+    assert.deepEqual(f.errors, []);
+  } finally { await f.close(); }
+});
+
+test('first close is explained before hiding, including a close before listeners register', async () => {
+  const f = await openFixture({closeNoticePending:true}); try {
+    const p = f.page;
+    await p.locator('#desktop-close-dialog[open]').waitFor();
+    assert.equal((await calls(p, 'acknowledge_desktop_close')).length, 0);
+    await p.evaluate(() => window.__fixture.emit('desktop-close-notice'));
+    assert.equal(await p.locator('#desktop-close-dialog[open]').count(), 1);
+    await p.locator('#desktop-close-confirm').click();
+    await p.locator('#desktop-close-dialog').waitFor({state:'hidden'});
+    assert.equal((await calls(p, 'acknowledge_desktop_close')).length, 1);
+    assert.equal(await p.evaluate(() => window.__fixture.hidden), true);
+    assert.deepEqual(f.errors, []);
+  } finally { await f.close(); }
+});
+
+test('cancelling the first-close notice keeps the window open and allows another close', async () => {
+  const f = await openFixture(); try {
+    const p = f.page;
+    await p.evaluate(() => window.__fixture.emit('desktop-close-notice'));
+    await p.locator('#desktop-close-dialog[open]').waitFor();
+    await p.keyboard.press('Escape');
+    await p.locator('#desktop-close-dialog').waitFor({state:'hidden'});
+    assert.equal((await calls(p, 'cancel_desktop_close')).length, 1);
+    assert.equal((await calls(p, 'acknowledge_desktop_close')).length, 0);
+    await p.evaluate(() => window.__fixture.emit('desktop-close-notice'));
+    await p.locator('#desktop-close-dialog[open]').waitFor();
+    assert.deepEqual(f.errors, []);
+  } finally { await f.close(); }
+});
+
+test('failed preference persistence keeps the first-close notice visible and does not hide', async () => {
+  const f = await openFixture({closeNoticePending:true,preferenceSaveError:true}); try {
+    const p = f.page;
+    await p.locator('#desktop-close-dialog[open]').waitFor();
+    await p.locator('#desktop-close-confirm').click();
+    await p.locator('#desktop-close-feedback').filter({hasText:'无法保存'}).waitFor();
+    assert.equal(await p.locator('#desktop-close-dialog').isVisible(), true);
+    assert.equal(await p.evaluate(() => Boolean(window.__fixture.hidden)), false);
+    await p.locator('#desktop-close-cancel').click();
+    await p.locator('#desktop-close-dialog').waitFor({state:'hidden'});
+    await p.evaluate(() => window.__fixture.emit('desktop-show-preferences'));
+    await p.locator('#desktop-run-in-background:enabled').waitFor();
+    await p.locator('#desktop-run-in-background').uncheck();
+    await p.locator('#desktop-preferences-save').click();
+    await p.locator('#desktop-preferences-feedback').filter({hasText:'无法保存'}).waitFor();
+    assert.equal(await p.locator('#desktop-preferences-dialog').isVisible(), true);
+    assert.equal(await p.evaluate(() => window.__fixture.windowPreferences.run_in_background), true);
+    assert.deepEqual(f.errors, []);
+  } finally { await f.close(); }
+});
+
+test('unavailable tray disables background preference and keeps explicit quit available', async () => {
+  const f = await openFixture({backgroundAvailable:false}); try {
+    const p = f.page;
+    await p.locator('#signed-in [data-desktop-settings]').click();
+    await p.locator('#desktop-preferences-feedback').filter({hasText:'关闭窗口将退出应用'}).waitFor();
+    assert.equal(await p.locator('#desktop-run-in-background').isDisabled(), true);
+    await p.locator('#desktop-quit').click();
+    assert.equal((await calls(p, 'quit_desktop_app')).length, 1);
+    assert.deepEqual(f.errors, []);
+  } finally { await f.close(); }
+});
+
 test('other-environment connections require reconnect and cannot start a paid test', async () => {
   const f = await openFixture(); try {
     const p = f.page;

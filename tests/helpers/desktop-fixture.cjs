@@ -21,6 +21,7 @@ module.exports = async function openFixture(browser, options = {}) {
       if (options.missingGui && ['workbuddy','deepseek-harness'].includes(entry.id)) { entry.installed=false;entry.canConnect=false;entry.connection=null; }
     });
     fixture.installation = null;
+    fixture.windowPreferences = {run_in_background:options.runInBackground !== false,background_available:options.backgroundAvailable !== false,close_notice_pending:Boolean(options.closeNoticePending),error:null};
     if (options.legacy) fixture.entries[3].connection = {state:'legacy',owner:null,boundWorkspace:null,keyId:null,protocol:null,models:['legacy-model']};
     const clone = value => structuredClone(value);
     const loginStatus = () => ({context:fixture.signedIn?{user:{id:user.id,name:user.name},default_workspace:fixture.current}:null,pending:fixture.pending});
@@ -33,6 +34,11 @@ module.exports = async function openFixture(browser, options = {}) {
       if (options.credentialLost && ['connect_tool','reconnect_tool'].includes(command) && !args.recovery) throw {message:'本机保存的连接信息已丢失',recovery:{keyId:'missing-fixture',ownerId:user.id,workspaceId:fixture.current.id,ownerName:user.name,workspaceName:fixture.current.name}};
       if (args.recovery && (args.recovery.ownerId!==user.id || args.recovery.workspaceId!==fixture.current.id)) throw Error('账号或空间已改变');
       switch(command) {
+        case 'desktop_window_preferences': return clone(fixture.windowPreferences);
+        case 'save_desktop_window_preferences': if(options.preferenceSaveError)throw Error('无法保存应用设置');fixture.windowPreferences.run_in_background=args.runInBackground;return clone(fixture.windowPreferences);
+        case 'acknowledge_desktop_close': if(options.preferenceSaveError)throw Error('无法保存应用设置');fixture.windowPreferences.close_notice_pending=false;fixture.hidden=true;return null;
+        case 'cancel_desktop_close': fixture.windowPreferences.close_notice_pending=false;return null;
+        case 'quit_desktop_app': fixture.quit=true;return null;
         case 'start_tool_installation': fixture.installation={tool:args.tool,stage:options.guiInstall?'waiting_for_user':'dependencies',detail:options.guiInstall?'请完成原生安装器中的步骤；取消请在原生安装器中操作':'正在准备运行依赖',output:['准备工具运行依赖'],installed:false}; return clone(fixture.installation);
         case 'tool_installation_status': if(fixture.installation.stage !== 'cancelled' && !options.installPending && !options.installFail && (!options.guiInstall || fixture.nativeInstalled)){fixture.installation={...fixture.installation,stage:'succeeded',detail:'安装完成，请单独接入',installed:true};entry.installed=true;entry.canConnect=true;} if(options.installFail)fixture.installation={...fixture.installation,stage:'failed',detail:'依赖下载失败，请重试'}; return clone(fixture.installation);
         case 'cancel_tool_installation': fixture.installation={...fixture.installation,stage:'cancelled',detail:options.guiInstall?'已停止等待；请在原生安装器中取消安装':'安装已取消，已准备的依赖保留'}; return null;
