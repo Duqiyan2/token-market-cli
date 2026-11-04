@@ -25,6 +25,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Test background Windows processes without a parent console
+        env:
+          CARGO_TARGET_DIR: src-tauri/target
+        run: cargo test --release --manifest-path rust/tokenmarket-core/Cargo.toml --target x86_64-pc-windows-msvc --test windows_background_processes --locked -- --nocapture
       - name: Build production installers
         uses: tauri-apps/tauri-action@v0
         with:
