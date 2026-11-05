@@ -673,7 +673,10 @@ fn write_deepseek_harness(
                     "apiKeyEnv": "TOKEN_MARKET_API_KEY",
                     "api": "openai-completions",
                     "baseURL": format!("{}/v1", config.base_url.trim_end_matches('/')),
-                    "models": [{"id": "glm-5.3"}, {"id": "deepseek-v4.1-flash"}]
+                    "models": [
+                        crate::model_catalog::harness_model(&json!({"id": "glm-5.3"})),
+                        crate::model_catalog::harness_model(&json!({"id": "deepseek-v4.1-flash"}))
+                    ]
                 }
             }
         },

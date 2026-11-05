@@ -17,6 +17,10 @@ text models without replacing existing model preferences. Model eligibility
 comes from `model_types` containing `TEXT_GENERATION`; missing required models
 stop connection without changing the configuration.
 
+Missing model metadata is supplemented from the bundled [model capability
+catalogue](model-capabilities.md), while valid server values retain priority.
+Harness also receives per-model reasoning controls and protocol compatibility.
+
 Connect saves the credential, loads the model catalogue and publishes managed
 configuration with encrypted restoration records. It sends no generation request.
 Reconnect validates and reuses a saved credential when possible. A different

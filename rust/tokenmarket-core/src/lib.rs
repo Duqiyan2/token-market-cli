@@ -1,6 +1,7 @@
 pub mod adapters;
 pub mod auth;
 pub mod config;
+mod model_catalog;
 pub mod models;
 pub mod verification;
 

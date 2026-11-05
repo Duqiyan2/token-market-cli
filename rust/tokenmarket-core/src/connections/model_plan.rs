@@ -34,18 +34,18 @@ fn select_with_model(tool: ToolId, catalogue: &Value, default_model: &str) -> Re
             if !ids.insert(id) {
                 bail!("模型目录含重复模型 ID，原配置已保留")
             }
-            models.push(row.clone());
+            models.push(crate::model_catalog::complete_metadata(row));
         }
         if models.is_empty() {
             bail!("当前 Key 没有文本生成模型，原配置已保留")
         }
         return Ok(models);
     }
-    Ok(vec![rows
-        .iter()
-        .find(|row| row["id"] == default_model && is_text_generation(row))
-        .with_context(|| format!("当前 Key 无法使用 {default_model}，原配置已保留"))?
-        .clone()])
+    Ok(vec![crate::model_catalog::complete_metadata(
+        rows.iter()
+            .find(|row| row["id"] == default_model && is_text_generation(row))
+            .with_context(|| format!("当前 Key 无法使用 {default_model}，原配置已保留"))?,
+    )])
 }
 
 /// Metadata shape shared by Harness and OpenClaw; adapter mutation stays local.

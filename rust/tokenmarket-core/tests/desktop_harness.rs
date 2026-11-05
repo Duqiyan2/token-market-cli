@@ -198,7 +198,7 @@ async fn harness_connect_imports_every_chat_model_in_catalogue_order_and_preserv
 }
 
 #[tokio::test]
-async fn harness_preserves_legacy_credentials_shape_and_declares_only_real_metadata() {
+async fn harness_preserves_legacy_credentials_and_completes_known_model_metadata() {
     let root = tempdir().unwrap();
     let inventory = inventory(root.path());
     let profile = root.path().join("cordis.patch.yml");
@@ -224,14 +224,68 @@ async fn harness_preserves_legacy_credentials_shape_and_declares_only_real_metad
         yaml(&credentials),
         json!({"OTHER_KEY":"keep-secret","TOKEN_MARKET_API_KEY":"sk-fixture"})
     );
+    let models = yaml(&profile)[0]["config"]["providers"]["tokenmarket"]["models"].clone();
+    assert_eq!(models[0], json!({"id":"custom-one"}));
+    assert_eq!(models[1]["id"], "glm-5.3");
+    assert_eq!(models[1]["contextWindow"], 1_000_000);
+    assert_eq!(models[1]["maxTokens"], 65_536);
     assert_eq!(
-        yaml(&profile)[0]["config"]["providers"]["tokenmarket"]["models"],
-        json!([{"id":"custom-one"},{"id":"glm-5.3"}])
+        models[1]["reasoningEfforts"],
+        json!({"low":"low","high":"high","max":"max"})
+    );
+    assert_eq!(models[1]["compat"]["thinkingFormat"], "openai");
+    assert_eq!(
+        manager.list().unwrap()[0].model_snapshot[1]["max_output_tokens"],
+        131_072
     );
     assert!(manager.list().unwrap()[0].receipts[1]
         .fields
         .iter()
         .any(|f| f.pointer == "/TOKEN_MARKET_API_KEY" && f.before == Some(json!("old-secret"))));
+    assert_eq!(server.await.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn harness_writes_per_model_reasoning_and_keeps_server_limits_and_key_visibility() {
+    let root = tempdir().unwrap();
+    let inventory = inventory(root.path());
+    let profile = root.path().join("cordis.patch.yml");
+    let (url, server) = platform(json!({"data":[
+        {"id":"deepseek-v4.1-flash","model_types":["TEXT_GENERATION"],"context_window_tokens":262144,"max_output_tokens":8192},
+        {"id":"kimi-k2.6","model_types":["TEXT_GENERATION"]},
+        {"id":"glm-5.3","model_types":["TEXT_GENERATION"],"supports_reasoning":false},
+        {"id":"gpt-6.1-sol","model_types":["IMAGE_GENERATION"]}
+    ]}), 2).await;
+    let manager = support::manager(root.path().join("state"), url.clone(), url);
+    let summary = manager
+        .connect(
+            context(),
+            ToolId::DeepSeekHarness,
+            &inventory,
+            profile.clone(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        summary.models,
+        ["deepseek-v4.1-flash", "kimi-k2.6", "glm-5.3"]
+    );
+    let rows = yaml(&profile)[0]["config"]["providers"]["tokenmarket"]["models"].clone();
+    assert_eq!(rows.as_array().unwrap().len(), 3);
+    assert_eq!(rows[0]["contextWindow"], 262144);
+    assert_eq!(rows[0]["maxTokens"], 8192);
+    assert_eq!(
+        rows[0]["reasoningEfforts"],
+        json!({"off":null,"low":"low","high":"high","max":"max"})
+    );
+    assert_eq!(rows[0]["compat"]["thinkingFormat"], "deepseek");
+    assert_eq!(
+        rows[1]["reasoningEfforts"],
+        json!({"off":null,"high":"high"})
+    );
+    assert_eq!(rows[1]["compat"]["supportsReasoningEffort"], false);
+    assert_eq!(rows[2]["reasoningEfforts"], false);
+    assert!(rows[2].get("compat").is_none());
     assert_eq!(server.await.unwrap().len(), 2);
 }
 

@@ -175,17 +175,7 @@ impl HarnessConfig {
             .unwrap();
         let model_rows: Vec<Value> = models
             .iter()
-            .map(|model| {
-                let mut row = json!({"id":model["id"]});
-                if let Some(name) = model["display_name"]
-                    .as_str()
-                    .filter(|name| !name.is_empty())
-                {
-                    row["name"] = json!(name)
-                }
-                super::model_plan::project_metadata(model, &mut row);
-                row
-            })
+            .map(crate::model_catalog::harness_model)
             .collect();
         for (name, applied) in [
             ("api", json!("openai-completions")),

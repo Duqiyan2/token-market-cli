@@ -268,8 +268,8 @@ async fn personal_connection_prefers_default_restores_provider_and_never_tests_i
 }
 
 #[tokio::test]
-async fn default_model_and_missing_metadata_never_produce_a_fake_catalogue() {
-    for valid in [true, false] {
+async fn known_model_metadata_uses_offline_fallback_while_unknown_models_still_require_limits() {
+    for (valid, known) in [(true, true), (false, true), (false, false)] {
         let root = tempfile::tempdir().unwrap();
         let inventory = fixture(root.path());
         let path = inventory.config_path(ToolId::DuMate);
@@ -281,12 +281,15 @@ async fn default_model_and_missing_metadata_never_produce_a_fake_catalogue() {
                 row.as_object_mut().unwrap().remove("max_output_tokens");
             }
         }
+        if !known {
+            catalog["data"][1]["id"] = json!("unknown-model");
+        }
         let (url, requests, task) = server(catalog).await;
         let manager = support::manager(root.path().join("state"), url.clone(), url);
         let result = manager
             .connect(context(), ToolId::DuMate, &inventory, path.clone())
             .await;
-        if valid {
+        if valid || known {
             let connection = result.unwrap();
             assert_eq!(connection.models, ["glm-5.3"]);
             // An account switch invalidates Test, but Disconnect still restores its original account file.
@@ -778,11 +781,8 @@ async fn unavailable_default_preserves_a_valid_existing_model() {
     let path = inventory.config_path(ToolId::DuMate);
     write(&path, &json!({"customLLMProvider":{"model":"existing"}}));
     let mut catalog = catalogue();
-    // A listed default without limits is unavailable for DuMate.
-    catalog["data"][1]
-        .as_object_mut()
-        .unwrap()
-        .remove("max_output_tokens");
+    // A model absent from this Key's list is unavailable even if bundled.
+    catalog["data"].as_array_mut().unwrap().remove(1);
     let (url, _, task) = server(catalog).await;
     let manager = support::manager(root.path().join("state"), url.clone(), url);
     let connection = manager

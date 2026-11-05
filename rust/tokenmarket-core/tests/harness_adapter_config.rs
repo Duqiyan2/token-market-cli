@@ -31,4 +31,13 @@ fn terminal_harness_setup_preserves_unrelated_yaml_numbers_as_scalars() {
         .unwrap();
     let native: serde_yaml::Value = serde_yaml::from_slice(&std::fs::read(path).unwrap()).unwrap();
     assert_eq!(native[0]["config"]["version"].as_u64(), Some(1));
+    let models = &native[1]["config"]["providers"]["tokenmarket"]["models"];
+    assert_eq!(models[0]["contextWindow"].as_u64(), Some(1_000_000));
+    assert_eq!(models[0]["reasoningEfforts"]["max"].as_str(), Some("max"));
+    assert!(models[0]["reasoningEfforts"].get("off").is_none());
+    assert_eq!(
+        models[1]["compat"]["thinkingFormat"].as_str(),
+        Some("deepseek")
+    );
+    assert!(models[1]["reasoningEfforts"].get("off").unwrap().is_null());
 }

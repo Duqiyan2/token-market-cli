@@ -310,7 +310,7 @@ async fn claude_reconnect_fills_model_aliases_missing_from_old_receipts_and_rest
 }
 
 #[tokio::test]
-async fn reconnect_retires_metadata_no_longer_advertised_without_losing_original_restore_value() {
+async fn reconnect_uses_builtin_metadata_when_server_omits_it_and_restores_original_value() {
     let root = tempdir().unwrap();
     let inv = inventory(root.path());
     let path = root.path().join("settings.json");
@@ -332,8 +332,8 @@ async fn reconnect_retires_metadata_no_longer_advertised_without_losing_original
         .unwrap();
     let current: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     assert_eq!(
-        current["env"]["CLAUDE_CODE_MAX_CONTEXT_TOKENS"], "original-limit",
-        "new catalogue does not authorize retaining an old model context override"
+        current["env"]["CLAUDE_CODE_MAX_CONTEXT_TOKENS"], "1000000",
+        "the bundled model capacity replaces missing server metadata"
     );
     manager
         .disconnect(
