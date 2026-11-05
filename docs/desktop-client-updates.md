@@ -80,9 +80,40 @@ These constraints come from the shared storage/locking implementation, the
 [macOS packaging flow](../scripts/macos-local-signing.py) and the
 [Tauri updater documentation](https://v2.tauri.app/plugin/updater/).
 
+## Manual check implementation
+
+Settings now has a separate **客户端更新** section, available without a Client
+Session or workspace balance. It reads the current native application version
+and lets the user manually check a stable static manifest. A successful check
+shows the newer supported version and plain-text release notes, or reports that
+no newer supported stable version is available. Failures show a reason and an
+explicit retry action. Discovery does not download, install or restart anything.
+
+Build the desktop with `TOKEN_MARKET_UPDATER_ENDPOINT` set to the fixed HTTPS
+static-manifest address and `TOKEN_MARKET_UPDATER_PUBLIC_KEY` set to the contents
+of the Tauri signer's public key file. These are compile-time settings; the
+renderer cannot replace either value. Both may remain empty until deployment
+is provisioned, in which case manual checking reports the missing configuration.
+The configured manifest and artifact URLs must use HTTPS, including redirects
+in production. Only compiled native tests may opt into a loopback HTTP fixture.
+
+The manifest uses Tauri's static format: `version`, optional `notes` and
+`pub_date`, and `platforms.darwin-aarch64` / `platforms.windows-x86_64` entries
+containing `url` and the `.sig` file contents in `signature`. Only versions newer
+than the running application with no prerelease suffix are offered. Dynamic
+single-package manifests, missing matching packages and empty signatures are
+rejected. Downloaded bytes still require Tauri verification before installation;
+a check result does not mean those bytes have been verified.
+
+Isolated native integration tests use signed synthetic fixtures and the real
+Tauri updater. Playwright tests exercise the existing UI-to-native boundary.
+Run them with `cargo test --locked --manifest-path src-tauri/Cargo.toml` and
+`node --test tests/desktop-ui.test.cjs` (Playwright and a browser are required).
+These tests do not establish configured production hosting or device upgrades.
+
 ## Implementation and release work remaining
 
-- Integrate the Tauri updater with desktop Settings, startup checks, persistent
+- Complete startup checks, persistent
   ignored-version preferences and the confirmed install/restart interaction.
 - Add cross-process installation coordination without changing the independent
   CLI update path or interrupting running mutations.
@@ -101,6 +132,7 @@ These constraints come from the shared storage/locking implementation, the
   deployment and device acceptance as separate evidence. None is established by
   this design document.
 
-The current desktop has no built-in self-updater. The existing release workflow
-publishes installers; this design discussion does not establish that deployed
+Older deployed desktop versions contain no built-in updater and require one
+manual installation of an updater-enabled release. The existing release workflow
+publishes installers; source implementation alone does not establish that deployed
 clients can already update themselves.

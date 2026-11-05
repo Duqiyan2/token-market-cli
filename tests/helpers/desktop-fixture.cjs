@@ -53,6 +53,12 @@ module.exports = async function openFixture(browser, options = {}) {
       if (options.credentialLost && ['connect_tool','reconnect_tool'].includes(command) && !args.recovery) throw {message:'本机保存的连接信息已丢失',recovery:{keyId:'missing-fixture',ownerId:user.id,workspaceId:fixture.current.id,ownerName:user.name,workspaceName:fixture.current.name}};
       if (args.recovery && (args.recovery.ownerId!==user.id || args.recovery.workspaceId!==fixture.current.id)) throw Error('账号或空间已改变');
       switch(command) {
+        case 'desktop_client_update_status': {
+          const value={status:'idle',currentVersion:'1.0.0',availableVersion:null,releaseNotes:null,error:null};
+          if(options.deferClientUpdateStatus) return new Promise(resolve=>fixture.resolveClientUpdateStatus=()=>resolve(value));
+          return value;
+        }
+        case 'check_client_update': return clone(fixture.clientUpdate || options.clientUpdate || {status:'current',currentVersion:'1.0.0',availableVersion:null,releaseNotes:null,error:null});
         case 'desktop_window_preferences': if(fixture.deferPreferences)return new Promise(resolve=>{fixture.resolvePreferences=()=>resolve(clone(fixture.windowPreferences));});return clone(fixture.windowPreferences);
         case 'save_desktop_window_preferences': if(options.preferenceSaveError)throw Error('无法保存应用设置');fixture.windowPreferences.run_in_background=args.runInBackground;return clone(fixture.windowPreferences);
         case 'acknowledge_desktop_close': if(options.preferenceSaveError)throw Error('无法保存应用设置');fixture.windowPreferences.close_notice_pending=false;fixture.hidden=true;return null;

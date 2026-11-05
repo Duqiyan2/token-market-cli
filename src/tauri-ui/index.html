@@ -89,6 +89,19 @@
         <section class="settings-section settings-session">
           <div class="settings-row"><div class="settings-copy"><h3>退出应用</h3><p>彻底退出 Token Market，已有工具连接保留。</p></div><button id="desktop-quit" class="quiet danger">退出应用</button></div>
         </section>
+        <section class="settings-section" aria-labelledby="client-update-title">
+          <h2 id="client-update-title">客户端更新</h2>
+          <div class="settings-group">
+            <div class="settings-row">
+              <div class="settings-copy"><h3>Token Market</h3><p id="client-current-version">正在读取当前版本…</p><p>检查 Token Market 稳定版更新，已有工具连接保留。</p></div>
+              <button id="check-client-update">检查客户端更新</button>
+            </div>
+            <div class="client-update-result">
+              <p id="client-update-status" role="status" aria-live="polite"></p>
+              <p id="client-update-notes" hidden></p>
+            </div>
+          </div>
+        </section>
       </div>
     </section>
     <section id="help-page" data-view="help" hidden>
@@ -120,6 +133,7 @@
 <script src="tools.js"></script>
 <script src="connection-test.js"></script>
 <script src="window-lifecycle.js"></script>
+<script src="client-update.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

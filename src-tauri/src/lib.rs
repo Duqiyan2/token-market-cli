@@ -1,3 +1,4 @@
+mod client_update;
 mod connections;
 mod installation;
 mod window_lifecycle;
@@ -224,11 +225,15 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(tokenmarket_core::connections::ConnectionManager::current())
         .manage(tokenmarket_core::installation::InstallationManager::current())
         .manage(workspace::WorkspaceState::new())
         .on_window_event(window_lifecycle::on_window_event)
         .setup(|app| {
+            app.manage(client_update::ClientUpdater::new(
+                app.package_info().version.to_string(),
+            ));
             window_lifecycle::setup(app.handle());
             let api_base = tokenmarket_core::config::console_api_base_url();
             app.manage(DesktopState {
@@ -289,6 +294,8 @@ pub fn run() {
             window_lifecycle::acknowledge_desktop_close,
             window_lifecycle::cancel_desktop_close,
             window_lifecycle::quit_desktop_app,
+            client_update::desktop_client_update_status,
+            client_update::check_client_update,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
