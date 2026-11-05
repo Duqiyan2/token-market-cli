@@ -76,13 +76,13 @@ or errors. The actual upload uses native ossutil2.4.1 `cp` with `--cache-control
 and `--force` for discovery aliases. See [ossutil configuration](https://www.alibabacloud.com/help/en/oss/developer-reference/ossutil-overview/).
 
 Candidate and stable share a destination-specific nonblocking OS file lock on
-one designated publishing account, independent of checkout/config/output/state
+one designated publishing account, independent of checkout/config/output
 paths. Persistent lock files are in `/tmp/tokenmarket-publisher-UID/` on Unix and
 `%LOCALAPPDATA%/Token Market/Release Publisher Locks/` on Windows. OS locks release
 on process exit; do not delete lock files while a publisher is running. This is
 not a distributed lock across computers/accounts: disable CI and other-machine
-writers to the same bucket/prefix. `state_dir` reserves an external operator state
-location; it does not choose or bypass the common lock namespace.
+writers to the same bucket/prefix. Optional operator records may live in an
+external directory; they do not configure the common lock namespace.
 
 Each invocation snapshots and verifies the actual upload bytes. Under the lock,
 production publication first reads current public stable: genuine404 permits
