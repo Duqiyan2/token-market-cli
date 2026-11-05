@@ -1,0 +1,5 @@
+# Cryptographic fixtures must retain their signed bytes on every checkout.
+/src-tauri/tests/fixtures/client-update/package.txt -text
+/src-tauri/tests/fixtures/client-update/**/*.sig -text
+/src-tauri/tests/fixtures/client-update/**/*.pub -text
+/src-tauri/tests/fixtures/client-update/public-key.txt -text
