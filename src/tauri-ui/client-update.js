@@ -2,10 +2,10 @@
 (() => {
   if (!window.__TAURI__) return;
   const invoke = (command, args) => window.__TAURI__.core.invoke(command, args);
+  const publish = value => document.dispatchEvent(new CustomEvent('client-update-action-result', {detail:value}));
   const el = id => document.getElementById(id);
   const check = el('check-client-update');
   let checking = false;
-  let generation = 0;
   let currentVersion = '未知';
   let latest = null;
   let downloading = false;
@@ -26,15 +26,18 @@
     if (downloading) return;
     const version = confirmedVersion;
     confirm.close();
-    ++generation;
+    document.dispatchEvent(new Event('client-update-manual-check'));
     downloading = true;
     render({...latest,status:'downloading',error:null});
-    try { render(await invoke('download_client_update', {version})); }
-    catch (error) { render({...latest,status:'failed',currentVersion,error:String(error)}); }
+    try { publish(await invoke('download_client_update', {version})); }
+    catch (error) { publish({...latest,status:'failed',currentVersion,error:String(error)}); }
     finally { downloading = false; }
   };
   function render(value) {
-    if (latest?.status === 'ready' && value.availableVersion === latest.availableVersion && ['downloading','verifying'].includes(value.status)) return;
+    if (value.automatic && !['available','downloading','verifying','ready'].includes(value.status)) {
+      value = {...value,status:'idle',error:null};
+    }
+    if (latest?.status === 'ready' && value.status !== 'ready') return;
     latest = value;
     currentVersion = value.currentVersion;
     el('client-current-version').textContent = `当前版本 ${value.currentVersion}`;
@@ -59,16 +62,12 @@
   }
   check.onclick = async () => {
     if (checking) return;
-    ++generation;
+    document.dispatchEvent(new Event('client-update-manual-check'));
     checking = true; check.disabled = true;
     el('client-update-status').textContent = '正在检查客户端更新…';
-    try { render(await invoke('check_client_update')); }
-    catch (error) { render({status:'failed',currentVersion,error:String(error)}); }
+    try { publish(await invoke('check_client_update')); }
+    catch (error) { publish({status:'failed',currentVersion,error:String(error)}); }
     finally { checking = false; render(latest); }
   };
-  window.__TAURI__.event.listen('desktop-client-update-status', event => {
-    if (event.payload.availableVersion === latest?.availableVersion && ['downloading','verifying','ready','failed'].includes(event.payload.status)) render(event.payload);
-  });
-  invoke('desktop_client_update_status').then(value => { if (generation === 0) render(value); })
-    .catch(error => { if (generation === 0) render({status:'failed',currentVersion,error:String(error)}); });
+  document.addEventListener('client-update-status', event => render(event.detail));
 })();

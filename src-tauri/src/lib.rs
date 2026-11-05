@@ -231,9 +231,7 @@ pub fn run() {
         .manage(workspace::WorkspaceState::new())
         .on_window_event(window_lifecycle::on_window_event)
         .setup(|app| {
-            app.manage(client_update::ClientUpdater::new(
-                app.package_info().version.to_string(),
-            ));
+            client_update::setup(app.handle());
             window_lifecycle::setup(app.handle());
             let api_base = tokenmarket_core::config::console_api_base_url();
             app.manage(DesktopState {
@@ -297,6 +295,8 @@ pub fn run() {
             client_update::desktop_client_update_status,
             client_update::check_client_update,
             client_update::download_client_update,
+            client_update::defer_client_update,
+            client_update::ignore_client_update_version,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -54,6 +54,8 @@ test('a late download progress event cannot erase a verified Client Update', asy
     await p.getByRole('button',{name:'确认下载',exact:true}).click();
     await p.locator('#client-update-status').filter({hasText:'签名验证通过'}).waitFor();
     await p.evaluate(()=>window.__fixture.emit('desktop-client-update-status',{status:'verifying',currentVersion:'1.0.0',availableVersion:'1.1.0'}));
+    await p.evaluate(()=>window.__fixture.emit('desktop-client-update-status',{status:'available',currentVersion:'1.0.0',availableVersion:'1.1.0',automatic:true,remind:true}));
+    assert.equal(await p.locator('#client-update-reminder').isVisible(),false);
     assert.match(await p.locator('#client-update-status').textContent(),/签名验证通过/);
     assert.equal(await p.getByRole('button',{name:'安装并重启',exact:true}).isVisible(),true);
     assert.deepEqual(f.errors,[]);
@@ -1032,5 +1034,59 @@ test('installation paths render as selectable text and cannot inject page markup
     const row=f.page.locator('[data-tool="codex"]');assert.equal(await row.locator('.tool-location-path').textContent(),path);
     assert.equal(await row.locator('img').count(),1);await detail(f.page,'codex');
     assert.equal(await f.page.locator('.tool-files-sheet .tool-path-row').filter({hasText:'当前入口'}).locator('code').textContent(),path);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('signed-out startup presents a Client Update before any manual check and Later keeps login usable', async () => {
+  const f=await openFixture({signedIn:false,startupClientUpdate:{status:'available',currentVersion:'1.0.0',availableVersion:'1.1.0',releaseNotes:'保留已有连接',automatic:true,remind:true,error:null}});try {
+    const p=f.page;
+    await p.getByRole('dialog',{name:'客户端有新版本'}).waitFor({timeout:1500});
+    assert.match(await p.locator('#client-update-reminder').textContent(),/1\.1\.0/);
+    assert.match(await p.locator('#client-update-reminder').textContent(),/保留已有连接/);
+    assert.equal((await calls(p,'check_client_update')).length,0);
+    await p.getByRole('button',{name:'稍后提醒',exact:true}).click();
+    await p.waitForFunction(()=>!document.querySelector('#client-update-reminder').open);
+    assert.equal(await p.locator('#login').isVisible(),true);
+    assert.equal((await calls(p,'defer_client_update')).length,1);
+    assert.equal((await p.evaluate(()=>window.__fixture.calls.filter(c=>/download|install|restart/.test(c.command)))).length,0);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('an automatic check failure leaves signed-out startup usable and manual retry reports its own result', async () => {
+  const f=await openFixture({signedIn:false,startupClientUpdate:{status:'failed',currentVersion:'1.0.0',automatic:true,remind:false,error:'网络离线'},clientUpdate:{status:'failed',currentVersion:'1.0.0',automatic:false,remind:false,error:'清单读取失败'}});try {
+    const p=f.page;
+    await p.waitForFunction(()=>window.__fixture.calls.some(c=>c.command==='desktop_client_update_status'));
+    assert.equal(await p.locator('#login').isVisible(),true);
+    assert.equal(await p.locator('dialog[open]').count(),0);
+    await p.locator('#login [data-desktop-settings]').click();
+    assert.equal(await p.locator('#client-update-status').textContent(),'');
+    await p.getByRole('button',{name:'检查客户端更新',exact:true}).click();
+    await p.locator('#client-update-status').filter({hasText:'清单读取失败'}).waitFor();
+    await p.evaluate(()=>{window.__fixture.clientUpdate={status:'current',currentVersion:'1.0.0',automatic:false,remind:false};});
+    await p.getByRole('button',{name:'重试检查客户端更新',exact:true}).click();
+    await p.locator('#client-update-status').filter({hasText:'没有更新的受支持稳定版本'}).waitFor();
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('a late startup event offers exact-version ignore and manual checks still show that release', async () => {
+  const available={status:'available',currentVersion:'1.0.0',availableVersion:'1.1.0',releaseNotes:'稳定版说明',automatic:true,remind:true,error:null};
+  const f=await openFixture({signedIn:false,deferClientUpdateStatus:true,clientUpdate:{...available,automatic:false,remind:false}});try {
+    const p=f.page;
+    await p.waitForFunction(()=>Boolean(window.__fixture.resolveClientUpdateStatus));
+    await p.evaluate(value=>{window.__fixture.clientUpdateStatus=value;window.__fixture.emit('desktop-client-update-status',value);},available);
+    await p.getByRole('dialog',{name:'客户端有新版本'}).waitFor();
+    await p.evaluate(()=>window.__fixture.resolveClientUpdateStatus());
+    assert.equal(await p.locator('#client-update-reminder').isVisible(),true);
+    await p.getByRole('button',{name:'忽略此版本',exact:true}).click();
+    await p.waitForFunction(()=>!document.querySelector('#client-update-reminder').open);
+    assert.deepEqual((await calls(p,'ignore_client_update_version')).map(c=>c.args),[{version:'1.1.0'}]);
+    await p.locator('#login [data-desktop-settings]').click();
+    await p.getByRole('button',{name:'检查客户端更新',exact:true}).click();
+    await p.locator('#client-update-status').filter({hasText:'发现新版本 1.1.0'}).waitFor();
+    assert.equal(await p.locator('dialog[open]').count(),0);
+    assert.equal(await p.evaluate(()=>window.__fixture.ignoredClientUpdate),'1.1.0');
+    assert.deepEqual(f.errors,[]);
   }finally{await f.close();}
 });

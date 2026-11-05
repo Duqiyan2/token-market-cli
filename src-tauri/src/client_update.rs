@@ -1,5 +1,13 @@
 use serde::Serialize;
-use std::{sync::Mutex, time::Duration};
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex,
+    },
+    time::Duration,
+};
+mod reminders;
+use reminders::Reminders;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
@@ -11,6 +19,8 @@ pub struct ClientUpdateStatus {
     pub available_version: Option<String>,
     pub release_notes: Option<String>,
     pub error: Option<String>,
+    pub automatic: bool,
+    pub remind: bool,
 }
 
 struct UpdateConfig {
@@ -78,14 +88,33 @@ struct UpdateState {
 
 pub struct ClientUpdater {
     config: UpdateConfig,
+    reminders: Mutex<Reminders>,
+    startup_started: AtomicBool,
     state: Mutex<UpdateState>,
     operation: tauri::async_runtime::Mutex<()>,
 }
 
 impl ClientUpdater {
     pub fn new(current_version: String) -> Self {
+        #[cfg(not(test))]
+        let path = Some(
+            tokenmarket_core::config::token_market_home().join("client-update-preferences.json"),
+        );
+        #[cfg(test)]
+        let path = None;
+        Self::with_preferences(current_version, path)
+    }
+
+    #[cfg(test)]
+    fn with_reminder_path(current_version: String, path: std::path::PathBuf) -> Self {
+        Self::with_preferences(current_version, Some(path))
+    }
+
+    fn with_preferences(current_version: String, path: Option<std::path::PathBuf>) -> Self {
         Self {
             config: UpdateConfig::from_build(),
+            reminders: Mutex::new(Reminders::new(path)),
+            startup_started: AtomicBool::new(false),
             state: Mutex::new(UpdateState {
                 status: ClientUpdateStatus {
                     status: "idle".into(),
@@ -93,6 +122,8 @@ impl ClientUpdater {
                     available_version: None,
                     release_notes: None,
                     error: None,
+                    automatic: false,
+                    remind: false,
                 },
                 candidate: None,
                 verified_bytes: None,
@@ -109,7 +140,42 @@ impl ClientUpdater {
             .clone()
     }
 
+    pub fn later(&self) -> ClientUpdateStatus {
+        let mut state = self.state.lock().expect("client update state");
+        self.reminders.lock().expect("client reminders").later();
+        state.status.remind = false;
+        state.status.clone()
+    }
+
+    pub fn ignore_version(&self, version: &str) -> Result<ClientUpdateStatus, String> {
+        let mut state = self.state.lock().expect("client update state");
+        if state.status.available_version.as_deref() != Some(version) {
+            return Err("可用版本已改变，请重新检查客户端更新".into());
+        }
+        self.reminders
+            .lock()
+            .expect("client reminders")
+            .ignore(version)?;
+        state.status.remind = false;
+        Ok(state.status.clone())
+    }
+
+    pub async fn startup_check<R: Runtime>(&self, app: &AppHandle<R>) -> ClientUpdateStatus {
+        if self.startup_started.swap(true, Ordering::SeqCst) {
+            return self.status();
+        }
+        self.check_with_origin(app, true).await
+    }
+
     pub async fn check<R: Runtime>(&self, app: &AppHandle<R>) -> ClientUpdateStatus {
+        self.check_with_origin(app, false).await
+    }
+
+    async fn check_with_origin<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        automatic: bool,
+    ) -> ClientUpdateStatus {
         if matches!(
             self.status().status.as_str(),
             "downloading" | "verifying" | "ready"
@@ -122,6 +188,8 @@ impl ClientUpdater {
         }
         {
             let mut state = self.state.lock().expect("client update state");
+            state.status.automatic = automatic;
+            state.status.remind = false;
             state.candidate = None;
             state.verified_bytes = None;
             state.status.status = "checking".into();
@@ -133,6 +201,12 @@ impl ClientUpdater {
         let mut state = self.state.lock().expect("client update state");
         match result {
             Ok(Some(update)) => {
+                state.status.remind = automatic
+                    && self
+                        .reminders
+                        .lock()
+                        .expect("client reminders")
+                        .eligible(&update.version);
                 state.status.status = "available".into();
                 state.status.available_version = Some(update.version.clone());
                 state.status.release_notes = update.body.clone();
@@ -167,6 +241,8 @@ impl ClientUpdater {
             }
             state.verified_bytes = None;
             state.status.status = "downloading".into();
+            state.status.automatic = false;
+            state.status.remind = false;
             state.status.error = None;
             update
         };
@@ -272,6 +348,32 @@ impl ClientUpdater {
         }
         Ok(update)
     }
+}
+
+pub fn setup(app: &AppHandle) {
+    app.manage(ClientUpdater::new(app.package_info().version.to_string()));
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let status = handle.state::<ClientUpdater>().startup_check(&handle).await;
+        let _ = handle.emit("desktop-client-update-status", status);
+    });
+}
+
+#[tauri::command]
+pub fn defer_client_update(app: AppHandle) -> ClientUpdateStatus {
+    let status = app.state::<ClientUpdater>().later();
+    let _ = app.emit("desktop-client-update-status", &status);
+    status
+}
+
+#[tauri::command]
+pub fn ignore_client_update_version(
+    app: AppHandle,
+    version: String,
+) -> Result<ClientUpdateStatus, String> {
+    let status = app.state::<ClientUpdater>().ignore_version(&version)?;
+    let _ = app.emit("desktop-client-update-status", &status);
+    Ok(status)
 }
 
 #[tauri::command]
