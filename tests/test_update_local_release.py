@@ -72,11 +72,13 @@ class LocalReleaseCommand(unittest.TestCase):
     def test_local_candidate_and_read_only_acceptance_need_no_github_and_preserve_stable(self):
         with self.served_store() as (store, base):
             self.config(base)
-            self.local_records(base)
+            accepted = self.local_records(base)
             result = self.local('candidate', '--inventory', str(self.inventory), '--local-store', str(store),
                 env={'OSS_ACCESS_KEY_SECRET': 'ambient-secret-must-not-leak', 'GITHUB_ACTIONS': 'true'})
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(json.loads((store / 'test/accepted/stable.json').read_text())['version'], '1.1.0')
+            manifest = store / 'test/accepted/stable.json'
+            self.assertEqual(json.loads(manifest.read_text(encoding='utf-8'))['version'], '1.1.0')
+            self.assertEqual(hashlib.sha256(manifest.read_bytes()).hexdigest(), accepted['release']['manifest_sha256'])
             self.assertEqual((store / 'production/stable.json').read_bytes(), b'previous-release')
             self.assertNotIn('ambient-secret-must-not-leak', result.stdout + result.stderr)
             self.observed.clear()
@@ -91,10 +93,25 @@ class LocalReleaseCommand(unittest.TestCase):
             self.assertIs(json.loads(result.stdout)['dry_run'], True)
             self.assertEqual(self.observed, [])
 
+    def test_local_validate_reads_utf8_private_config_under_ascii_locale(self):
+        with self.served_store() as (store, base):
+            self.config(base)
+            accepted = self.local_records(base)
+            accepted['devices']['darwin-aarch64']['operator'] = '合成操作员'
+            self.acceptance_path.write_text(json.dumps(accepted, ensure_ascii=False), encoding='utf-8')
+            self.settings['native']['windows_timestamp_url'] = 'http://示例.invalid'
+            self.config_path.write_text(json.dumps(self.settings, ensure_ascii=False), encoding='utf-8')
+            result = self.local('validate', '--inventory', str(self.inventory),
+                '--acceptance', str(self.acceptance_path), '--local-store', str(store),
+                env={'PYTHONUTF8': '0', 'PYTHONCOERCECLOCALE': '0', 'LC_ALL': 'C'})
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIs(json.loads(result.stdout)['dry_run'], True)
+            self.assertEqual(self.observed, [])
+
     def test_local_publish_reads_recovery_before_advancing_stable_and_refuses_stale_or_ambiguous_current_release(self):
         with self.served_store() as (store, base):
             self.config(base)
-            self.local_records(base)
+            accepted = self.local_records(base)
             stable = store / 'production/stable.json'
             current_manifest = dict(version='1.2.0', notes='previous', platforms={target: dict(url=base + '/old', signature='old') for target in self.release['targets']})
             for previous, expected in [(json.dumps(current_manifest).encode(), 'newer'), (b'malformed', 'current production')]:
@@ -109,6 +126,7 @@ class LocalReleaseCommand(unittest.TestCase):
             result = self.local('publish', '--inventory', str(self.inventory), '--acceptance', str(self.acceptance_path), '--local-store', str(store))
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual([path for path, _ in self.observed][-2:], ['/recovery/index.html', '/production/stable.json'])
+            self.assertEqual(hashlib.sha256(stable.read_bytes()).hexdigest(), accepted['release']['manifest_sha256'])
             current = stable.read_bytes()
             self.release['notes'] = 'Changed notes at same version'
             self.save()
@@ -190,6 +208,7 @@ class LocalReleaseCommand(unittest.TestCase):
         # synthetic final app/installers; the updater signatures/verifier are real.
         adapter = self.root / 'native-adapter.py'
         adapter.write_text("import pathlib,sys,json,os\nroot=pathlib.Path(sys.argv[1]);root.mkdir(parents=True)\n"
+            "sys.stdout.buffer.write(bytes.fromhex('e69e84e5bbbae697a5e5bf97ff'))\n"
             "assert not any(k.startswith(('OSS_', 'OSSUTIL_', 'GITHUB_', 'TAURI_SIGNING_')) for k in os.environ)\n"
             "if sys.argv[2]=='darwin-aarch64':\n p=root/'Token Market.app/Contents/MacOS/Token Market';p.parent.mkdir(parents=True);p.write_bytes(b'final synthetic app');(root/'manual.dmg').write_bytes(b'manual dmg')\n"
             "else:\n [(root/name).write_bytes(b'final synthetic installer') for name in ('TokenMarket.exe','setup.exe','manual.msi')]\n"
@@ -198,7 +217,8 @@ class LocalReleaseCommand(unittest.TestCase):
         receipts = []
         for target in ('darwin-aarch64', 'windows-x86_64-nsis'):
             result = self.local('build', '--target', target, '--fixture-native-command', sys.executable, str(adapter),
-                env={'OSS_ACCESS_KEY_SECRET': 'ambient-upload-secret', 'TAURI_SIGNING_PRIVATE_KEY': 'ambient-wrong-key'})
+                env={'OSS_ACCESS_KEY_SECRET': 'ambient-upload-secret', 'TAURI_SIGNING_PRIVATE_KEY': 'ambient-wrong-key',
+                    'PYTHONUTF8': '0', 'PYTHONCOERCECLOCALE': '0', 'LC_ALL': 'C'})
             self.assertEqual(result.returncode, 0, result.stderr)
             result = json.loads(result.stdout)
             receipts.append(result['prepared_receipt'])
@@ -206,15 +226,17 @@ class LocalReleaseCommand(unittest.TestCase):
             self.assertEqual(record['provenance_kind'], 'local-native-build')
             self.assertEqual(record['source_commit'], subprocess.check_output(['git', '-C', str(source), 'rev-parse', 'HEAD'], text=True).strip())
             self.assertNotIn(private.read_text(), Path(result['build_provenance']).read_text())
-        notes = self.root / 'notes.txt'; notes.write_text('Local fixture release notes')
-        result = self.local('inventory', '--prepared', receipts[0], '--prepared', receipts[1], '--notes-file', str(notes))
+        notes = self.root / 'notes.txt'; notes.write_text('修复客户端更新，保留中文发行说明。', encoding='utf-8')
+        result = self.local('inventory', '--prepared', receipts[0], '--prepared', receipts[1], '--notes-file', str(notes),
+            env={'PYTHONUTF8': '0', 'PYTHONCOERCECLOCALE': '0', 'LC_ALL': 'C'})
         self.assertEqual(result.returncode, 0, result.stderr)
         result = json.loads(result.stdout)
         draft = json.loads(Path(result['acceptance_template']).read_text())
         self.assertTrue(all(device['actual_device'] is False for device in draft['devices'].values()))
         self.assertTrue(all(device['startup']['status'] == 'pending' for device in draft['devices'].values()))
         inventory = Path(result['inventory'])
-        collected = json.loads(inventory.read_text())
+        collected = json.loads(inventory.read_text(encoding='utf-8'))
+        self.assertEqual(collected['notes'], '修复客户端更新，保留中文发行说明。')
         self.assertEqual(set(collected['targets']), {'darwin-aarch64', 'windows-x86_64-nsis'})
         self.assertEqual({item['platform'] for item in collected['installers']}, {'darwin-aarch64', 'windows-x86_64'})
         result = self.local('candidate', '--inventory', str(inventory), '--local-store', str(store))
