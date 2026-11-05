@@ -9,6 +9,14 @@ These terms distinguish the user's client login from each tool's connection.
 The local application used to manage Agent tools, through either the terminal CLI or desktop interface. These are two interfaces to the same client identity and tool connections on a device.
 _Avoid_: Agent tool
 
+**Client Update**:
+A change to the installed version of the Token Market Client itself. Desktop client updates and CLI updates have separate delivery paths and are independent of Tool Upgrades.
+_Avoid_: Tool upgrade
+
+**Tool Upgrade**:
+A change to the version of an installed Agent Tool managed by the Token Market Client. It is distinct from updating the client and from changing a Tool Connection.
+_Avoid_: Client update, reconnect
+
 **Client Session**:
 The user's reusable login shared by the Token Market CLI and desktop interface on a device. Ending it does not end existing Tool Connections or revoke their Agent API Keys.
 _Avoid_: Agent API key, authorization code
