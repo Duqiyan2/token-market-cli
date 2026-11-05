@@ -79,3 +79,5 @@ impl Drop for ClientUpdateGuard {
 
 mod journal;
 pub use journal::{ClientUpdateJournal, ClientUpdatePhase};
+mod guardian;
+pub use guardian::{run_guardian, GuardianEnvironment, GuardianPlan, NativeProcessIdentity};
