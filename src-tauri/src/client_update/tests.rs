@@ -594,3 +594,58 @@ async fn downloading_a_startup_release_clears_automatic_reminder_metadata() {
     assert_eq!(checked.status, "ready");
     assert!(!checked.automatic && !checked.remind);
 }
+
+/// This separate release acceptance seam requires the built verifier command.
+/// Run the exact documented command after `cargo build --example verify-update-artifacts`.
+#[tokio::test]
+#[ignore = "requires built release verifier; run the documented release-distribution check"]
+async fn release_distribution_client_downloads_and_verifies_both_cli_published_targets() {
+    use std::{
+        io::BufRead,
+        process::{Command, Stdio},
+    };
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap();
+    let mut server = Command::new("python3")
+        .arg(root.join("tests/helpers/update-distribution-fixture.py"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap();
+    let stdout = server.stdout.take().unwrap();
+    let mut reader = std::io::BufReader::new(stdout);
+    let mut line = String::new();
+    reader.read_line(&mut line).unwrap();
+    assert!(
+        !line.is_empty(),
+        "fixture publisher must start before client checks"
+    );
+    let service: serde_json::Value = serde_json::from_str(&line).unwrap();
+    let app = app();
+    for target in ["darwin-aarch64", "windows-x86_64-nsis"] {
+        let executable = tempfile::tempdir().unwrap();
+        let mut updater = ClientUpdater::new("1.0.0".into());
+        updater.config.endpoint = Some(service["endpoint"].as_str().unwrap().into());
+        updater.config.public_key = Some(PUBLIC_KEY.trim().into());
+        updater.config.target = Some(target.into());
+        updater.config.allow_loopback_http = true;
+        updater.config.executable_path = Some(
+            executable
+                .path()
+                .join("Token Market.app/Contents/MacOS/Token Market"),
+        );
+        let checked = updater.check(app.handle()).await;
+        assert_eq!(checked.status, "available", "{target}: {checked:?}");
+        let downloaded = updater.download(app.handle(), "1.1.0").await.unwrap();
+        assert_eq!(downloaded.status, "ready", "{target}: {downloaded:?}");
+        assert_eq!(
+            std::fs::read_dir(executable.path()).unwrap().count(),
+            0,
+            "release verification must never install"
+        );
+    }
+    server.stdin.take().unwrap().write_all(b"stop\n").unwrap();
+    assert!(server.wait().unwrap().success());
+}
