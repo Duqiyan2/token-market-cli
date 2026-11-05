@@ -55,13 +55,19 @@ impl Document {
 impl HarnessConfig {
     pub fn credential(&self, gateway: &str) -> Option<String> {
         let entries = self.profile.value.as_array()?;
-        let route = entries
+        let providers = entries
             .iter()
             .find(|entry| entry["id"] == "llm-pi-ai")?
-            .pointer("/config/providers/tokenmarket")?;
-        if route["baseURL"].as_str()?.trim_end_matches('/')
-            != format!("{}/v1", gateway.trim_end_matches('/'))
-        {
+            .pointer("/config/providers")?
+            .as_object()?;
+        let expected = format!("{}/v1", gateway.trim_end_matches('/'));
+        if !providers.iter().any(|(id, route)| {
+            crate::model_catalog::harness_managed_provider(id)
+                && route["apiKeyEnv"] == "TOKEN_MARKET_API_KEY"
+                && route["baseURL"]
+                    .as_str()
+                    .is_some_and(|url| url.trim_end_matches('/') == expected)
+        }) {
             return None;
         }
         self.credentials
@@ -95,21 +101,24 @@ impl HarnessConfig {
             bail!("Harness profile 存在重复 llm-pi-ai 条目，请先修复")
         }
         if let Some(row) = matches.first() {
-            for pointer in [
-                "/config",
-                "/config/providers",
-                "/config/providers/tokenmarket",
-            ] {
+            for pointer in ["/config", "/config/providers"] {
                 if row.pointer(pointer).is_some_and(|v| !v.is_object()) {
                     bail!("Harness provider 配置结构无效")
                 }
             }
-            // Explicit model lists and modelOverrides are mutually exclusive in Harness.
-            if row
-                .pointer("/config/providers/tokenmarket/modelOverrides")
-                .is_some()
-            {
-                bail!("Harness Token Market 路由已有 modelOverrides，请先确认路由配置")
+            if let Some(providers) = row.pointer("/config/providers").and_then(Value::as_object) {
+                for (_, provider) in providers
+                    .iter()
+                    .filter(|(id, _)| crate::model_catalog::harness_managed_provider(id))
+                {
+                    if !provider.is_object() {
+                        bail!("Harness provider 配置结构无效")
+                    }
+                    // Explicit model lists and modelOverrides are mutually exclusive in Harness.
+                    if provider.get("modelOverrides").is_some() {
+                        bail!("Harness Token Market 路由已有 modelOverrides，请先确认路由配置")
+                    }
+                }
             }
         }
         let credentials = Document::read(home.join(".credentials.yaml"), json!({}))?;
@@ -152,11 +161,7 @@ impl HarnessConfig {
         };
         let entry = &mut rows[index];
         let prefix = "/@id=llm-pi-ai";
-        for pointer in [
-            "/config",
-            "/config/providers",
-            "/config/providers/tokenmarket",
-        ] {
+        for pointer in ["/config", "/config/providers"] {
             if entry.pointer(pointer).is_none() {
                 let (parent, leaf) = pointer.rsplit_once('/').unwrap();
                 entry
@@ -168,30 +173,84 @@ impl HarnessConfig {
                 self.profile.containers.push(format!("{prefix}{pointer}"));
             }
         }
-        let route = entry
-            .pointer_mut("/config/providers/tokenmarket")
+        let providers = entry
+            .pointer_mut("/config/providers")
             .unwrap()
             .as_object_mut()
             .unwrap();
-        let model_rows: Vec<Value> = models
+        let expected = format!("{}/v1", gateway.trim_end_matches('/'));
+        let desired: Vec<_> = models
             .iter()
-            .map(crate::model_catalog::harness_model)
+            .map(|model| {
+                (
+                    crate::model_catalog::harness_provider_id(model["id"].as_str().unwrap()),
+                    crate::model_catalog::harness_provider(model, gateway),
+                )
+            })
             .collect();
-        for (name, applied) in [
-            ("api", json!("openai-completions")),
-            (
+        // Retire the old shared provider and stale model providers in the same
+        // transaction. Leave unrelated fields and other gateway environments alone.
+        let obsolete: Vec<_> = providers
+            .iter()
+            .filter(|(id, route)| {
+                crate::model_catalog::harness_managed_provider(id)
+                    && !desired.iter().any(|(wanted, _)| wanted == *id)
+                    && route["baseURL"]
+                        .as_str()
+                        .is_some_and(|url| url.trim_end_matches('/') == expected)
+                    && route["apiKeyEnv"] == "TOKEN_MARKET_API_KEY"
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in obsolete {
+            let route = providers.get_mut(&id).unwrap().as_object_mut().unwrap();
+            for name in [
+                "displayName",
+                "api",
                 "baseURL",
-                json!(format!("{}/v1", gateway.trim_end_matches('/'))),
-            ),
-            ("apiKeyEnv", json!("TOKEN_MARKET_API_KEY")),
-            ("models", json!(model_rows)),
-        ] {
-            self.profile.fields.push(FieldReceipt {
-                retired: false,
-                pointer: format!("{prefix}/config/providers/tokenmarket/{name}"),
-                before: route.insert(name.into(), applied.clone()),
-                applied,
-            });
+                "apiKeyEnv",
+                "models",
+                "reasoning",
+            ] {
+                if let Some(applied) = route.remove(name) {
+                    self.profile.fields.push(FieldReceipt {
+                        retired: true,
+                        pointer: format!("{prefix}/config/providers/{id}/{name}"),
+                        before: None,
+                        applied,
+                    });
+                }
+            }
+            if route.is_empty() {
+                providers.remove(&id);
+            }
+        }
+        for (id, provider) in desired {
+            let pointer = format!("{prefix}/config/providers/{id}");
+            if !providers.contains_key(&id) {
+                providers.insert(id.clone(), json!({}));
+                self.profile.containers.push(pointer.clone());
+            }
+            let route = providers.get_mut(&id).unwrap().as_object_mut().unwrap();
+            for (name, applied) in provider.as_object().unwrap() {
+                self.profile.fields.push(FieldReceipt {
+                    retired: false,
+                    pointer: format!("{pointer}/{name}"),
+                    before: route.insert(name.clone(), applied.clone()),
+                    applied: applied.clone(),
+                });
+            }
+            // A fresh adoption may have a default for an older capability map.
+            if provider.get("reasoning").is_none() {
+                if let Some(applied) = route.remove("reasoning") {
+                    self.profile.fields.push(FieldReceipt {
+                        retired: true,
+                        pointer: format!("{pointer}/reasoning"),
+                        before: None,
+                        applied,
+                    });
+                }
+            }
         }
         if self.credentials.before.is_none() {
             for (name, applied) in [("version", json!(1)), ("records", json!({}))] {

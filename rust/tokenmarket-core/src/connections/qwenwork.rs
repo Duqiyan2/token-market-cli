@@ -118,10 +118,12 @@ impl QwenWorkConfig {
             );
             let pointer = format!("/models/{model_key}");
             let before: Option<Value> = None;
-            let context = model["context_window_tokens"]
-                .as_i64()
-                .filter(|v| *v > 0)
-                .unwrap_or(0);
+            let window = model["context_window_tokens"].as_i64().filter(|v| *v > 0);
+            let input = model["max_input_tokens"].as_i64().filter(|v| *v > 0);
+            let context = match (window, input) {
+                (Some(window), Some(input)) => window.min(input),
+                (window, input) => window.or(input).unwrap_or(0),
+            };
             let output = model["max_output_tokens"]
                 .as_i64()
                 .filter(|v| *v > 0)

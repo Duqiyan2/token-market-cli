@@ -142,6 +142,57 @@ pub(super) fn apply(
         if !capabilities.iter().any(|cap| cap == "tool_use") {
             capabilities.push(json!("tool_use"));
         }
+        if let Some(supported) = model["supports_reasoning"].as_bool() {
+            capabilities.retain(|cap| cap != "thinking" && cap != "always_thinking");
+            if supported {
+                capabilities.push(json!("thinking"));
+                if crate::model_projection::thinking_mode(model) == "always" {
+                    capabilities.push(json!("always_thinking"));
+                }
+            }
+        }
+        if let Some(input) = model["input_modalities"]
+            .as_array()
+            .filter(|a| !a.is_empty())
+        {
+            for (modality, tag) in [
+                ("image", "image_in"),
+                ("video", "video_in"),
+                ("audio", "audio_in"),
+            ] {
+                capabilities.retain(|cap| cap != tag);
+                if input.iter().any(|v| v == modality) {
+                    capabilities.push(json!(tag));
+                }
+            }
+        }
+        if let Some(input) = model["max_input_tokens"]
+            .as_u64()
+            .filter(|n| *n > 0 && *n <= i64::MAX as u64)
+        {
+            document.set(
+                &["models", &alias, "max_input_size"],
+                json!(input.min(context)),
+            )?;
+        }
+        if model["reasoning_efforts"].is_object()
+            && crate::model_catalog::efforts(&model["reasoning_efforts"])
+        {
+            let levels = crate::model_projection::effort_levels(model);
+            document.set(
+                &["models", &alias, "support_efforts"],
+                json!(levels
+                    .iter()
+                    .map(|l| model["reasoning_efforts"][*l].clone())
+                    .collect::<Vec<_>>()),
+            )?;
+            if let Some(default) = crate::model_projection::default_effort(model) {
+                document.set(&["models", &alias, "default_effort"], json!(default))?;
+            }
+            if let Some(off) = model["reasoning_efforts"]["off"].as_str() {
+                document.set(&["models", &alias, "off_effort"], json!(off))?;
+            }
+        }
         for (field, value) in [
             ("provider", json!("tokenmarket")),
             ("model", json!(id)),

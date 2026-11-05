@@ -130,7 +130,10 @@ pub(super) fn retire_removed_fields(
             let bootstrap = bootstrap_field(record.tool, &old.path, &field.pointer);
             if !field.retired
                 && !bootstrap
-                && !file.fields.iter().any(|new| new.pointer == field.pointer)
+                && !file
+                    .fields
+                    .iter()
+                    .any(|new| !new.retired && new.pointer == field.pointer)
             {
                 set(&mut value, &field.pointer, field.before.clone())?;
                 touched.push(field.pointer.clone());

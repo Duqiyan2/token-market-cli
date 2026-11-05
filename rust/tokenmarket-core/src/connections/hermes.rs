@@ -154,6 +154,35 @@ pub(super) fn apply(
     }
     for model in models {
         let id = model["id"].as_str().context("模型目录缺少模型 ID")?;
+        if let Some(input) = model["input_modalities"]
+            .as_array()
+            .filter(|a| !a.is_empty())
+        {
+            document.set(
+                &["providers", "tokenmarket", "models", id, "supports_vision"],
+                json!(input.iter().any(|v| v == "image")),
+            )?;
+        }
+        let mut capabilities = json!({"supports_tools":true});
+        if let Some(supported) = model["supports_reasoning"].as_bool() {
+            capabilities["supports_reasoning"] = json!(supported);
+        }
+        if let Some(window) = model["context_window_tokens"].as_u64().filter(|n| *n > 0) {
+            capabilities["context_window"] = json!(window);
+        }
+        if let Some(input) = model["input_modalities"]
+            .as_array()
+            .filter(|a| !a.is_empty())
+        {
+            capabilities["supports_vision"] = json!(input.iter().any(|v| v == "image"));
+        }
+        document.set_metadata(&["model_overrides", "tokenmarket", id], &capabilities)?;
+        if let Some(effort) = crate::model_projection::default_effort(model) {
+            document.set_metadata(
+                &["agent", "reasoning_overrides", &format!("tokenmarket/{id}")],
+                &json!({"enabled":true,"effort":effort}),
+            )?;
+        }
         // Hermes treats null context_length as unspecified and auto-detects it.
         // Owning this leaf registers metadata-free rows without owning their maps.
         let context = model["context_window_tokens"]

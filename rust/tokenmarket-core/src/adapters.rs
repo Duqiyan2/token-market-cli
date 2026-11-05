@@ -436,7 +436,14 @@ impl Adapter {
                 let provider = patch
                     .iter()
                     .find(|item| item.get("id").and_then(Value::as_str) == Some("llm-pi-ai"))
-                    .and_then(|item| item.pointer("/config/providers/tokenmarket"));
+                    .and_then(|item| item.pointer("/config/providers"))
+                    .and_then(Value::as_object)
+                    .and_then(|providers| {
+                        providers
+                            .iter()
+                            .find(|(id, _)| crate::model_catalog::harness_managed_provider(id))
+                            .map(|(_, provider)| provider)
+                    });
                 let Some(provider) = provider else {
                     return Ok(None);
                 };
@@ -450,7 +457,9 @@ impl Adapter {
                 Ok(Some(ToolConfig {
                     base_url: base_url.into(),
                     api_key: credentials
-                        .get("TOKEN_MARKET_API_KEY")
+                        .get("refs")
+                        .and_then(|refs| refs.get("TOKEN_MARKET_API_KEY"))
+                        .or_else(|| credentials.get("TOKEN_MARKET_API_KEY"))
                         .and_then(Value::as_str)
                         .unwrap_or("")
                         .into(),
@@ -536,6 +545,19 @@ impl Adapter {
                 }
                 current["env"]["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] =
                     json!(config.context_window_tokens.unwrap_or(200_000).to_string());
+                let metadata = crate::model_projection::settings(
+                    ToolId::ClaudeCode,
+                    &json!({"id":config.model,"context_window_tokens":config.context_window_tokens}),
+                );
+                for (name, value) in metadata.as_object().unwrap() {
+                    if name == "env" {
+                        for (name, value) in value.as_object().unwrap() {
+                            current["env"][name] = value.clone();
+                        }
+                    } else {
+                        current[name] = value.clone();
+                    }
+                }
                 write_private_json(&config_path, &current)?;
             }
             ToolId::Codex => {
@@ -551,6 +573,17 @@ impl Adapter {
                     toml_edit::value(config.api_key.as_str());
                 document["model_providers"]["tokenmarket"]["wire_api"] =
                     toml_edit::value("responses");
+                let metadata = crate::model_projection::settings(
+                    ToolId::Codex,
+                    &json!({"id":config.model,"context_window_tokens":config.context_window_tokens}),
+                );
+                for (name, value) in metadata.as_object().unwrap() {
+                    document[name] = if let Some(value) = value.as_str() {
+                        toml_edit::value(value)
+                    } else {
+                        toml_edit::value(value.as_i64().unwrap())
+                    };
+                }
                 write_private_file(&config_path, &format!("{document}\n"))?;
             }
             ToolId::WorkBuddy => {
@@ -659,20 +692,19 @@ fn write_deepseek_harness(
         .into_iter()
         .filter(|item| item.get("id").and_then(Value::as_str) != Some("llm-pi-ai"))
         .collect();
+    let providers: Map<String, Value> = ["glm-5.3", "deepseek-v4.1-flash"]
+        .into_iter()
+        .map(|id| {
+            (
+                crate::model_catalog::harness_provider_id(id),
+                crate::model_catalog::harness_provider(&json!({"id":id}), &config.base_url),
+            )
+        })
+        .collect();
     next.push(json!({
         "id": "llm-pi-ai",
         "config": {
-            "providers": {
-                "tokenmarket": {
-                    "apiKeyEnv": "TOKEN_MARKET_API_KEY",
-                    "api": "openai-completions",
-                    "baseURL": format!("{}/v1", config.base_url.trim_end_matches('/')),
-                    "models": [
-                        crate::model_catalog::harness_model(&json!({"id": "glm-5.3"})),
-                        crate::model_catalog::harness_model(&json!({"id": "deepseek-v4.1-flash"}))
-                    ]
-                }
-            }
+            "providers": providers
         },
         "tokenMarketSetup": {"setupId": context.setup_id, "keyId": context.key_id}
     }));

@@ -23,6 +23,19 @@ pub(super) fn escaped(value: &str) -> String {
 }
 
 impl ProviderDocument {
+    /// Own individual projected leaves, preserving tool/user options beside them.
+    pub fn set_metadata(&mut self, path: &[&str], metadata: &Value) -> Result<()> {
+        for (name, value) in metadata.as_object().context("模型元数据必须是对象")? {
+            let mut child = path.to_vec();
+            child.push(name);
+            if value.is_object() {
+                self.set_metadata(&child, value)?;
+            } else {
+                self.set(&child, value.clone())?;
+            }
+        }
+        Ok(())
+    }
     pub fn set(&mut self, path: &[&str], applied: Value) -> Result<()> {
         let mut value = &mut self.value;
         let mut pointer = String::new();
@@ -97,14 +110,13 @@ impl ProviderDocument {
         let row = rows[index]
             .as_object_mut()
             .context("工具模型配置必须是对象")?;
-        for (name, applied) in fields {
-            self.fields.push(FieldReceipt {
-                pointer: format!("{selector}/{}", escaped(name)),
-                before: row.insert(name.clone(), applied.clone()),
-                applied: applied.clone(),
-                retired: false,
-            });
-        }
+        set_row_metadata(
+            row,
+            &selector,
+            fields,
+            &mut self.fields,
+            &mut self.created_containers,
+        )?;
         Ok(())
     }
 
@@ -126,6 +138,38 @@ impl ProviderDocument {
             protocol: "OPENAI_CHAT_COMPLETIONS",
         })
     }
+}
+
+pub(super) fn set_row_metadata(
+    row: &mut serde_json::Map<String, Value>,
+    prefix: &str,
+    metadata: &serde_json::Map<String, Value>,
+    fields: &mut Vec<FieldReceipt>,
+    created: &mut Vec<String>,
+) -> Result<()> {
+    for (name, applied) in metadata {
+        let pointer = format!("{prefix}/{}", escaped(name));
+        if let Some(children) = applied.as_object() {
+            if !row.contains_key(name) {
+                row.insert(name.clone(), json!({}));
+                created.push(pointer.clone());
+            }
+            let target = row
+                .get_mut(name)
+                .unwrap()
+                .as_object_mut()
+                .context("工具模型元数据父级必须是对象")?;
+            set_row_metadata(target, &pointer, children, fields, created)?;
+        } else {
+            fields.push(FieldReceipt {
+                pointer,
+                before: row.insert(name.clone(), applied.clone()),
+                applied: applied.clone(),
+                retired: false,
+            });
+        }
+    }
+    Ok(())
 }
 
 impl ProviderConfig {
@@ -221,5 +265,137 @@ impl ProviderConfig {
             _ => bail!("此工具没有受支持的 provider 配置"),
         }
         self.document.finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn document(path: &str) -> ProviderDocument {
+        ProviderDocument {
+            value: json!({}),
+            path: PathBuf::from(path),
+            original: None,
+            fields: vec![],
+            created_containers: vec![],
+        }
+    }
+
+    #[test]
+    fn provider_adapters_write_native_capabilities_and_receipts() {
+        let glm = crate::model_catalog::complete_metadata(
+            &json!({"id":"glm-5.3","max_input_tokens":128000,"max_output_tokens":8192,"input_modalities":["text","image"]}),
+        );
+        let kimi = crate::model_catalog::complete_metadata(&json!({"id":"kimi-k2.6"}));
+        let fixed = crate::model_catalog::complete_metadata(&json!({"id":"minimax-m2.5"}));
+        let models = [glm, kimi, fixed];
+        let mut doc = document("config.toml");
+        super::super::kimi::apply(&mut doc, "https://fixture.invalid", "fixture-key", &models)
+            .unwrap();
+        assert_eq!(
+            doc.value["models"]["tokenmarket/glm-5.3"]["support_efforts"],
+            json!(["low", "high", "max"])
+        );
+        assert_eq!(
+            doc.value["models"]["tokenmarket/glm-5.3"]["default_effort"],
+            "high"
+        );
+        assert_eq!(
+            doc.value["models"]["tokenmarket/glm-5.3"]["max_input_size"],
+            128000
+        );
+        assert!(doc.value["models"]["tokenmarket/glm-5.3"]["capabilities"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("always_thinking")));
+        assert!(
+            !doc.value["models"]["tokenmarket/kimi-k2.6"]["capabilities"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("always_thinking"))
+        );
+        assert_eq!(
+            doc.value["models"]["tokenmarket/kimi-k2.6"]["support_efforts"],
+            json!([])
+        );
+        let prepared = doc.finish().unwrap();
+        assert!(std::str::from_utf8(&prepared.bytes)
+            .unwrap()
+            .contains("support_efforts"));
+        assert!(prepared
+            .fields
+            .iter()
+            .any(|f| f.pointer == "/models/tokenmarket~1glm-5.3/max_input_size"));
+
+        let mut doc = document("config.yaml");
+        super::super::minimax::apply(&mut doc, "https://fixture.invalid", "fixture-key", &models)
+            .unwrap();
+        assert_eq!(
+            doc.value["custom_provider"]["tokenmarket"]["models"]["glm-5.3"]["thinking"]
+                ["effortOptions"],
+            json!(["low", "high", "max"])
+        );
+        assert_eq!(
+            doc.value["custom_provider"]["tokenmarket"]["models"]["kimi-k2.6"]["thinking_config"]
+                ["mode"],
+            "switchable"
+        );
+        assert_eq!(
+            doc.value["custom_provider"]["tokenmarket"]["models"]["minimax-m2.5"]
+                ["thinking_config"]["mode"],
+            "forced_on"
+        );
+        assert!(doc.finish().is_ok());
+
+        let mut doc = document("config.toml");
+        super::super::grok::apply(&mut doc, "https://fixture.invalid", "fixture-key", &models)
+            .unwrap();
+        assert_eq!(
+            doc.value["model"]["tokenmarket/glm-5.3"]["reasoning_effort"],
+            "high"
+        );
+        assert_eq!(
+            doc.value["model"]["tokenmarket/glm-5.3"]["reasoning_efforts"][2]["value"],
+            "max"
+        );
+        assert_eq!(
+            doc.value["model"]["tokenmarket/kimi-k2.6"]["supports_reasoning_effort"],
+            false
+        );
+        assert!(doc.finish().is_ok());
+
+        let mut doc = document("config.yaml");
+        super::super::hermes::apply(&mut doc, "https://fixture.invalid", "fixture-key", &models)
+            .unwrap();
+        assert_eq!(
+            doc.value["providers"]["tokenmarket"]["models"]["glm-5.3"]["supports_vision"],
+            true
+        );
+        assert_eq!(
+            doc.value["model_overrides"]["tokenmarket"]["glm-5.3"]["supports_reasoning"],
+            true
+        );
+        assert_eq!(
+            doc.value["agent"]["reasoning_overrides"]["tokenmarket/glm-5.3"]["effort"],
+            "high"
+        );
+        assert!(doc.finish().is_ok());
+    }
+
+    #[test]
+    fn array_model_metadata_owns_leaves_and_preserves_unmanaged_compatibility() {
+        let mut doc = document("models.json");
+        doc.value = json!({"providers":{"tokenmarket":{"models":[{"id":"glm-5.3","compat":{"custom":"keep"}}]}}});
+        let model = crate::model_catalog::complete_metadata(&json!({"id":"glm-5.3"}));
+        super::super::pi::apply(&mut doc, "https://fixture.invalid", "fixture-key", &[model])
+            .unwrap();
+        assert_eq!(
+            doc.value["providers"]["tokenmarket"]["models"][0]["compat"]["custom"],
+            "keep"
+        );
+        assert!(doc.fields.iter().any(|f| f.pointer
+            == "/providers/tokenmarket/models/@id=glm-5.3/compat/supportsReasoningEffort"));
+        assert!(!doc.fields.iter().any(|f| f.pointer.ends_with("/compat")));
     }
 }

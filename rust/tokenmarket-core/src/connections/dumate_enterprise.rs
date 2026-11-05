@@ -99,7 +99,8 @@ impl EnterpriseConfig {
                     id,
                     context,
                     output,
-                    model["input_modalities"]
+                    model["input_modalities"],
+                    crate::model_projection::thinking_mode(model)
                 ]))?)
             );
             let model_key = format!("personal:tokenmarket-{}-{}", &scope[..12], &digest[..12]);
@@ -118,10 +119,10 @@ impl EnterpriseConfig {
             // Do not own dynamic probe results. A new credential/gateway has a new
             // modelKey and normalizes to untested; identical reconnects keep real checks.
             let values = json!({
-                "displayName":format!("Token Market · {id}"),
+                "displayName":format!("Token Market · {}",model["display_name"].as_str().filter(|s| !s.is_empty()).unwrap_or(id)),
                 "modelID":id, "protocol":"openai_chat_completions",
                 "baseURL":format!("{}/v1",gateway.trim_end_matches('/')), "apiKey":key,
-                "modelCategory":"LLM", "thinkingMode":"unknown",
+                "modelCategory":"LLM", "thinkingMode":crate::model_projection::thinking_mode(model),
                 "supportsImageUnderstanding": model["input_modalities"].as_array().is_some_and(|v| v.iter().any(|s| s == "image")),
                 "contextTokens":context, "outputTokens":output
             });

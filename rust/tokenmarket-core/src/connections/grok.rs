@@ -105,6 +105,38 @@ pub(super) fn apply(
         ] {
             document.set(&["model", &alias, field], applied)?;
         }
+        let levels = crate::model_projection::effort_levels(model);
+        if model["supports_reasoning"].is_boolean() {
+            document.set(
+                &["model", &alias, "supports_reasoning_effort"],
+                json!(!levels.is_empty()),
+            )?;
+            let default = crate::model_projection::default_effort(model);
+            let mut options: Vec<Value> = levels.iter().filter_map(|level| {
+                let wire = model["reasoning_efforts"][*level].as_str()?;
+                ["none","minimal","low","medium","high","xhigh","max"].contains(&wire).then(|| json!({"id":level,"value":wire,"label":level,"default":Some(wire)==default}))
+            }).collect();
+            if let Some(off) = model["reasoning_efforts"]["off"]
+                .as_str()
+                .filter(|s| *s == "none")
+            {
+                options.insert(0, json!({"id":"off","value":off,"label":"Off"}));
+            }
+            document.set(&["model", &alias, "reasoning_efforts"], json!(options))?;
+            if let Some(default) = default.filter(|s| {
+                ["none", "minimal", "low", "medium", "high", "xhigh", "max"].contains(s)
+            }) {
+                document.set(&["model", &alias, "reasoning_effort"], json!(default))?;
+            }
+        }
+        for (field, maximum) in [("temperature", 2.0), ("top_p", 1.0)] {
+            if let Some(value) = model[field]
+                .as_f64()
+                .filter(|v| v.is_finite() && *v >= 0.0 && *v <= maximum)
+            {
+                document.set(&["model", &alias, field], json!(value))?;
+            }
+        }
         for (source, field) in [
             ("context_window_tokens", "context_window"),
             ("max_output_tokens", "max_completion_tokens"),

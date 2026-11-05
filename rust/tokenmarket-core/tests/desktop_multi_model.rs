@@ -232,9 +232,9 @@ async fn workbuddy_imports_all_compatible_models_and_restores_only_owned_fields_
         );
         assert_eq!(
             rows[1],
-            json!({"id":"vendor/zeta~1","name":"Token Market · Zeta","url":format!("{url}/v1/chat/completions"),"apiKey":"sk-fixture","vendor":"Token Market","useCustomProtocol":true,"supportsToolCall":true})
+            json!({"id":"vendor/zeta~1","name":"Token Market","url":format!("{url}/v1/chat/completions"),"apiKey":"sk-fixture","vendor":"Token Market","useCustomProtocol":true,"supportsToolCall":true})
         );
-        assert_eq!(rows[2]["name"], "Token Market · alpha");
+        assert_eq!(rows[2]["name"], "Token Market");
         assert_eq!(rows[2]["supportsToolCall"], true);
         assert_eq!(rows[2]["maxInputTokens"], 65536);
         assert!(rows[2].get("defaultEffort").is_none());
@@ -415,7 +415,7 @@ async fn openclaw_preserves_selection_policy_and_other_providers_through_connect
     let route = &applied["models"]["providers"]["tokenmarket"];
     assert_eq!(
         *route,
-        json!({"custom":"keep","baseUrl":format!("{url}/v1"),"apiKey":"sk-fixture","api":"openai-completions","models":[{"id":"zeta","name":"zeta"},{"id":"alpha","name":"Alpha","contextWindow":32768,"maxTokens":4096,"input":["text","image"]}]})
+        json!({"custom":"keep","baseUrl":format!("{url}/v1"),"apiKey":"sk-fixture","api":"openai-completions","models":[{"id":"zeta","name":"zeta","compat":{"supportsTools":true}},{"id":"alpha","name":"Alpha","contextWindow":32768,"maxTokens":4096,"input":["text","image"],"compat":{"supportsTools":true}}]})
     );
     applied["models"]["providers"]["tokenmarket"]["later"] = json!("keep");
     applied["models"]["providers"]["other"]["later"] = json!(true);
@@ -436,7 +436,7 @@ async fn openclaw_preserves_selection_policy_and_other_providers_through_connect
 }
 
 #[tokio::test]
-async fn opencode_imports_provider_map_without_changing_defaults_or_fabricating_partial_limits() {
+async fn opencode_imports_each_known_limit_without_changing_defaults() {
     use tokenmarket_core::connections::DisconnectRequest;
     let root = tempdir().unwrap();
     let inventory = inventory(root.path());
@@ -459,7 +459,7 @@ async fn opencode_imports_provider_map_without_changing_defaults_or_fabricating_
     let route = &applied["provider"]["tokenmarket"];
     assert_eq!(
         *route,
-        json!({"npm":"@ai-sdk/openai-compatible","name":"Token Market","options":{"timeout":60000,"baseURL":format!("{url}/v1"),"apiKey":"sk-fixture"},"models":{"manual":{"name":"Manual"},"vendor/zeta":{"name":"vendor/zeta"},"alpha":{"name":"Alpha","limit":{"context":32768,"output":4096}}},"custom":true})
+        json!({"npm":"@ai-sdk/openai-compatible","name":"Token Market","options":{"timeout":60000,"baseURL":format!("{url}/v1"),"apiKey":"sk-fixture"},"models":{"manual":{"name":"Manual"},"vendor/zeta":{"name":"vendor/zeta","limit":{"context":65536},"tool_call":true,"reasoning_options":[]},"alpha":{"name":"Alpha","limit":{"context":32768,"output":4096},"tool_call":true,"reasoning_options":[]}},"custom":true})
     );
     applied["provider"]["tokenmarket"]["models"]["alpha"]["later"] = json!(true);
     applied["provider"]["tokenmarket"]["options"]["later"] = json!(true);
@@ -979,4 +979,79 @@ async fn new_opencode_jsonc_keeps_a_later_comment_when_disconnect_removes_all_ma
     );
     assert!(!path.with_extension("json").exists());
     server.await.unwrap();
+}
+
+#[tokio::test]
+async fn capability_import_reconnect_and_restore_preserve_nested_user_fields() {
+    use tokenmarket_core::connections::DisconnectRequest;
+    for tool in [ToolId::OpenClaw, ToolId::OpenCode] {
+        let root = tempdir().unwrap();
+        let inventory = inventory(root.path());
+        let path = root.path().join("models.json");
+        let original = if tool == ToolId::OpenClaw {
+            json!({"models":{"providers":{"tokenmarket":{"models":[{"id":"glm-5.3","name":"Manual","compat":{"supportsStore":true,"custom":"keep"}}]}}}})
+        } else {
+            json!({"provider":{"tokenmarket":{"models":{"glm-5.3":{"name":"Manual","limit":{"context":1000,"custom":"keep"}}}}}})
+        };
+        std::fs::write(&path, serde_json::to_vec(&original).unwrap()).unwrap();
+        let rich = json!({"data":[{"id":"glm-5.3","model_types":["TEXT_GENERATION"],"max_input_tokens":128000,"max_output_tokens":8192,"input_modalities":["text","image"]},{"id":"custom","model_types":["TEXT_GENERATION"],"reasoning_efforts":{"high":"high"}}]});
+        let disabled = json!({"data":[{"id":"glm-5.3","model_types":["TEXT_GENERATION"],"supports_reasoning":false}]});
+        let (url, server) = platform_sequence(vec![rich, disabled], 3).await;
+        let manager = support::manager(root.path().join("state"), url.clone(), url);
+        manager
+            .connect(context(), tool, &inventory, path.clone())
+            .await
+            .unwrap();
+        let mut applied = read(&path);
+        let row = if tool == ToolId::OpenClaw {
+            &mut applied["models"]["providers"]["tokenmarket"]["models"][0]
+        } else {
+            &mut applied["provider"]["tokenmarket"]["models"]["glm-5.3"]
+        };
+        assert_eq!(row["reasoning"], true);
+        if tool == ToolId::OpenClaw {
+            assert_eq!(row["maxTokens"], 8192);
+            assert_eq!(row["thinkingLevelMap"]["max"], "max");
+            assert_eq!(row["compat"]["custom"], "keep");
+            row["compat"]["later"] = json!(true);
+        } else {
+            assert_eq!(row["limit"]["input"], 128000);
+            assert_eq!(row["limit"]["output"], 8192);
+            assert_eq!(
+                row["reasoning_options"],
+                json!([{"type":"effort","values":["low","high","max"]}])
+            );
+            row["limit"]["later"] = json!(true);
+        }
+        std::fs::write(&path, serde_json::to_vec(&applied).unwrap()).unwrap();
+        manager
+            .reconnect(context(), tool, "9001", &inventory, path.clone())
+            .await
+            .unwrap();
+        let applied = read(&path);
+        let row = if tool == ToolId::OpenClaw {
+            &applied["models"]["providers"]["tokenmarket"]["models"][0]
+        } else {
+            &applied["provider"]["tokenmarket"]["models"]["glm-5.3"]
+        };
+        assert_eq!(row["reasoning"], false);
+        assert!(row.get("thinkingLevelMap").is_none());
+        if tool == ToolId::OpenCode {
+            assert_eq!(row["reasoning_options"], json!([]));
+        }
+        manager
+            .disconnect(tool, "9001", None, DisconnectRequest::default())
+            .await
+            .unwrap();
+        let mut expected = original;
+        if tool == ToolId::OpenClaw {
+            expected["models"]["providers"]["tokenmarket"]["models"][0]["compat"]["later"] =
+                json!(true);
+        } else {
+            expected["provider"]["tokenmarket"]["models"]["glm-5.3"]["limit"]["later"] =
+                json!(true);
+        }
+        assert_eq!(read(&path), expected);
+        server.await.unwrap();
+    }
 }

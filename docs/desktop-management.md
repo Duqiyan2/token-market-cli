@@ -19,10 +19,11 @@ stop connection without changing the configuration.
 
 Missing model metadata is supplemented from the bundled [model capability
 catalogue](model-capabilities.md), while valid server values retain priority.
-Harness also receives per-model reasoning controls and protocol compatibility.
+Harness also receives per-model reasoning controls and protocol compatibility. Each model has its own provider, named `Token Market:model name` with an ASCII colon, and a supported default reasoning level when known. Reconnection migrates the old shared provider for the same gateway and retires unavailable model providers.
 
-WorkBuddy displays imported models as `Token Market · <display name>` (falling
-back to the model ID); API requests keep the original model ID. CLI and desktop
+WorkBuddy renders custom models as `name:id`. Imported rows use `name: "Token Market"`,
+so the picker shows `Token Market:glm-5.3` without repeating the model name;
+API requests keep the original model ID. CLI and desktop
 share the WorkBuddy capability projection: input/context and output limits,
 tool calls, image input, reasoning support, always-on reasoning, permitted
 efforts and default effort. See the [field mapping](model-capabilities.md#workbuddy).

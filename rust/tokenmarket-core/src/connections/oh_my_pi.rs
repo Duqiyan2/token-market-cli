@@ -313,7 +313,12 @@ pub(super) fn apply(
     for model in models {
         let id = model["id"].as_str().context("模型目录缺少 ID")?;
         let mut metadata = json!({"name":model["display_name"].as_str().filter(|v|!v.is_empty()).unwrap_or(id),"api":"openai-completions","baseUrl":format!("{}/v1",gateway.trim_end_matches('/'))});
-        super::model_plan::project_metadata(model, &mut metadata);
+        metadata.as_object_mut().unwrap().extend(
+            crate::model_projection::settings(crate::ToolId::OhMyPi, model)
+                .as_object()
+                .unwrap()
+                .clone(),
+        );
         document.set_model_fields(
             &["providers", "tokenmarket", "models"],
             id,

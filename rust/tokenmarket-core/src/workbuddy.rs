@@ -3,14 +3,11 @@ use serde_json::{json, Value};
 
 pub(crate) fn model_settings(model: &Value) -> Value {
     let model = crate::model_catalog::complete_metadata(model);
-    let id = model["id"].as_str().unwrap_or_default();
-    let name = model["display_name"]
-        .as_str()
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or(id);
     // The connection selector admits TEXT_GENERATION models, our Agent models.
+    // WorkBuddy renders custom models as name:id. Keep the provider label here
+    // so the picker does not repeat the model ID already appended by WorkBuddy.
     let mut settings = json!({
-        "name": format!("Token Market · {name}"),
+        "name": "Token Market",
         "supportsToolCall": true,
     });
     let input = model["max_input_tokens"].as_u64().filter(|n| *n > 0);
@@ -75,7 +72,7 @@ mod tests {
         let glm = model_settings(
             &json!({"id":"glm-5.3", "max_input_tokens":128000, "max_output_tokens":8192, "input_modalities":["text","image"]}),
         );
-        assert_eq!(glm["name"], "Token Market · GLM-5.3");
+        assert_eq!(glm["name"], "Token Market");
         assert_eq!(glm["maxInputTokens"], 128000);
         assert_eq!(glm["maxOutputTokens"], 8192);
         assert_eq!(glm["supportsImages"], true);
@@ -105,7 +102,7 @@ mod tests {
     fn preserves_unknowns_and_respects_explicit_disabled_reasoning() {
         assert_eq!(
             model_settings(&json!({"id":"custom"})),
-            json!({"name":"Token Market · custom", "supportsToolCall":true})
+            json!({"name":"Token Market", "supportsToolCall":true})
         );
         let disabled = model_settings(
             &json!({"id":"glm-5.3", "supports_reasoning":false, "max_input_tokens":2000000, "temperature":0}),

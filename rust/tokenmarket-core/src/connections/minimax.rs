@@ -170,34 +170,10 @@ pub(super) fn apply(
     }
     for model in models {
         let id = model["id"].as_str().context("模型目录缺少 ID")?;
-        document.set(
-            &["custom_provider", "tokenmarket", "models", id, "name"],
-            json!(model["display_name"]
-                .as_str()
-                .filter(|v| !v.is_empty())
-                .unwrap_or(id)),
+        document.set_metadata(
+            &["custom_provider", "tokenmarket", "models", id],
+            &crate::model_projection::settings(crate::ToolId::MiniMaxCode, model),
         )?;
-        for (source, field) in [
-            ("context_window_tokens", "context"),
-            ("max_output_tokens", "output"),
-        ] {
-            if let Some(tokens) = model[source]
-                .as_u64()
-                .filter(|v| *v > 0 && *v <= 9_007_199_254_740_991)
-            {
-                document.set(
-                    &[
-                        "custom_provider",
-                        "tokenmarket",
-                        "models",
-                        id,
-                        "limit",
-                        field,
-                    ],
-                    json!(tokens),
-                )?;
-            }
-        }
     }
     Ok(())
 }

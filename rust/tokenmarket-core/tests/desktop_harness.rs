@@ -10,11 +10,18 @@ async fn platform(
     models: serde_json::Value,
     expected_requests: usize,
 ) -> (String, tokio::task::JoinHandle<Vec<String>>) {
+    platform_catalogues(vec![models], expected_requests).await
+}
+async fn platform_catalogues(
+    catalogues: Vec<Value>,
+    expected_requests: usize,
+) -> (String, tokio::task::JoinHandle<Vec<String>>) {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = format!("http://{}", listener.local_addr().unwrap());
     let task = tokio::spawn(async move {
         let mut requests = vec![];
+        let mut catalogue_index = 0;
         loop {
             let (mut socket, _) = listener.accept().await.unwrap();
             let mut data = vec![];
@@ -43,7 +50,9 @@ async fn platform(
             let request = String::from_utf8(data).unwrap();
             let first = request.lines().next().unwrap().to_string();
             requests.push(first.clone());
+            let models = &catalogues[catalogue_index.min(catalogues.len() - 1)];
             let response = if first.starts_with("GET /v1/models ") {
+                catalogue_index += 1;
                 assert!(request.contains("Bearer sk-fixture"));
                 models.clone()
             } else if first.contains("/disable ") {
@@ -106,6 +115,20 @@ fn context() -> ConnectContext {
 fn yaml(path: &std::path::Path) -> Value {
     serde_yaml::from_slice(&std::fs::read(path).unwrap()).unwrap()
 }
+fn model_provider<'a>(profile: &'a Value, id: &str) -> &'a Value {
+    profile
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == "llm-pi-ai")
+        .unwrap()["config"]["providers"]
+        .as_object()
+        .unwrap()
+        .values()
+        .find(|provider| provider["models"][0]["id"] == id)
+        .unwrap()
+}
+
 #[tokio::test]
 async fn harness_connect_imports_every_chat_model_in_catalogue_order_and_preserves_both_documents()
 {
@@ -146,13 +169,22 @@ async fn harness_connect_imports_every_chat_model_in_catalogue_order_and_preserv
         applied[1]["config"]["providers"]["official"],
         old_profile[1]["config"]["providers"]["official"]
     );
-    let route = &applied[1]["config"]["providers"]["tokenmarket"];
-    assert_eq!(route["custom"], "keep");
+    assert_eq!(
+        applied[1]["config"]["providers"]["tokenmarket"],
+        json!({"custom":"keep"})
+    );
+    let route = model_provider(&applied, "zeta");
+    assert_eq!(route["displayName"], "Token Market:zeta");
+    assert_eq!(route["models"].as_array().unwrap().len(), 1);
+    assert!(route.get("reasoning").is_none());
+    let alpha = model_provider(&applied, "alpha");
+    assert_eq!(alpha["displayName"], "Token Market:Alpha");
+    assert_eq!(alpha["models"], json!([{"id":"alpha","name":"Alpha"}]));
     assert_eq!(route["api"], "openai-completions");
     assert_eq!(route["baseURL"], format!("{url}/v1"));
     assert_eq!(
         route["models"],
-        json!([{"id":"zeta","contextWindow":65536,"maxTokens":8192,"input":["text","image"]},{"id":"alpha","name":"Alpha"}])
+        json!([{"id":"zeta","contextWindow":65536,"maxTokens":8192,"input":["text","image"]}])
     );
     assert!(applied[1]["config"].get("model").is_none());
     let mut expected = old_credentials.clone();
@@ -176,13 +208,18 @@ async fn harness_connect_imports_every_chat_model_in_catalogue_order_and_preserv
     // deserializer can otherwise hide its own numeric serialization wrappers.
     let native_profile: serde_yaml::Value =
         serde_yaml::from_slice(&std::fs::read(&profile).unwrap()).unwrap();
+    let native_provider = native_profile[1]["config"]["providers"]
+        .as_mapping()
+        .unwrap()
+        .values()
+        .find(|provider| provider["models"][0]["id"].as_str() == Some("zeta"))
+        .unwrap();
     assert_eq!(
-        native_profile[1]["config"]["providers"]["tokenmarket"]["models"][0]["contextWindow"]
-            .as_u64(),
+        native_provider["models"][0]["contextWindow"].as_u64(),
         Some(65536)
     );
     assert_eq!(
-        native_profile[1]["config"]["providers"]["tokenmarket"]["models"][0]["maxTokens"].as_u64(),
+        native_provider["models"][0]["maxTokens"].as_u64(),
         Some(8192)
     );
     let native_credentials: serde_yaml::Value =
@@ -224,7 +261,15 @@ async fn harness_preserves_legacy_credentials_and_completes_known_model_metadata
         yaml(&credentials),
         json!({"OTHER_KEY":"keep-secret","TOKEN_MARKET_API_KEY":"sk-fixture"})
     );
-    let models = yaml(&profile)[0]["config"]["providers"]["tokenmarket"]["models"].clone();
+    let applied = yaml(&profile);
+    let models = json!([
+        model_provider(&applied, "custom-one")["models"][0],
+        model_provider(&applied, "glm-5.3")["models"][0]
+    ]);
+    assert!(model_provider(&applied, "custom-one")
+        .get("reasoning")
+        .is_none());
+    assert_eq!(model_provider(&applied, "glm-5.3")["reasoning"], "high");
     assert_eq!(models[0], json!({"id":"custom-one"}));
     assert_eq!(models[1]["id"], "glm-5.3");
     assert_eq!(models[1]["contextWindow"], 1_000_000);
@@ -270,7 +315,24 @@ async fn harness_writes_per_model_reasoning_and_keeps_server_limits_and_key_visi
         summary.models,
         ["deepseek-v4.1-flash", "kimi-k2.6", "glm-5.3"]
     );
-    let rows = yaml(&profile)[0]["config"]["providers"]["tokenmarket"]["models"].clone();
+    let applied = yaml(&profile);
+    let rows = json!([
+        model_provider(&applied, "deepseek-v4.1-flash")["models"][0],
+        model_provider(&applied, "kimi-k2.6")["models"][0],
+        model_provider(&applied, "glm-5.3")["models"][0]
+    ]);
+    assert_eq!(
+        applied[0]["config"]["providers"].as_object().unwrap().len(),
+        3
+    );
+    assert_eq!(
+        model_provider(&applied, "deepseek-v4.1-flash")["reasoning"],
+        "high"
+    );
+    assert_eq!(model_provider(&applied, "kimi-k2.6")["reasoning"], "high");
+    assert!(model_provider(&applied, "glm-5.3")
+        .get("reasoning")
+        .is_none());
     assert_eq!(rows.as_array().unwrap().len(), 3);
     assert_eq!(rows[0]["contextWindow"], 262144);
     assert_eq!(rows[0]["maxTokens"], 8192);
@@ -585,4 +647,167 @@ async fn harness_disconnect_removes_new_owned_profile_and_versioned_credential_b
     assert!(!profile.exists());
     assert!(!credentials.exists());
     assert!(manager.list().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn harness_reconnect_retires_unavailable_providers_and_invalid_defaults() {
+    use tokenmarket_core::connections::DisconnectRequest;
+    let root = tempdir().unwrap();
+    let inventory = inventory(root.path());
+    let profile = root.path().join("cordis.patch.yml");
+    let (url, server) = platform_catalogues(vec![
+        json!({"data":[{"id":"glm-5.3","model_types":["TEXT_GENERATION"]},{"id":"deepseek-v4.1-flash","model_types":["TEXT_GENERATION"]}]}),
+        json!({"data":[{"id":"glm-5.3","display_name":"Renamed GLM","supports_reasoning":false,"model_types":["TEXT_GENERATION"]}]}),
+    ], 3).await;
+    let manager = support::manager(root.path().join("state"), url.clone(), url);
+    manager
+        .connect(
+            context(),
+            ToolId::DeepSeekHarness,
+            &inventory,
+            profile.clone(),
+        )
+        .await
+        .unwrap();
+    let first = yaml(&profile);
+    let id = first[0]["config"]["providers"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .find(|(_, p)| p["models"][0]["id"] == "glm-5.3")
+        .unwrap()
+        .0
+        .clone();
+    let mut edited = first;
+    edited[0]["config"]["providers"][&id]["custom"] = json!("keep");
+    std::fs::write(&profile, serde_yaml::to_string(&edited).unwrap()).unwrap();
+    manager
+        .reconnect(
+            context(),
+            ToolId::DeepSeekHarness,
+            "9001",
+            &inventory,
+            profile.clone(),
+        )
+        .await
+        .unwrap();
+    server.await.unwrap();
+    let applied = yaml(&profile);
+    let providers = applied[0]["config"]["providers"].as_object().unwrap();
+    assert_eq!(providers.len(), 1);
+    assert!(
+        providers.contains_key(&id),
+        "renaming must not change provider identity"
+    );
+    let glm = model_provider(&applied, "glm-5.3");
+    assert_eq!(glm["displayName"], "Token Market:Renamed GLM");
+    assert!(glm.get("reasoning").is_none());
+    assert_eq!(glm["custom"], "keep");
+    let outcome = manager
+        .disconnect(
+            ToolId::DeepSeekHarness,
+            "9001",
+            None,
+            DisconnectRequest::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(outcome.state, "disconnected");
+    assert_eq!(
+        yaml(&profile)[0]["config"]["providers"][&id],
+        json!({"custom":"keep"})
+    );
+    assert!(!root.path().join(".credentials.yaml").exists());
+}
+
+#[tokio::test]
+async fn harness_reconnect_migrates_previous_shared_provider_receipts() {
+    use tokenmarket_core::connections::DisconnectRequest;
+    let root = tempdir().unwrap();
+    let inventory = inventory(root.path());
+    let profile = root.path().join("cordis.patch.yml");
+    let original = json!([{"id":"llm-pi-ai","config":{"providers":{"official":{"custom":"keep"},"tokenmarket":{"custom":"before"}}}}]);
+    std::fs::write(&profile, serde_yaml::to_string(&original).unwrap()).unwrap();
+    let (url, server) = platform(
+        json!({"data":[{"id":"glm-5.3","model_types":["TEXT_GENERATION"]}]}),
+        3,
+    )
+    .await;
+    let state = root.path().join("state");
+    let manager = support::manager(state.clone(), url.clone(), url);
+    manager
+        .connect(
+            context(),
+            ToolId::DeepSeekHarness,
+            &inventory,
+            profile.clone(),
+        )
+        .await
+        .unwrap();
+    // Recreate a previous-release connection: one shared route, with its original
+    // leaf receipts and the same encrypted connection/backup storage.
+    let mut applied = yaml(&profile);
+    let providers = applied[0]["config"]["providers"].as_object_mut().unwrap();
+    let id = providers
+        .iter()
+        .find(|(_, p)| p["models"][0]["id"] == "glm-5.3")
+        .unwrap()
+        .0
+        .clone();
+    let mut route = providers.remove(&id).unwrap();
+    route.as_object_mut().unwrap().remove("displayName");
+    route.as_object_mut().unwrap().remove("reasoning");
+    route["custom"] = json!("before");
+    providers.insert("tokenmarket".into(), route);
+    std::fs::write(&profile, serde_yaml::to_string(&applied).unwrap()).unwrap();
+    let store = state.join("connections.json");
+    let mut records: Value = serde_json::from_slice(&support::read_private(&store)).unwrap();
+    let receipt = &mut records[0]["receipts"][0];
+    receipt["fields"].as_array_mut().unwrap().retain(|f| {
+        !f["pointer"].as_str().unwrap().ends_with("/displayName")
+            && !f["pointer"].as_str().unwrap().ends_with("/reasoning")
+    });
+    for field in receipt["fields"].as_array_mut().unwrap() {
+        field["pointer"] = json!(field["pointer"]
+            .as_str()
+            .unwrap()
+            .replace(&id, "tokenmarket"));
+    }
+    receipt["created_containers"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|v| !v.as_str().unwrap().contains(&id));
+    std::fs::write(&store, records.to_string()).unwrap();
+    manager
+        .reconnect(
+            context(),
+            ToolId::DeepSeekHarness,
+            "9001",
+            &inventory,
+            profile.clone(),
+        )
+        .await
+        .unwrap();
+    server.await.unwrap();
+    let applied = yaml(&profile);
+    assert_eq!(
+        applied[0]["config"]["providers"]["tokenmarket"],
+        json!({"custom":"before"})
+    );
+    assert_eq!(model_provider(&applied, "glm-5.3")["reasoning"], "high");
+    assert_eq!(
+        applied[0]["config"]["providers"].as_object().unwrap().len(),
+        3
+    );
+    let outcome = manager
+        .disconnect(
+            ToolId::DeepSeekHarness,
+            "9001",
+            None,
+            DisconnectRequest::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(outcome.state, "disconnected");
+    assert_eq!(yaml(&profile), original);
 }

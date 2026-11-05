@@ -2,6 +2,7 @@ pub mod adapters;
 pub mod auth;
 pub mod config;
 mod model_catalog;
+mod model_projection;
 pub mod models;
 pub mod verification;
 

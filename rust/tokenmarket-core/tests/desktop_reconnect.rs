@@ -696,9 +696,17 @@ async fn harness_reconnect_reloads_all_chat_models_and_restores_the_first_two_fi
         .find(|v| v["id"] == "llm-pi-ai")
         .unwrap();
     assert_eq!(
-        route["config"]["providers"]["tokenmarket"]["models"],
-        json!([{"id":"beta"},{"id":"gamma"}])
+        route["config"]["providers"]["tokenmarket"],
+        original[1]["config"]["providers"]["tokenmarket"]
     );
+    let providers = route["config"]["providers"].as_object().unwrap();
+    let mut models: Vec<_> = providers
+        .iter()
+        .filter(|(id, _)| id.starts_with("tokenmarket-model-"))
+        .map(|(_, provider)| provider["models"][0]["id"].as_str().unwrap())
+        .collect();
+    models.sort();
+    assert_eq!(models, ["beta", "gamma"]);
     manager
         .disconnect(
             ToolId::DeepSeekHarness,

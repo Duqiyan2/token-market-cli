@@ -1,5 +1,6 @@
 //! Offline fallback metadata, never a source of model availability or credentials.
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::sync::OnceLock;
 
 fn catalogue() -> &'static Value {
@@ -48,7 +49,7 @@ fn positive(value: &Value) -> bool {
     value.as_u64().is_some_and(|n| n > 0)
 }
 
-fn efforts(value: &Value) -> bool {
+pub(crate) fn efforts(value: &Value) -> bool {
     value == false
         || value.as_object().is_some_and(|map| {
             !map.is_empty()
@@ -66,9 +67,11 @@ fn efforts(value: &Value) -> bool {
 /// Valid server values (including false) always win, field by field.
 pub(crate) fn complete_metadata(model: &Value) -> Value {
     let mut result = model.clone();
-    let Some(defaults) = model["id"].as_str().and_then(lookup) else {
+    if !result.is_object() {
         return result;
-    };
+    }
+    let empty = json!({});
+    let defaults = model["id"].as_str().and_then(lookup).unwrap_or(&empty);
     for field in [
         "context_window_tokens",
         "max_input_tokens",
@@ -82,20 +85,24 @@ pub(crate) fn complete_metadata(model: &Value) -> Value {
         .as_str()
         .is_none_or(|s| s.trim().is_empty())
     {
-        result["display_name"] = defaults["display_name"].clone();
+        if let Some(name) = defaults.get("display_name") {
+            result["display_name"] = name.clone();
+        }
     }
     if !result["input_modalities"]
         .as_array()
         .is_some_and(|items| !items.is_empty() && items.iter().all(Value::is_string))
     {
-        result["input_modalities"] = defaults["input_modalities"].clone();
+        if let Some(input) = defaults.get("input_modalities") {
+            result["input_modalities"] = input.clone();
+        }
     }
     if !result["supports_reasoning"].is_boolean() {
-        result["supports_reasoning"] = if efforts(&result["reasoning_efforts"]) {
-            json!(result["reasoning_efforts"] != false)
-        } else {
-            defaults["supports_reasoning"].clone()
-        };
+        if efforts(&result["reasoning_efforts"]) {
+            result["supports_reasoning"] = json!(result["reasoning_efforts"] != false);
+        } else if let Some(supported) = defaults.get("supports_reasoning") {
+            result["supports_reasoning"] = supported.clone();
+        }
     }
     if result["supports_reasoning"] == false || result["reasoning_efforts"] == false {
         result["supports_reasoning"] = json!(false);
@@ -166,9 +173,86 @@ pub(crate) fn harness_model(model: &Value) -> Value {
     row
 }
 
+/// Stable provider identity is independent of the editable display name.
+pub(crate) fn harness_provider_id(id: &str) -> String {
+    format!("tokenmarket-model-{:x}", Sha256::digest(id.as_bytes()))
+}
+
+pub(crate) fn harness_managed_provider(id: &str) -> bool {
+    id == "tokenmarket"
+        || id
+            .strip_prefix("tokenmarket-model-")
+            .is_some_and(|hash| hash.len() == 64 && hash.bytes().all(|c| c.is_ascii_hexdigit()))
+}
+
+pub(crate) fn harness_provider(model: &Value, gateway: &str) -> Value {
+    let row = harness_model(model);
+    let name = row["name"]
+        .as_str()
+        .or_else(|| row["id"].as_str())
+        .unwrap_or("");
+    let mut provider = json!({
+        "displayName": format!("Token Market:{name}"),
+        "apiKeyEnv": "TOKEN_MARKET_API_KEY",
+        "api": "openai-completions",
+        "baseURL": format!("{}/v1", gateway.trim_end_matches('/')),
+        "models": [row]
+    });
+    // Use Harness' internal levels, including toggle-only models whose compat
+    // suppresses the wire effort. Never invent a default for unknown capabilities.
+    if let Some(level) = ["medium", "high", "low", "minimal", "xhigh", "max"]
+        .into_iter()
+        .find(|level| {
+            provider["models"][0]["reasoningEfforts"]
+                .get(*level)
+                .is_some()
+        })
+    {
+        provider["reasoning"] = json!(level);
+    }
+    provider
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn harness_provider_defaults_always_belong_to_the_exact_model() {
+        for (id, metadata) in catalogue()["models"].as_object().unwrap() {
+            let mut model = metadata.clone();
+            model["id"] = json!(id);
+            let provider = harness_provider(&model, "https://gateway.example");
+            if let Some(level) = provider["reasoning"].as_str() {
+                assert_ne!(level, "off", "{id}");
+                assert!(
+                    provider["models"][0]["reasoningEfforts"]
+                        .get(level)
+                        .is_some(),
+                    "{id}"
+                );
+            }
+        }
+        let provider = harness_provider(
+            &json!({"id":"customer/route~one", "display_name":"Custom", "reasoning_efforts":{"off":null,"max":"max"}}),
+            "https://gateway.example/",
+        );
+        assert_eq!(provider["reasoning"], "max");
+        assert_eq!(provider["displayName"], "Token Market:Custom");
+        assert_eq!(provider["models"][0]["id"], "customer/route~one");
+        assert!(harness_managed_provider(&harness_provider_id(
+            "customer/route~one"
+        )));
+        assert_ne!(
+            harness_provider_id("customer/route~one"),
+            harness_provider_id("customer-route-one")
+        );
+        assert!(
+            harness_provider(&json!({"id":"unknown"}), "https://gateway.example")
+                .get("reasoning")
+                .is_none()
+        );
+    }
 
     #[test]
     fn snapshot_is_valid_and_covers_mainstream_models() {

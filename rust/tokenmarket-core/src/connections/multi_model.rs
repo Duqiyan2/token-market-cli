@@ -330,16 +330,14 @@ impl MultiModelConfig {
                     rows.len() - 1
                 };
                 let row = rows[index].as_object_mut().unwrap();
-                let mut metadata = json!({"name":model["display_name"].as_str().filter(|s|!s.is_empty()).unwrap_or(id)});
-                super::model_plan::project_metadata(model, &mut metadata);
-                for (name, applied) in metadata.as_object().unwrap() {
-                    fields.push(FieldReceipt {
-                        retired: false,
-                        pointer: format!("{selector}/{name}"),
-                        before: row.insert(name.clone(), applied.clone()),
-                        applied: applied.clone(),
-                    });
-                }
+                let metadata = crate::model_projection::settings(ToolId::OpenClaw, model);
+                super::provider_config::set_row_metadata(
+                    row,
+                    &selector,
+                    metadata.as_object().unwrap(),
+                    &mut fields,
+                    &mut created_containers,
+                )?;
             }
         }
         if self.tool == ToolId::OpenCode {
@@ -378,38 +376,20 @@ impl MultiModelConfig {
                     self.value.pointer_mut(&format!("{prefix}/models")).unwrap()[id] = json!({});
                     created_containers.push(pointer.clone());
                 }
-                put(
-                    &mut self.value,
-                    &format!("{pointer}/name"),
-                    json!(model["display_name"]
-                        .as_str()
-                        .filter(|name| !name.is_empty())
-                        .unwrap_or(id)),
+                let metadata = crate::model_projection::settings(ToolId::OpenCode, model);
+                let row = self
+                    .value
+                    .pointer_mut(&pointer)
+                    .unwrap()
+                    .as_object_mut()
+                    .context("OpenCode 模型必须是对象")?;
+                super::provider_config::set_row_metadata(
+                    row,
+                    &pointer,
+                    metadata.as_object().unwrap(),
                     &mut fields,
-                );
-                if let (Some(context), Some(output)) = (
-                    model["context_window_tokens"].as_u64().filter(|n| *n > 0),
-                    model["max_output_tokens"].as_u64().filter(|n| *n > 0),
-                ) {
-                    validate_objects(&self.value, &[&format!("{pointer}/limit")])?;
-                    ensure_objects(
-                        &mut self.value,
-                        &[&format!("{pointer}/limit")],
-                        &mut created_containers,
-                    );
-                    put(
-                        &mut self.value,
-                        &format!("{pointer}/limit/context"),
-                        json!(context),
-                        &mut fields,
-                    );
-                    put(
-                        &mut self.value,
-                        &format!("{pointer}/limit/output"),
-                        json!(output),
-                        &mut fields,
-                    );
-                }
+                    &mut created_containers,
+                )?;
             }
         }
         Ok(PreparedConfiguration {

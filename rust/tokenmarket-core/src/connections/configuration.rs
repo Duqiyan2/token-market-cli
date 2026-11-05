@@ -261,7 +261,7 @@ impl ConfigDocument {
                     created_containers.push("/model_providers/tokenmarket".into());
                 }
                 let mut fields = vec![];
-                for (path, applied) in [
+                let mut values = vec![
                     (vec!["model"], json!(model_id)),
                     (vec!["model_provider"], json!("tokenmarket")),
                     (
@@ -292,7 +292,12 @@ impl ConfigDocument {
                         vec!["model_providers", "tokenmarket", "supports_websockets"],
                         json!(false),
                     ),
-                ] {
+                ];
+                let metadata = crate::model_projection::settings(ToolId::Codex, model);
+                for (name, value) in metadata.as_object().unwrap() {
+                    values.push((vec![name.as_str()], value.clone()));
+                }
+                for (path, applied) in values {
                     let mut item = document.as_item_mut();
                     for name in &path {
                         item = &mut item[name];
@@ -300,11 +305,18 @@ impl ConfigDocument {
                     let before = item
                         .as_str()
                         .map(|v| json!(v))
-                        .or_else(|| item.as_bool().map(|v| json!(v)));
+                        .or_else(|| item.as_bool().map(|v| json!(v)))
+                        .or_else(|| item.as_integer().map(|v| json!(v)))
+                        .or_else(|| item.as_float().map(|v| json!(v)));
+                    if !item.is_none() && before.is_none() {
+                        bail!("Codex 模型配置字段必须是标量");
+                    }
                     let mut replacement = if let Some(value) = applied.as_str() {
                         toml_edit::value(value)
+                    } else if let Some(value) = applied.as_bool() {
+                        toml_edit::value(value)
                     } else {
-                        toml_edit::value(applied.as_bool().expect("owned TOML boolean"))
+                        toml_edit::value(applied.as_i64().context("Codex token 限制超出整数范围")?)
                     };
                     if let (Some(old), Some(new)) = (item.as_value(), replacement.as_value_mut()) {
                         *new.decor_mut() = old.decor().clone();
@@ -348,17 +360,21 @@ impl ConfigDocument {
                         .into_iter()
                         .map(|(name, value)| (format!("/env/{name}"), json!(value))),
                 );
-                if let Some(tokens) = model["context_window_tokens"].as_u64().filter(|v| *v > 0) {
-                    values.push((
-                        "/env/CLAUDE_CODE_MAX_CONTEXT_TOKENS".into(),
-                        json!(tokens.to_string()),
-                    ));
+                let metadata = crate::model_projection::settings(ToolId::ClaudeCode, model);
+                for (name, value) in metadata.as_object().unwrap() {
+                    if name == "env" {
+                        for (name, value) in value.as_object().unwrap() {
+                            values.push((format!("/env/{name}"), value.clone()));
+                        }
+                    } else {
+                        values.push((format!("/{name}"), value.clone()));
+                    }
                 }
                 let mut fields = vec![];
                 for (pointer, applied) in values {
                     let before = config.pointer(&pointer).cloned();
-                    if pointer == "/model" {
-                        config["model"] = applied.clone();
+                    if !pointer.starts_with("/env/") {
+                        config[pointer.trim_start_matches('/')] = applied.clone();
                     } else {
                         config["env"][pointer.trim_start_matches("/env/")] = applied.clone();
                     }

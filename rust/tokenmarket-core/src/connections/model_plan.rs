@@ -48,28 +48,6 @@ fn select_with_model(tool: ToolId, catalogue: &Value, default_model: &str) -> Re
     )])
 }
 
-/// Metadata shape shared by Harness and OpenClaw; adapter mutation stays local.
-pub(super) fn project_metadata(model: &Value, target: &mut Value) {
-    for (source, name) in [
-        ("context_window_tokens", "contextWindow"),
-        ("max_output_tokens", "maxTokens"),
-    ] {
-        if let Some(tokens) = model[source].as_u64().filter(|n| *n > 0) {
-            target[name] = serde_json::json!(tokens);
-        }
-    }
-    if let Some(input) = model["input_modalities"].as_array() {
-        let known: Vec<_> = input
-            .iter()
-            .filter(|v| matches!(v.as_str(), Some("text" | "image")))
-            .cloned()
-            .collect();
-        if !known.is_empty() {
-            target["input"] = serde_json::json!(known);
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -197,7 +197,7 @@ async fn minimax_imports_all_text_models_into_custom_provider_without_selecting_
         original["custom_provider"]["tokenmarket"]["models"]["user-model"]
     );
     assert!(p["models"]["embedding"].is_null());
-    assert!(p["models"]["vendor/zeta~1"]["tool_call"].is_null());
+    assert_eq!(p["models"]["vendor/zeta~1"]["tool_call"], true);
     for key in [
         "defaultModel",
         "defaultModelVariant",

@@ -34,12 +34,14 @@ Missing data stops before config publication. The shared issuance protocol first
 saves/confirms the Key so it can read that exact Key's catalogue; a metadata failure
 retains that saved Key, and retry reuses it rather than issuing another one.
 
-Eligible Agent models explicitly gain `tool_use`; existing capability tags remain.
-This follows Token Market's TEXT_GENERATION eligibility contract, and does not
-prove native Kimi tool calls. Actual Agent streaming/tool calling remains release
-acceptance. The adapter leaves `default_model`, `[thinking]`, model effort settings,
-other providers, user fields and TOML comments intact. Model selection stays inside
-Kimi. OpenAI does not read Kimi's Anthropic-only `max_output_size`, so the adapter
+Eligible Agent models explicitly gain `tool_use`. Confirmed model metadata also
+refreshes thinking/always-thinking and image/video/audio input tags, independent
+input limits and supported/default/off effort fields. Unrelated capability tags
+remain. This follows Token Market's TEXT_GENERATION eligibility contract, and does
+not prove native Kimi tool calls. Actual Agent streaming/tool calling remains
+release acceptance. The adapter leaves `default_model`, global `[thinking]`, other
+providers, unrelated user fields and TOML comments intact. Model selection stays
+inside Kimi. See [all-tool model projection](model-capabilities.md#全工具配置投影). OpenAI does not read Kimi's Anthropic-only `max_output_size`, so the adapter
 does not fabricate an output limit or claim that field constrains this protocol.
 
 Declared `api_key_env`, OAuth, dynamic registry sources, competing authorization

@@ -100,12 +100,15 @@ pub(super) fn normalize(
             .flatten()
             .any(|row| {
                 row["id"] == "llm-pi-ai"
-                    && same_route(
-                        &row["config"]["providers"]["tokenmarket"]["baseURL"],
-                        &platform_route,
-                    )
-                    && row["config"]["providers"]["tokenmarket"]["apiKeyEnv"]
-                        == "TOKEN_MARKET_API_KEY"
+                    && row["config"]["providers"]
+                        .as_object()
+                        .is_some_and(|providers| {
+                            providers.iter().any(|(id, provider)| {
+                                crate::model_catalog::harness_managed_provider(id)
+                                    && same_route(&provider["baseURL"], &platform_route)
+                                    && provider["apiKeyEnv"] == "TOKEN_MARKET_API_KEY"
+                            })
+                        })
             });
     for (receipt, original) in receipts.iter_mut().zip(originals) {
         let Some(original) = original else { continue };
@@ -153,13 +156,21 @@ pub(super) fn normalize(
         } else if adopted_harness {
             if let Some(rows) = original.as_array() {
                 if let Some(row) = rows.iter().find(|row| row["id"] == "llm-pi-ai") {
-                    if let Some(provider) = row.pointer("/config/providers/tokenmarket") {
-                        adopt_fields(
-                            receipt,
-                            "/@id=llm-pi-ai/config/providers/tokenmarket",
-                            provider,
-                            false,
-                        );
+                    if let Some(providers) =
+                        row.pointer("/config/providers").and_then(Value::as_object)
+                    {
+                        for (id, provider) in providers.iter().filter(|(id, provider)| {
+                            crate::model_catalog::harness_managed_provider(id)
+                                && same_route(&provider["baseURL"], &platform_route)
+                                && provider["apiKeyEnv"] == "TOKEN_MARKET_API_KEY"
+                        }) {
+                            adopt_fields(
+                                receipt,
+                                &format!("/@id=llm-pi-ai/config/providers/{}", escape(id)),
+                                provider,
+                                false,
+                            );
+                        }
                     }
                 }
             } else if receipt
@@ -200,6 +211,27 @@ pub(super) fn normalize(
                     })
                 }) {
                     adopt_fields(receipt, pointer, value, false);
+                    if record.tool == ToolId::Hermes {
+                        if let Some(metadata) = original.pointer("/model_overrides/tokenmarket") {
+                            adopt_fields(receipt, "/model_overrides/tokenmarket", metadata, false);
+                        }
+                        if let Some(overrides) = original
+                            .pointer("/agent/reasoning_overrides")
+                            .and_then(Value::as_object)
+                        {
+                            for (id, setting) in overrides
+                                .iter()
+                                .filter(|(id, _)| id.starts_with("tokenmarket/"))
+                            {
+                                adopt_fields(
+                                    receipt,
+                                    &format!("/agent/reasoning_overrides/{}", escape(id)),
+                                    setting,
+                                    false,
+                                );
+                            }
+                        }
+                    }
                     if record.tool == ToolId::Codex && original["model_provider"] == "tokenmarket" {
                         for pointer in ["/model_provider", "/model"] {
                             if let Some(value) = original.pointer(pointer) {
