@@ -46,6 +46,27 @@ test('signed-out Client Update downloads only after confirmation and leaves veri
   }finally{await f.close();}
 });
 
+test('Client Update installation explains active work and requires an explicit retry before guarded handoff', async () => {
+  const f=await openFixture({signedIn:false,startupClientUpdate:{status:'ready',currentVersion:'1.0.0',availableVersion:'1.1.0',installAvailable:true},clientInstallBusy:true});try {
+    const p=f.page;await p.locator('#login [data-desktop-settings]').click();
+    await p.getByRole('button',{name:'安装并重启',exact:true}).click();
+    await p.getByRole('button',{name:'取消安装',exact:true}).click();
+    assert.equal((await calls(p,'install_client_update')).length,0);
+    await p.getByRole('button',{name:'安装并重启',exact:true}).click();
+    await p.getByRole('button',{name:'确认安装并重启',exact:true}).click();
+    await p.locator('#client-install-error').filter({hasText:'工具连接操作正在进行'}).waitFor();
+    assert.equal(await p.getByRole('button',{name:'安装并重启',exact:true}).isEnabled(),true);
+    assert.deepEqual((await calls(p,'install_client_update')).map(c=>c.args),[{version:'1.1.0'}]);
+    await p.evaluate(()=>window.__fixture.clientInstallBusy=false);
+    await p.getByRole('button',{name:'安装并重启',exact:true}).click();
+    await p.getByRole('button',{name:'确认安装并重启',exact:true}).click();
+    await p.locator('#client-update-status').filter({hasText:'安装交接已启动'}).waitFor();
+    assert.doesNotMatch(await p.locator('#client-update-status').textContent(),/更新完成|安装完成/);
+    assert.equal((await calls(p,'install_client_update')).length,2);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
 test('a late download progress event cannot erase a verified Client Update', async () => {
   const f=await openFixture({signedIn:false,clientUpdate:{status:'available',currentVersion:'1.0.0',availableVersion:'1.1.0',releaseNotes:null,error:null}});try {
     const p=f.page;await p.locator('#login [data-desktop-settings]').click();

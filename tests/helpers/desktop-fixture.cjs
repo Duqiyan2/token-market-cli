@@ -47,6 +47,7 @@ module.exports = async function openFixture(browser, options = {}) {
     const workspace = () => ({user,current_workspace:fixture.current,switchable_workspaces:[personal,team],balance:options.noBalance?null:{currency:'CNY',amount:'128.60'},balance_error:options.noBalance?'读取余额失败':null,can_recharge:!options.restricted,menus:options.restricted?[]:[{path:'/console/tokens'},{path:'/console/billing'},{path:'/console/spaces'}]});
     fixture.emit = (name,payload) => (fixture.events[name]||[]).forEach(fn=>fn({payload}));
     fixture.loginStatus = loginStatus;
+    fixture.clientInstallBusy=Boolean(options.clientInstallBusy);
     fixture.clientUpdateStatus=options.startupClientUpdate || {status:'idle',currentVersion:'1.0.0',availableVersion:null,releaseNotes:null,error:null};
     window.__TAURI__ = {window:{getCurrentWindow:()=>({setTheme:async value=>{fixture.nativeTheme=value;}})},event:{listen:async (name,fn) => { (fixture.events[name] ||= []).push(fn); return () => {}; }},core:{invoke:async (command,args = {}) => {
       fixture.calls.push({command,args:clone(args)});
@@ -60,6 +61,7 @@ module.exports = async function openFixture(browser, options = {}) {
           return value;
         }
         case 'download_client_update': if(options.deferClientDownload)return new Promise(resolve=>fixture.resolveClientDownload=resolve);return {status:'ready',currentVersion:'1.0.0',availableVersion:args.version,releaseNotes:'保留已有连接',error:null};
+        case 'install_client_update': return fixture.clientInstallBusy ? {status:'ready',currentVersion:'1.0.0',availableVersion:args.version,installAvailable:true,error:'工具连接操作正在进行，请完成后重试安装客户端更新'} : {status:'handoff',currentVersion:'1.0.0',availableVersion:args.version,installAvailable:true,error:null};
         case 'defer_client_update': fixture.clientUpdateStatus.remind=false;return clone(fixture.clientUpdateStatus);
         case 'ignore_client_update_version': fixture.clientUpdateStatus.remind=false;fixture.ignoredClientUpdate=args.version;return clone(fixture.clientUpdateStatus);
         case 'check_client_update': return clone(fixture.clientUpdate || options.clientUpdate || {status:'current',currentVersion:'1.0.0',availableVersion:null,releaseNotes:null,error:null});

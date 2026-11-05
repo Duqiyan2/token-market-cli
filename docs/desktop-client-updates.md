@@ -9,6 +9,10 @@ behavior, not an implemented or released updater.
   managed Tool Upgrades retain their respective delivery paths.
 - Initial architecture matrix: macOS Apple Silicon and Windows x64. Intel Mac
   and Windows ARM support are deferred pending their builds and device acceptance.
+- Windows in-app installation initially supports current-user NSIS (.exe)
+  installations only, as subsequently confirmed by the user. Keep MSI available
+  for manual installation/recovery without mixing installer ownership; MSI
+  auto-update requires separate lifecycle verification.
 - Check for updates automatically at application startup and provide a manual
   check in Settings.
 - Show the available version and release notes. Download and install only after

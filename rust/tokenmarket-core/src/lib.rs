@@ -19,3 +19,5 @@ pub mod inventory;
 pub mod connections;
 mod dumate;
 mod yaml;
+
+pub mod client_update;
