@@ -133,7 +133,19 @@
 <script src="tools.js"></script>
 <script src="connection-test.js"></script>
 <script src="window-lifecycle.js"></script>
+<dialog id="client-update-reminder" aria-labelledby="client-update-reminder-title">
+  <h2 id="client-update-reminder-title">客户端有新版本</h2>
+  <p id="client-update-reminder-version"></p>
+  <p id="client-update-reminder-notes"></p>
+  <p id="client-update-reminder-error" role="status"></p>
+  <div class="dialog-actions">
+    <button id="client-update-later" class="quiet">稍后提醒</button>
+    <button id="client-update-ignore" class="quiet">忽略此版本</button>
+    <button id="client-update-view">查看更新</button>
+  </div>
+</dialog>
 <script src="client-update.js"></script>
+<script src="client-update-reminder.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

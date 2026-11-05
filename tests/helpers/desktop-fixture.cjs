@@ -47,6 +47,7 @@ module.exports = async function openFixture(browser, options = {}) {
     const workspace = () => ({user,current_workspace:fixture.current,switchable_workspaces:[personal,team],balance:options.noBalance?null:{currency:'CNY',amount:'128.60'},balance_error:options.noBalance?'读取余额失败':null,can_recharge:!options.restricted,menus:options.restricted?[]:[{path:'/console/tokens'},{path:'/console/billing'},{path:'/console/spaces'}]});
     fixture.emit = (name,payload) => (fixture.events[name]||[]).forEach(fn=>fn({payload}));
     fixture.loginStatus = loginStatus;
+    fixture.clientUpdateStatus=options.startupClientUpdate || {status:'idle',currentVersion:'1.0.0',availableVersion:null,releaseNotes:null,error:null};
     window.__TAURI__ = {window:{getCurrentWindow:()=>({setTheme:async value=>{fixture.nativeTheme=value;}})},event:{listen:async (name,fn) => { (fixture.events[name] ||= []).push(fn); return () => {}; }},core:{invoke:async (command,args = {}) => {
       fixture.calls.push({command,args:clone(args)});
       const entry = fixture.entries.find(t=>t.id===args.tool);
@@ -54,10 +55,12 @@ module.exports = async function openFixture(browser, options = {}) {
       if (args.recovery && (args.recovery.ownerId!==user.id || args.recovery.workspaceId!==fixture.current.id)) throw Error('账号或空间已改变');
       switch(command) {
         case 'desktop_client_update_status': {
-          const value={status:'idle',currentVersion:'1.0.0',availableVersion:null,releaseNotes:null,error:null};
+          const value=clone(fixture.clientUpdateStatus);
           if(options.deferClientUpdateStatus) return new Promise(resolve=>fixture.resolveClientUpdateStatus=()=>resolve(value));
           return value;
         }
+        case 'defer_client_update': fixture.clientUpdateStatus.remind=false;return clone(fixture.clientUpdateStatus);
+        case 'ignore_client_update_version': fixture.clientUpdateStatus.remind=false;fixture.ignoredClientUpdate=args.version;return clone(fixture.clientUpdateStatus);
         case 'check_client_update': return clone(fixture.clientUpdate || options.clientUpdate || {status:'current',currentVersion:'1.0.0',availableVersion:null,releaseNotes:null,error:null});
         case 'desktop_window_preferences': if(fixture.deferPreferences)return new Promise(resolve=>{fixture.resolvePreferences=()=>resolve(clone(fixture.windowPreferences));});return clone(fixture.windowPreferences);
         case 'save_desktop_window_preferences': if(options.preferenceSaveError)throw Error('无法保存应用设置');fixture.windowPreferences.run_in_background=args.runInBackground;return clone(fixture.windowPreferences);
