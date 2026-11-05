@@ -1,6 +1,21 @@
 name: Update distribution fixtures
 
 on:
+  pull_request:
+    paths:
+      - "scripts/desktop-update-release.py"
+      - "scripts/desktop_update_local.py"
+      - "scripts/build-macos-clients.sh"
+      - "scripts/build-windows-clients.ps1"
+      - "scripts/macos-local-signing.py"
+      - "tests/test_update_*.py"
+      - "docs/client-update-*.json"
+      - "src-tauri/examples/verify-update-artifacts.rs"
+      - "src-tauri/src/client_update/**"
+      - "src-tauri/tests/fixtures/client-update/**"
+      - "src-tauri/Cargo.toml"
+      - "src-tauri/Cargo.lock"
+      - ".github/workflows/update-distribution-fixtures.yml"
   workflow_dispatch:
 
 # Fixture jobs never publish OSS; real writers use the designated local host.

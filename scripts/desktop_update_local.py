@@ -28,7 +28,7 @@ def load(args, api):
     config = json.loads(path.read_text())
     fields = ('schema_version', 'source_root', 'version', 'public_base_url', 'manifest_key', 'recovery_key',
               'candidate_key', 'public_key_file', 'private_key_file', 'private_key_password_file',
-              'output_dir', 'state_dir', 'tools', 'oss', 'native')
+              'output_dir', 'tools', 'oss', 'native')
     api.object_fields(config, fields, 'Local config')
     api.require(type(config['schema_version']) is int and config['schema_version'] == 1, 'Unsupported local config schema_version')
     api.object_fields(config['tools'], ('signer', 'verifier'), 'tools')
@@ -45,13 +45,24 @@ def load(args, api):
         missing += ['oss.' + name for name in config['oss'] if not config['oss'][name]]
     missing += ['tools.' + name for name in (('signer', 'verifier') if args.command == 'local-build' else ('verifier',)) if not config['tools'][name]]
     api.require(not missing, 'Missing local configuration: ' + ', '.join(missing))
-    for name in ('public_key_file', 'private_key_file', 'private_key_password_file', 'output_dir', 'state_dir'):
+    for name in ('public_key_file', 'private_key_file', 'private_key_password_file', 'output_dir'):
         if config[name]:
             config[name] = str(external(config[name], name))
     if config['oss']['config_file']:
         config['oss']['config_file'] = str(external(config['oss']['config_file'], 'oss.config_file'))
     if config['native']['macos_identity_dir']:
-        config['native']['macos_identity_dir'] = str(external(config['native']['macos_identity_dir'], 'native.macos_identity_dir'))
+        identity = external(config['native']['macos_identity_dir'], 'native.macos_identity_dir')
+        config['native']['macos_identity_dir'] = str(identity)
+        # The native signer consumes these concrete files, so checking only the
+        # parent directory would let a child symlink bring Git material into signing.
+        # Resolve paths without reading certificate, password, keychain or metadata.
+        for name in ('certificate.pem', 'keychain-password', 'signing.keychain-db', 'identity.json'):
+            external(str(identity / name), 'native.macos_identity_dir.' + name)
+        lock = identity / 'build.lock'
+        external(str(lock), 'native.macos_identity_dir.build.lock')
+        # The signer opens/chmods this file. Never let that mutation follow a link,
+        # even when the linked target happens to be outside Git.
+        api.require(not lock.is_symlink(), 'native.macos_identity_dir.build.lock must not be a symlink')
     config['public_base_url'] = api.public_base(config['public_base_url'], args.fixture)
     for name in ('manifest_key', 'recovery_key', 'candidate_key'):
         api.safe_key(config[name])
@@ -168,7 +179,7 @@ def inventory_plan(args, config, api):
 @contextmanager
 def publisher_lock(config, args, api):
     # OS-wide path on the designated publishing account: independent of checkout,
-    # config/output/state directories, candidate route and process working directory.
+    # config/output directories, candidate route and process working directory.
     # Persistent files + OS advisory locks release automatically on process exit.
     if os.name == 'nt':
         root = Path(os.environ['LOCALAPPDATA']) / 'Token Market' / 'Release Publisher Locks'

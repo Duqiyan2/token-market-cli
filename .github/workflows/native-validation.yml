@@ -11,6 +11,7 @@ on:
       - "tests/helpers/**"
       - "scripts/macos-local-signing.py"
       - "scripts/build-macos-clients.sh"
+      - "scripts/build-windows-clients.ps1"
       - "tests/test_macos_signing.py"
       - "scripts/reset-macos-client-state.py"
       - "tests/test_macos_reset.py"
@@ -45,6 +46,21 @@ jobs:
 
       - name: Report checked revision
         run: git rev-parse HEAD
+
+      - name: Check Windows client build script syntax
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $parseErrors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $PWD 'scripts/build-windows-clients.ps1'),
+            [ref]$tokens, [ref]$parseErrors
+          ) | Out-Null
+          if ($parseErrors.Count -gt 0) {
+            $parseErrors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable

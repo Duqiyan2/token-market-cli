@@ -31,7 +31,7 @@ class LocalReleaseCommand(unittest.TestCase):
             public_base_url=base, manifest_key='production/stable.json', recovery_key='recovery/index.html',
             candidate_key='test/accepted/stable.json', public_key_file=str(public),
             private_key_file=str(self.root / 'missing-private.key'), private_key_password_file='',
-            output_dir=str(self.root / 'outputs'), state_dir=str(self.root / 'state'),
+            output_dir=str(self.root / 'outputs'),
             tools=dict(signer=os.environ.get('TOKEN_MARKET_TEST_TAURI_SIGNER', '/missing/signer'),
                 verifier=str((distribution.ROOT / 'src-tauri/target/debug/examples/verify-update-artifacts').resolve())),
             oss=dict(region='isolated-region', endpoint='https://oss.invalid', bucket='isolated-bucket', prefix='desktop',
@@ -82,7 +82,7 @@ class LocalReleaseCommand(unittest.TestCase):
             self.observed.clear()
             self.settings['oss'] = {field: '' for field in self.settings['oss']}
             self.settings['tools']['signer'] = ''
-            for field in ('private_key_file', 'source_root', 'output_dir', 'state_dir'):
+            for field in ('private_key_file', 'source_root', 'output_dir'):
                 self.settings[field] = ''
             self.write_config()
             result = self.local('validate', '--inventory', str(self.inventory), '--acceptance', str(self.acceptance_path),
@@ -142,7 +142,7 @@ class LocalReleaseCommand(unittest.TestCase):
         self.assertIn('local build provenance', result.stderr)
         self.assertFalse((self.root / 'isolated-store').exists())
 
-    def test_local_candidate_and_stable_share_a_process_lock_across_private_state_and_workdirs(self):
+    def test_local_candidate_and_stable_share_a_process_lock_across_private_configs_and_outputs(self):
         import threading
         with self.served_store(block_first=True) as (store, base):
             self.config(base)
@@ -153,7 +153,7 @@ class LocalReleaseCommand(unittest.TestCase):
             try:
                 self.assertTrue(self.readback_entered.wait(15))
                 second_config = copy.deepcopy(self.settings)
-                second_config['state_dir'] = str(self.root / 'other-private-state')
+                second_config['output_dir'] = str(self.root / 'other-private-output')
                 other = self.root / 'second-config.json'
                 other.write_text(json.dumps(second_config))
                 result = self.command('local-publish', '--config', str(other), '--fixture', '--local-store', str(store),
@@ -347,6 +347,75 @@ class LocalReleaseCommand(unittest.TestCase):
         self.assertFalse(marker.exists())
         self.assertFalse((self.root / 'outputs/1.1.0/darwin-aarch64').exists())
 
+    def test_local_build_rejects_git_linked_macos_identity_files_before_native_recipe(self):
+        self.config()
+        source = self.root / 'clean-source'
+        (source / 'src-tauri').mkdir(parents=True)
+        (source / 'src-tauri/tauri.conf.json').write_text('{"version":"1.1.0"}')
+        (source / 'src-tauri/Cargo.toml').write_text('[package]\nname="app"\nversion="1.1.0"\n')
+        for argv in (['init', '-q'], ['add', '.'], ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@invalid', 'commit', '-qm', 'fixture']):
+            subprocess.run(['git', '-C', str(source)] + argv, check=True, capture_output=True)
+        self.settings['source_root'] = str(source)
+        marker = self.root / 'native-must-not-run'
+        adapter = self.root / 'should-not-run.py'
+        adapter.write_text('from pathlib import Path\nPath(' + repr(str(marker)) + ').touch()\n')
+        identity = self.root / 'external-identity'
+        identity.mkdir()
+        checkout = self.root / 'other-checkout'
+        checkout.mkdir()
+        subprocess.run(['git', '-C', str(checkout), 'init', '-q'], check=True, capture_output=True)
+        protected = checkout / 'private-sentinel'
+        protected.write_text('untouched signing sentinel')
+        self.settings['native']['macos_identity_dir'] = str(identity)
+        for name in ('certificate.pem', 'keychain-password', 'signing.keychain-db', 'identity.json'):
+            with self.subTest(name=name):
+                child = identity / name
+                child.symlink_to(protected)
+                self.write_config()
+                result = self.local('build', '--target', 'darwin-aarch64',
+                    '--fixture-native-command', sys.executable, str(adapter))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('native.macos_identity_dir.' + name, result.stderr)
+                self.assertIn('outside Git', result.stderr)
+                self.assertNotIn('private-sentinel', result.stdout + result.stderr)
+                self.assertFalse(marker.exists())
+                self.assertEqual(protected.read_text(), 'untouched signing sentinel')
+                child.unlink()
+
+    def test_local_build_rejects_macos_identity_lock_symlinks_without_modifying_targets(self):
+        self.config()
+        source = self.root / 'clean-source'
+        (source / 'src-tauri').mkdir(parents=True)
+        (source / 'src-tauri/tauri.conf.json').write_text('{"version":"1.1.0"}')
+        (source / 'src-tauri/Cargo.toml').write_text('[package]\nname="app"\nversion="1.1.0"\n')
+        for argv in (['init', '-q'], ['add', '.'], ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@invalid', 'commit', '-qm', 'fixture']):
+            subprocess.run(['git', '-C', str(source)] + argv, check=True, capture_output=True)
+        self.settings['source_root'] = str(source)
+        identity = self.root / 'external-identity'
+        identity.mkdir()
+        self.settings['native']['macos_identity_dir'] = str(identity)
+        self.write_config()
+        checkout = self.root / 'another-checkout'
+        checkout.mkdir()
+        subprocess.run(['git', '-C', str(checkout), 'init', '-q'], check=True, capture_output=True)
+        for directory in (checkout, self.root):
+            with self.subTest(inside_git=directory == checkout):
+                protected = directory / 'lock-sentinel'
+                protected.write_text('untouched lock target')
+                protected.chmod(0o644)
+                original_mode = protected.stat().st_mode
+                lock = identity / 'build.lock'
+                lock.symlink_to(protected)
+                result = self.local('build', '--target', 'darwin-aarch64',
+                    '--fixture-native-command', '/missing/native-recipe')
+                lock.unlink()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('native.macos_identity_dir.build.lock', result.stderr)
+                self.assertNotIn('lock-sentinel', result.stdout + result.stderr)
+                self.assertEqual(protected.read_text(), 'untouched lock target')
+                self.assertEqual(protected.stat().st_mode, original_mode)
+                self.assertFalse((self.root / 'outputs').exists())
+
     def test_local_config_reports_fields_and_rejects_git_and_symlink_paths_without_values(self):
         self.config()
         self.settings['oss']['profile'] = ''
@@ -355,7 +424,7 @@ class LocalReleaseCommand(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('oss.profile', result.stderr)
         self.assertNotIn('isolated-bucket', result.stdout + result.stderr)
-        for field in ('state_dir', 'output_dir', 'public_key_file', 'private_key_file'):
+        for field in ('output_dir', 'public_key_file', 'private_key_file'):
             with self.subTest(field=field):
                 self.config()
                 link = self.root / ('link-' + field)

@@ -10,7 +10,6 @@
   "private_key_file": "",
   "private_key_password_file": "",
   "output_dir": "",
-  "state_dir": "",
   "tools": {
     "signer": "",
     "verifier": ""

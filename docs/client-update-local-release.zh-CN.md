@@ -26,7 +26,6 @@ Windows MSI 仍可用于手动安装/恢复，不是自动更新目标，也不�
 | `private_key_file` | 与该公钥对应的既有 updater 私钥文件；本机签名时读入子进程环境，不写入清单、日志或 Git |
 | `private_key_password_file` | 可选的私钥密码文本文件；无密码时留空，读取时仅去除行尾换行 |
 | `output_dir` | Git 外的构建、最终包及汇总清单目录；每个版本/目标不可覆盖 |
-| `state_dir` | Git 外的操作员状态/验收日志存放目录；实际进程锁使用固定 OS 目录，不受此字段改变 |
 | `tools.signer` | 本机 Tauri CLI **2.12.4** 可执行文件绝对路径 |
 | `tools.verifier` | 本机编译的官方 updater **2.14.1** 校验器绝对路径 |
 | `oss.region`, `endpoint`, `bucket`, `prefix` | 阿里云 OSS 实际区域、HTTPS 服务地址、桶及对象前缀 |
@@ -65,13 +64,15 @@ Gatekeeper 公共发行验收。保留真实状态；需要正式 Developer ID/�
   oss/                          # ossutil 原生配置/profile
   outputs/                      # 每个版本、每个原生目标和汇总清单
   evidence/                     # 真机日志、截图、验收 JSON、发行说明
-  state/                        # 操作员记录
+  records/                      # 可选操作员记录，目录约定，无配置字段
   verifier-target/              # 本机构建的官方校验器
 ```
 
 复制仓库中的 [空 JSON 示例](client-update-local.example.json) 到上面目录后再填值。
 不使用 shell `source`/`eval`。所有私有路径使用绝对路径；链接解析后进入任何 Git
-checkout 的路径同样会被拒绝。两原生主机可使用不同本地路径，但源码提交、版本、
+checkout 的路径同样会被拒绝。macOS 身份目录下的证书、密码、keychain 和身份元数据
+也逐一检查；可变的 `build.lock` 不允许是符号链接。两原生主机可使用不同本地路径，
+但源码提交、版本、
 生产 endpoint、固定 recovery 和公钥指纹必须完全一致。不要把填好的配置、profile、
 密钥、输出或验收材料提交到 Git。
 
@@ -84,7 +85,8 @@ CARGO_TARGET_DIR="$PRIVATE_DIR/verifier-target" cargo build --locked \
 
 所有 JSON 字段保留，但只填写本机使用的资源：`private_key_file` / 密码和 signer 仅构建需要；
 `source_root` 仅构建需要，`output_dir` 仅构建/汇总需要；OSS 各项只在 candidate/publish
-需要，`state_dir` 是可选的操作员目录。只读 validate 无需私钥、签名器或 OSS profile。
+需要。操作员记录可自行放在 Git 外的 `records/`，无需配置字段。只读 validate 无需私钥、
+签名器或 OSS profile。
 
 将生成的 `debug/examples/verify-update-artifacts`（Windows 为 `.exe`）填入
 `tools.verifier`。构建/包验证与原生设备验收分开记录。发布机使用专用 ossutil profile；
