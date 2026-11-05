@@ -241,3 +241,104 @@ async fn unconfigured_checks_give_an_actionable_publisher_reason() {
         assert!(!error.contains("TOKEN_MARKET_"), "{error}");
     }
 }
+
+#[tokio::test]
+async fn later_suppresses_startup_reminders_until_a_new_native_process() {
+    let app = app();
+    let server = ManifestServer::start(serde_json::json!({"version":"1.1.0","platforms":{
+        "darwin-aarch64":{"url":"https://updates.example.invalid/macos.tar.gz","signature":SIGNATURE.trim()}
+    }}));
+    let preferences = tempfile::tempdir().unwrap();
+    let executable = tempfile::tempdir().unwrap();
+    let build = || {
+        let mut updater = ClientUpdater::with_reminder_path(
+            "1.0.0".into(),
+            preferences.path().join("updates.json"),
+        );
+        updater.config.endpoint = Some(server.url.clone());
+        updater.config.public_key = Some(PUBLIC_KEY.trim().into());
+        updater.config.target = Some("darwin-aarch64".into());
+        updater.config.allow_loopback_http = true;
+        updater.config.executable_path = Some(
+            executable
+                .path()
+                .join("Token Market.app/Contents/MacOS/Token Market"),
+        );
+        updater
+    };
+    let updater = build();
+    assert!(updater.startup_check(app.handle()).await.remind);
+    assert!(!updater.later().remind);
+    assert!(
+        !updater.status().remind,
+        "a renderer status read must retain native Later"
+    );
+    assert_eq!(
+        updater
+            .check(app.handle())
+            .await
+            .available_version
+            .as_deref(),
+        Some("1.1.0")
+    );
+    assert!(
+        !updater.status().remind,
+        "manual discovery keeps process deferral"
+    );
+    assert!(!updater.startup_check(app.handle()).await.remind);
+    assert!(build().startup_check(app.handle()).await.remind);
+    assert_eq!(
+        server.requests.lock().unwrap().len(),
+        3,
+        "no repeated startup or periodic checks in one process"
+    );
+}
+
+#[tokio::test]
+async fn ignored_exact_version_persists_but_manual_and_next_version_remain_available() {
+    let app = app();
+    let preferences = tempfile::tempdir().unwrap();
+    let executable = tempfile::tempdir().unwrap();
+    let server = |version| {
+        ManifestServer::start(serde_json::json!({"version":version,"platforms":{
+            "darwin-aarch64":{"url":"https://updates.example.invalid/macos.tar.gz","signature":SIGNATURE.trim()}
+        }}))
+    };
+    let build = |server: &ManifestServer| {
+        let mut updater = ClientUpdater::with_reminder_path(
+            "1.0.0".into(),
+            preferences.path().join("updates.json"),
+        );
+        updater.config.endpoint = Some(server.url.clone());
+        updater.config.public_key = Some(PUBLIC_KEY.trim().into());
+        updater.config.target = Some("darwin-aarch64".into());
+        updater.config.allow_loopback_http = true;
+        updater.config.executable_path = Some(
+            executable
+                .path()
+                .join("Token Market.app/Contents/MacOS/Token Market"),
+        );
+        updater
+    };
+    let first = server("1.1.0");
+    let updater = build(&first);
+    assert!(updater.startup_check(app.handle()).await.remind);
+    assert!(!updater.ignore_version("1.1.0").unwrap().remind);
+    let restarted = build(&first);
+    let ignored = restarted.startup_check(app.handle()).await;
+    assert_eq!(ignored.status, "available");
+    assert!(!ignored.remind);
+    let manual = restarted.check(app.handle()).await;
+    assert_eq!(manual.available_version.as_deref(), Some("1.1.0"));
+    assert!(!manual.automatic);
+    assert!(
+        !build(&first).startup_check(app.handle()).await.remind,
+        "manual checking preserves exact-version ignore"
+    );
+    let next = server("1.2.0");
+    assert!(build(&next).startup_check(app.handle()).await.remind);
+    assert!(
+        restarted.ignore_version("9.9.9").is_err(),
+        "stale renderer must not ignore an unseen version"
+    );
+}

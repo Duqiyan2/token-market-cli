@@ -5,9 +5,11 @@
   const el = id => document.getElementById(id);
   const check = el('check-client-update');
   let checking = false;
-  let generation = 0;
   let currentVersion = '未知';
   function render(value) {
+    if (value.automatic && value.status !== 'available') {
+      value = {...value, status:'idle', error:null};
+    }
     currentVersion = value.currentVersion;
     el('client-current-version').textContent = `当前版本 ${value.currentVersion}`;
     el('client-update-status').textContent = value.status === 'available'
@@ -21,13 +23,12 @@
   }
   check.onclick = async () => {
     if (checking) return;
-    ++generation;
+    document.dispatchEvent(new Event('client-update-manual-check'));
     checking = true; check.disabled = true;
     el('client-update-status').textContent = '正在检查客户端更新…';
     try { render(await invoke('check_client_update')); }
     catch (error) { render({status:'failed',currentVersion,error:String(error)}); }
     finally { checking = false; check.disabled = false; }
   };
-  invoke('desktop_client_update_status').then(value => { if (generation === 0) render(value); })
-    .catch(error => { if (generation === 0) render({status:'failed',currentVersion,error:String(error)}); });
+  document.addEventListener('client-update-status', event => render(event.detail));
 })();
