@@ -2,10 +2,11 @@
 
 The native `ClientUpdater::install` operation accepts only the consent version.
 The updater retains the verified candidate and bytes; IPC never accepts a package
-path, URL, signature or bytes. No platform installer is registered in this slice:
-`installAvailable` is false and Settings keeps installation disabled. Calling the
-command directly also refuses it. Platform tickets must validate the following
-contract before calling `with_installer`.
+path, URL, signature or bytes. The macOS Apple Silicon executor registers only for supported installed app
+locations, with its concrete synchronous lifetime documented in
+[macOS Client Updates](macos-client-updates.md). Other platform executors must
+validate the following contract before calling `with_installer`. Unsupported
+locations/platforms keep `installAvailable` false and direct commands refuse them.
 
 ## Shared protection
 
@@ -32,8 +33,10 @@ finite lock set; do not claim exclusion for all possible future origins.
 `ClientUpdateInstaller::prepare(VerifiedClientUpdate)` obtains protection and
 returns an owned `ClientUpdateHandoff`. Returning is the guarded idle decision.
 No installer runs before `commit`; dropping a prepared handoff must abort safely.
-`commit` returns handoff success or an actionable error only when installation
-is known inactive. An uncertain postcommit result remains pending in the journal
+`commit` returns a typed `ClientUpdateCommit::Handoff` or
+`HandoffWithWarning` after commitment. A warning preserves pending handoff and
+recovery guidance without enabling another attempt. An `Err` is retryable only
+when installation is known inactive. An uncertain postcommit result remains pending in the journal
 and must not return a retryable error. It must preserve the
 lock owner across the whole installation interval. The high-level updater
 serializes requests, retains verified bytes after refusal/known launch failure,
@@ -81,8 +84,9 @@ an interrupted guardian before enabling this path.
 Only `acknowledge_startup(compiled_version, current_exe)` from the actual new
 process can record `Succeeded`, and only after `AwaitingStartup` with matching
 target version and original native application path. Installer launch, zero exit
-code or restarting an old executable is insufficient. The generic journal is
-not yet wired to startup because this slice launches no real installation.
+code or restarting an old executable is insufficient. The macOS executor reconciles this journal during early native setup, even when
+distribution configuration is blank. Platform launch/installation must not bypass
+that actual-version startup acknowledgment.
 
 Automated fixtures prove legacy lock conflicts in both directions, partial
 release, explicit retries and native/UI handoff behavior. They are not platform
