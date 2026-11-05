@@ -2,7 +2,7 @@
 (() => {
   if (!window.__TAURI__) return;
   const invoke = (command, args) => window.__TAURI__.core.invoke(command, args);
-  const publish = value => document.dispatchEvent(new CustomEvent('client-update-action-result', {detail:value}));
+  const publish = (value, action) => document.dispatchEvent(new CustomEvent('client-update-action-result', {detail:{value,action}}));
   const el = id => document.getElementById(id);
   const check = el('check-client-update');
   const recovery = el('client-update-recovery');
@@ -38,9 +38,9 @@
     confirm.close();
     document.dispatchEvent(new Event('client-update-manual-check'));
     downloading = true;
-    render({...latest,status:'downloading',error:null});
-    try { publish(await invoke('download_client_update', {version})); }
-    catch (error) { publish({...latest,status:'failed',currentVersion,error:String(error)}); }
+    publish({...latest,status:'downloading',error:null}, 'download');
+    try { publish(await invoke('download_client_update', {version}), 'download'); }
+    catch (error) { publish({...latest,status:'failed',currentVersion,error:String(error)}, 'download'); }
     finally { downloading = false; }
   };
   const install = el('install-client-update');
@@ -62,17 +62,15 @@
     installConfirm.close();
     installing = true;
     document.dispatchEvent(new Event('client-update-manual-check'));
-    publish({...latest,status:'installing',error:null});
-    try { publish(await invoke('install_client_update', {version:installVersion})); }
-    catch (error) { publish({...latest,status:'ready',error:String(error)}); }
+    publish({...latest,status:'installing',error:null}, 'install');
+    try { publish(await invoke('install_client_update', {version:installVersion}), 'install-result'); }
+    catch (error) { publish({...latest,status:'ready',error:String(error)}, 'install-error'); }
     finally { installing = false; render(latest); }
   };
   function render(value) {
     if (value.automatic && !['available','downloading','verifying','ready','installing','handoff'].includes(value.status)) {
       value = {...value,status:'idle',error:null};
     }
-    if (latest?.status === 'handoff' && value.status !== 'handoff') return;
-    if (['ready','installing'].includes(latest?.status) && !['ready','installing','handoff'].includes(value.status)) return;
     latest = value;
     recovery.disabled = !value.recoveryAvailable;
     el('client-recovery-help').hidden = Boolean(value.recoveryAvailable);
@@ -89,11 +87,11 @@
                 ? `客户端安装失败：${value.error || '请重新检查更新或使用官方安装包恢复'}` : value.status === 'failed'
                 ? `${value.availableVersion ? '下载或验证失败' : '检查失败'}：${value.error || '请重试'}` : '';
     el('client-update-status').className = ['failed','install_failed'].includes(value.status) ? 'error' : '';
-    check.textContent = ['failed','install_failed'].includes(value.status) && !value.availableVersion ? '重试检查客户端更新' : '检查客户端更新';
-    const busy = ['downloading','verifying','ready','installing','handoff'].includes(value.status);
+    check.textContent = value.status === 'handoff' || (['failed','install_failed'].includes(value.status) && !value.availableVersion) ? '重试检查客户端更新' : '检查客户端更新';
+    const busy = ['downloading','verifying','ready','installing'].includes(value.status);
     check.disabled = checking || busy;
     download.hidden = !value.availableVersion || ['ready','installing','handoff'].includes(value.status);
-    download.disabled = busy;
+    download.disabled = busy || value.status === 'handoff';
     download.textContent = value.status === 'failed' ? '重试下载客户端更新' : '下载客户端更新';
     install.hidden = !['ready','installing'].includes(value.status);
     install.disabled = installing || value.status !== 'ready' || !value.installAvailable;
@@ -108,8 +106,8 @@
     document.dispatchEvent(new Event('client-update-manual-check'));
     checking = true; check.disabled = true;
     el('client-update-status').textContent = '正在检查客户端更新…';
-    try { publish(await invoke('check_client_update')); }
-    catch (error) { publish({status:'failed',currentVersion,error:String(error)}); }
+    try { publish(await invoke('check_client_update'), 'check'); }
+    catch (error) { publish(latest?.status === 'handoff' ? {...latest,error:String(error)} : {status:'failed',currentVersion,error:String(error)}, 'check'); }
     finally { checking = false; render(latest); }
   };
   document.addEventListener('client-update-status', event => render(event.detail));

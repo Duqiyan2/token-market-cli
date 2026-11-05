@@ -7,8 +7,9 @@
   let version;
   let revision = 0;
   let busy = false;
-  let verifiedReady = false;
-  let handedOff = false;
+  let latest = null;
+  let nativeProgress = true;
+  let allowHandoff = true;
   let failureAnnounced = false;
   const failureNotice = el('client-update-failure-notice');
   el('client-update-failure-dismiss').onclick = () => { failureNotice.hidden = true; };
@@ -17,13 +18,30 @@
     document.querySelector('[data-desktop-settings]').click();
   };
   document.addEventListener('client-update-manual-check', () => { ++revision; });
-  document.addEventListener('client-update-action-result', event => { ++revision; receive(event.detail); });
-  function receive(value) {
-    // Native keeps the verified candidate until guarded installation is available.
-    if (handedOff && value.status !== 'handoff') return;
-    if (verifiedReady && !['ready','installing','handoff'].includes(value.status)) return;
-    if (['ready','installing','handoff'].includes(value.status)) verifiedReady = true;
-    if (value.status === 'handoff') handedOff = true;
+  document.addEventListener('client-update-action-result', event => { ++revision; receive(event.detail.value, event.detail.action); });
+  function receive(value, action) {
+    // One gate owns both Settings and reminders. Explicit native results can
+    // resolve handoff; unsolicited old progress cannot do so.
+    const recovery = action === 'check' && latest?.status === 'handoff';
+    // A returned native ready result proves this installation is inactive.
+    // It wins over an old handoff event; an IPC error makes no such claim.
+    const rejectedInstall = action === 'install-result' && value.status === 'ready';
+    if (!action && (!nativeProgress || (!allowHandoff && value.status === 'handoff'))) return;
+    if (latest?.status === 'handoff' && value.status !== 'handoff' && !recovery && !rejectedInstall) return;
+    if (['ready','installing'].includes(latest?.status) && !['ready','installing','handoff'].includes(value.status)) return;
+    if (recovery && value.status !== 'handoff') {
+      // All queued native events belong to the resolved attempt. A later
+      // download permits new progress; only an explicit install permits handoff.
+      nativeProgress = false;
+      allowHandoff = false;
+    }
+    if (action === 'download') nativeProgress = true;
+    if (action === 'install' && value.status === 'installing') {
+      nativeProgress = true;
+      allowHandoff = true;
+    }
+    if (rejectedInstall) allowHandoff = false;
+    latest = value;
     document.dispatchEvent(new CustomEvent('client-update-status', {detail:value}));
     if (value.status === 'install_failed' && value.showRecoveryNotice && !failureAnnounced) {
       failureAnnounced = true;

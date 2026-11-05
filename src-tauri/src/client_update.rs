@@ -143,6 +143,8 @@ struct UpdateState {
 pub struct ClientUpdater {
     config: UpdateConfig,
     installer: Option<Arc<dyn ClientUpdateInstaller>>,
+    startup_reconciliation:
+        Option<Arc<dyn Fn() -> Result<ClientUpdateStartup, String> + Send + Sync>>,
     reminders: Mutex<Reminders>,
     startup_started: AtomicBool,
     state: Mutex<UpdateState>,
@@ -169,6 +171,7 @@ impl ClientUpdater {
         Self {
             config: UpdateConfig::from_build(),
             installer: None,
+            startup_reconciliation: None,
             reminders: Mutex::new(Reminders::new(path)),
             startup_started: AtomicBool::new(false),
             state: Mutex::new(UpdateState {
@@ -199,6 +202,16 @@ impl ClientUpdater {
             .expect("client update state")
             .status
             .install_available = true;
+        self
+    }
+
+    /// Native-owned paths and process facts only; never selected through IPC.
+    fn with_startup_reconciliation(
+        mut self,
+        reconcile: impl Fn() -> Result<ClientUpdateStartup, String> + Send + Sync + 'static,
+    ) -> Self {
+        self.reconcile_startup_result(reconcile());
+        self.startup_reconciliation = Some(Arc::new(reconcile));
         self
     }
 
@@ -255,7 +268,19 @@ impl ClientUpdater {
     fn reconcile_startup_result(&self, recovery: Result<ClientUpdateStartup, String>) {
         let outcome = recovery.unwrap_or_else(ClientUpdateStartup::Pending);
         let (status, error, show_notice) = match outcome {
-            ClientUpdateStartup::Clear => return,
+            ClientUpdateStartup::Clear => {
+                let mut state = self.state.lock().expect("client update state");
+                if state.status.status == "handoff" {
+                    state.status.status = "idle".into();
+                    state.status.error = None;
+                    state.status.show_recovery_notice = false;
+                    // Recovery proves the durable attempt resolved, not that
+                    // an earlier in-memory package is still safe to install.
+                    state.candidate = None;
+                    state.verified_bytes = None;
+                }
+                return;
+            }
             ClientUpdateStartup::Pending(error) => ("handoff", error, false),
             ClientUpdateStartup::RetryableFailure(error) => {
                 // Preserve this known native outcome until a manual check. The
@@ -344,11 +369,20 @@ impl ClientUpdater {
     ) -> ClientUpdateStatus {
         if matches!(
             self.status().status.as_str(),
-            "downloading" | "verifying" | "ready" | "installing" | "handoff"
-        ) {
+            "downloading" | "verifying" | "ready" | "installing"
+        ) || (self.status().status == "handoff"
+            && (automatic || self.startup_reconciliation.is_none()))
+        {
             return self.status();
         }
         let _operation = self.operation.lock().await;
+        if !automatic && self.status().status == "handoff" {
+            if let Some(reconcile) = &self.startup_reconciliation {
+                // Explicit retry re-reads native facts under the platform's
+                // guards. Errors/uncertain installation retain the handoff.
+                self.reconcile_startup_result(reconcile());
+            }
+        }
         if matches!(
             self.status().status.as_str(),
             "ready" | "installing" | "handoff"
@@ -531,8 +565,7 @@ pub fn setup(app: &AppHandle) {
             Some(installer) => updater.with_installer(installer),
             None => updater,
         };
-        updater.reconcile_startup_result(macos::reconcile_startup());
-        updater
+        updater.with_startup_reconciliation(macos::reconcile_startup)
     };
     #[cfg(windows)]
     let updater = {
@@ -540,8 +573,7 @@ pub fn setup(app: &AppHandle) {
             Some(installer) => updater.with_installer(installer),
             None => updater,
         };
-        updater.reconcile_startup_result(windows::reconcile_startup());
-        updater
+        updater.with_startup_reconciliation(windows::reconcile_startup)
     };
     app.manage(updater);
     let handle = app.clone();
