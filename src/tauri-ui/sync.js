@@ -12,7 +12,9 @@
         window.TokenMarketWorkspace.refresh(),
         window.TokenMarketTools.sync(),
       ]);
-      await window.TokenMarketUsage?.refresh();
+      // Usage owns its request queue. Slow log queries must not block later
+      // page/workspace lifecycle events from syncing the rest of the dashboard.
+      void window.TokenMarketUsage?.refresh();
     } finally {
       running = false;
       if (requested) { requested = false; request(); }

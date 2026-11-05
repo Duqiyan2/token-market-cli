@@ -50,7 +50,7 @@ async fn native_identity_and_exact_filters_are_sent_without_model_keys() {
                 }
             }
         }
-        let data=json!({"success":true,"data":{"tools":[{"id":"codex","name":"Codex","keyCount":2}],"buckets":[],"items":[],"nextCursor":null,"page":1,"pageSize":20,"asOf":100}}).to_string();
+        let data=json!({"success":true,"data":{"tools":[{"id":"codex","name":"Codex","keyCount":2}],"granularity":"HOUR","buckets":[{"date":"1970-01-01","bucketStart":1,"requestCount":21,"costMicro":"9007199254740993","inputTokens":100,"outputTokens":20,"totalTokens":120,"cacheReadTokens":80,"cacheWriteTokens":0,"inputTokenCount":100}],"groups":[{"tool":"codex","model":"model-a","requestCount":21,"costMicro":"9007199254740993","totalTokens":120,"successCount":20,"speedOutputTokens":100,"generationMs":2000,"ttftTotalMs":200,"ttftCount":1}],"items":[],"nextCursor":null,"page":1,"pageSize":20,"asOf":100}}).to_string();
         socket
             .write_all(
                 format!(
@@ -73,10 +73,16 @@ async fn native_identity_and_exact_filters_are_sent_without_model_keys() {
         .await
         .unwrap();
     assert_eq!(response.tools[0].key_count, 2);
+    assert_eq!(response.granularity.as_deref(), Some("HOUR"));
+    assert_eq!(response.buckets[0].bucket_start, Some(1));
+    assert_eq!(response.buckets[0].cost_micro, "9007199254740993");
+    let groups = response.groups.as_ref().unwrap();
+    assert_eq!(groups[0].model, "model-a");
+    assert_eq!(groups[0].cost_micro, "9007199254740993");
     server.await.unwrap();
 }
 #[tokio::test]
-async fn changed_identity_invalid_device_or_unbounded_range_fails_before_network() {
+async fn changed_identity_invalid_device_or_negative_range_fails_before_network() {
     let client = UsageClient::new("http://127.0.0.1:1".into());
     let mut q = query();
     q.workspace_id = "8".into();
@@ -90,8 +96,11 @@ async fn changed_identity_invalid_device_or_unbounded_range_fails_before_network
     q.owner_id = "43".into();
     assert!(q.validate(&session()).is_err());
     q = query();
-    q.end_time = 40 * 86400000;
+    q.start_time = -1;
     assert!(q.validate(&session()).is_err());
+    q.start_time = 0;
+    q.end_time = 40 * 86400000;
+    assert!(q.validate(&session()).is_ok());
     assert!(client
         .query(&session(), "bad", &query(), UsageKind::Buckets)
         .await

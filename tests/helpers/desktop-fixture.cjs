@@ -55,11 +55,25 @@ module.exports = async function openFixture(browser, options = {}) {
     function usageResponse(command, request) {
       if(command==='desktop_usage_buckets'&&options.usageSummaryError)throw Error('汇总服务暂不可用');
       if(command==='desktop_usage_logs'&&options.usageLogError)throw Error('日志服务暂不可用');
-      const items=fixture.usageRows.filter(row=>row.workspaceId===request.workspaceId&&row.startedAt>=request.startTime&&row.startedAt<=request.endTime&&(!request.tool||row.tool===request.tool)&&(!request.model||row.model.includes(request.model))&&(request.status==='ALL'||!request.status||row.status===request.status));
+      const items=fixture.usageRows.filter(row=>row.workspaceId===request.workspaceId&&row.startedAt>=request.startTime&&row.startedAt<=request.endTime&&(!request.tool||row.tool===request.tool)&&(!request.model||row.model===request.model)&&(request.status==='ALL'||!request.status||row.status===request.status));
       const tools=request.workspaceId==='personal'?[{id:'codex',name:'Codex',keyCount:2}]:[{id:'claude-code',name:'Claude Code',keyCount:1}];
       const start=Number(request.cursor || 0),page=items.slice(start,start+request.pageSize),buckets=[];
-      const groups=new Map();for(const row of items){const date=new Date(row.startedAt+8*3600000).toISOString().slice(0,10);let b=groups.get(date);if(!b){b={date,requestCount:0,costMicro:'0',inputTokens:0,outputTokens:0,totalTokens:0,cacheReadTokens:0,cacheWriteTokens:0,inputTokenCount:0};groups.set(date,b);}b.requestCount++;b.costMicro=String(BigInt(b.costMicro)+BigInt(row.costMicro));for(const field of ['inputTokens','outputTokens','totalTokens','cacheReadTokens','cacheWriteTokens'])b[field]+=row[field];b.inputTokenCount+=row.totalTokens-row.outputTokens;}
-      return {tools,buckets:command==='desktop_usage_buckets'?[...groups.values()]:[],items:command==='desktop_usage_logs'?clone(page):[],nextCursor:command==='desktop_usage_logs'&&start+request.pageSize<items.length?String(start+request.pageSize):null,page:request.page,pageSize:request.pageSize,asOf:Date.now()};
+      const hourly=request.endTime-request.startTime<=86400000;
+      const groups=new Map();for(const row of items){
+        const bucketStart=hourly?request.startTime+Math.min(Math.floor((row.startedAt-request.startTime)/3600000),Math.floor(Math.max(request.endTime-request.startTime-1,0)/3600000))*3600000:null;
+        const date=new Date((hourly?bucketStart:row.startedAt)+8*3600000).toISOString().slice(0,10),key=hourly?bucketStart:date;
+        let b=groups.get(key);if(!b){b={date,bucketStart,requestCount:0,costMicro:'0',inputTokens:0,outputTokens:0,totalTokens:0,cacheReadTokens:0,cacheWriteTokens:0,inputTokenCount:0};groups.set(key,b);}
+        b.requestCount++;b.costMicro=String(BigInt(b.costMicro)+BigInt(row.costMicro));for(const field of ['inputTokens','outputTokens','totalTokens','cacheReadTokens','cacheWriteTokens'])b[field]+=row[field];b.inputTokenCount+=row.totalTokens-row.outputTokens;
+      }
+      const stats=new Map();
+      for(const row of fixture.usageRows.filter(row=>row.workspaceId===request.workspaceId&&row.startedAt>=request.startTime&&row.startedAt<=request.endTime&&(request.status==='ALL'||!request.status||(request.status==='CANCELLED'?row.status.startsWith('CLIENT_CANCELLED'):request.status==='FAILED'?!['SUCCESS','CLIENT_CANCELLED_BEFORE_FIRST_TOKEN','CLIENT_CANCELLED_AFTER_FIRST_TOKEN'].includes(row.status):row.status===request.status)))) {
+        const key=row.tool+':'+row.model;let group=stats.get(key);
+        if(!group){group={tool:row.tool,model:row.model,requestCount:0,costMicro:'0',totalTokens:0,successCount:0,speedOutputTokens:0,generationMs:0,ttftTotalMs:0,ttftCount:0};stats.set(key,group);}
+        group.requestCount++;group.costMicro=String(BigInt(group.costMicro)+BigInt(row.costMicro));group.totalTokens+=row.totalTokens;group.successCount+=row.status==='SUCCESS'?1:0;
+        if(row.ttftMs>0){group.ttftTotalMs+=row.ttftMs;group.ttftCount++;}
+        if(row.stream&&row.status==='SUCCESS'&&row.outputTokens>=100&&row.ttftMs>0&&row.durationMs-row.ttftMs>=100){group.speedOutputTokens+=row.outputTokens;group.generationMs+=row.durationMs-row.ttftMs;}
+      }
+      return {tools,granularity:options.usageLegacyBuckets?null:hourly?'HOUR':'DAY',groups:command==='desktop_usage_buckets'?[...stats.values()]:[],buckets:command==='desktop_usage_buckets'?[...groups.values()].map(b=>options.usageLegacyBuckets?{...b,bucketStart:null}:b):[],items:command==='desktop_usage_logs'?clone(page):[],nextCursor:command==='desktop_usage_logs'&&start+request.pageSize<items.length?String(start+request.pageSize):null,page:request.page,pageSize:request.pageSize,asOf:Date.now()};
     }
 
     window.__TAURI__ = {window:{getCurrentWindow:()=>({setTheme:async value=>{fixture.nativeTheme=value;}})},event:{listen:async (name,fn) => { (fixture.events[name] ||= []).push(fn); return () => {}; }},core:{invoke:async (command,args = {}) => {

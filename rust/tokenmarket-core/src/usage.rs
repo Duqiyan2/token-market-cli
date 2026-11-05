@@ -30,9 +30,8 @@ impl UsageQuery {
         }
         if self.workspace_id.is_empty()
             || !self.workspace_id.bytes().all(|c| c.is_ascii_digit())
-            || self.start_time <= 0
+            || self.start_time < 0
             || self.end_time < self.start_time
-            || self.end_time - self.start_time > 31 * 86_400_000
             || !(1..=100).contains(&self.page_size)
             || !(1..=10_000).contains(&self.page)
         {
@@ -60,7 +59,9 @@ pub enum UsageKind {
 pub struct UsageResponse {
     pub tools: Vec<UsageTool>,
     pub buckets: Vec<UsageBucket>,
+    pub granularity: Option<String>,
     pub items: Vec<UsageRow>,
+    pub groups: Option<Vec<UsageGroup>>,
     pub next_cursor: Option<String>,
     pub page: u32,
     pub page_size: u32,
@@ -77,6 +78,7 @@ pub struct UsageTool {
 #[serde(rename_all = "camelCase")]
 pub struct UsageBucket {
     pub date: String,
+    pub bucket_start: Option<i64>,
     pub request_count: u64,
     pub cost_micro: String,
     pub input_tokens: u64,
@@ -85,6 +87,20 @@ pub struct UsageBucket {
     pub cache_read_tokens: u64,
     pub cache_write_tokens: u64,
     pub input_token_count: u64,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageGroup {
+    pub tool: String,
+    pub model: String,
+    pub request_count: u64,
+    pub cost_micro: String,
+    pub total_tokens: u64,
+    pub success_count: u64,
+    pub speed_output_tokens: u64,
+    pub generation_ms: u64,
+    pub ttft_total_ms: u64,
+    pub ttft_count: u64,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

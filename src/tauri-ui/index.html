@@ -57,29 +57,44 @@
     <section id="usage-page" data-view="usage" aria-labelledby="usage-title" hidden>
       <header class="page-heading"><div><h1 id="usage-title">用量统计</h1><p id="usage-scope">当前空间 · 本设备工具的历史用量</p></div><button id="usage-refresh">刷新</button></header>
       <form id="usage-filters" class="usage-filters" aria-label="用量筛选">
-        <label>时间<select id="usage-range"><option value="1">今天</option><option value="7">近 7 天</option><option value="30" selected>近 30 天</option></select></label>
-        <label>工具<select id="usage-tool"><option value="">全部工具</option></select></label>
-        <label>模型<input id="usage-model" type="search" placeholder="搜索模型" maxlength="128"></label>
-        <label>状态<select id="usage-status"><option value="ALL">全部状态</option><option value="SUCCESS">成功</option><option value="FAILED">失败</option><option value="CANCELLED">已取消</option></select></label>
-        <button type="submit">查询</button>
+        <div class="usage-picker-anchor">
+          <button id="usage-range-trigger" type="button" class="usage-filter-button" aria-haspopup="dialog" aria-expanded="false" aria-controls="usage-date-panel"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18M8 15h2M14 15h2"/></svg><span id="usage-range-label">近 30 天</span><svg class="usage-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+          <div id="usage-date-panel" class="usage-date-panel" role="dialog" aria-label="选择日期与时间" tabindex="-1" hidden>
+            <div id="usage-presets" class="usage-presets"></div>
+            <div class="usage-date-layout">
+              <div class="usage-date-fields"><p class="caption">支持日期与时间 · 北京时间</p>
+                <div class="usage-date-field active" data-date-field="start"><label for="usage-start-date">开始时间</label><div><input id="usage-start-date" type="date" min="1970-01-01" aria-label="开始日期"><input id="usage-start-time" type="time" aria-label="开始时刻"></div></div>
+                <div class="usage-date-field" data-date-field="end"><label for="usage-end-date">结束时间</label><div><input id="usage-end-date" type="date" min="1970-01-01" aria-label="结束日期"><input id="usage-end-time" type="time" aria-label="结束时刻"></div></div>
+                <label class="usage-live-end"><input id="usage-live-end" type="checkbox">结束时间跟随当前时刻</label>
+                <p id="usage-date-error" class="usage-date-error" role="status" hidden></p>
+                <div class="usage-date-actions"><button id="usage-date-cancel" type="button" class="quiet">取消</button><button id="usage-date-apply" type="button" class="primary">确定</button></div>
+              </div>
+              <div class="usage-calendar"><div class="usage-calendar-heading"><button id="usage-month-prev" type="button" aria-label="上个月">‹</button><strong id="usage-month-label"></strong><button id="usage-month-next" type="button" aria-label="下个月">›</button></div><div class="usage-calendar-week" aria-hidden="true"><span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span></div><div id="usage-calendar-days" class="usage-calendar-days" role="group" aria-label="选择日期"></div></div>
+            </div>
+          </div>
+        </div>
+        <span class="usage-filter-divider" aria-hidden="true"></span>
+        <div id="usage-tools" class="usage-tool-segments" role="group" aria-label="按工具筛选"></div>
       </form>
       <div id="usage-feedback" class="notice error" role="status" hidden></div>
       <section class="usage-overview" aria-label="用量汇总与趋势">
         <div class="usage-cards">
           <button type="button" class="usage-card" data-usage-metric="costMicro" aria-pressed="false"><span>总费用</span><strong id="usage-cost">—</strong></button>
           <button type="button" class="usage-card" data-usage-metric="requestCount" aria-pressed="false"><span>总请求数</span><strong id="usage-requests">—</strong></button>
-          <button type="button" class="usage-card active" data-usage-metric="totalTokens" aria-pressed="true"><span>消耗 Tokens</span><strong id="usage-tokens">—</strong></button>
-          <button type="button" class="usage-card" data-usage-metric="cacheRate" aria-pressed="false"><span>缓存命中率</span><strong id="usage-cache">—</strong></button>
+          <button type="button" class="usage-card active" data-usage-metric="totalTokens" aria-pressed="true"><span>消耗 Tokens <span class="usage-help" title="平台记录的总 Token，包含缓存 Token，不重复累加缓存。">ⓘ</span></span><strong id="usage-tokens">—</strong></button>
+          <button type="button" class="usage-card" data-usage-metric="cacheRate" aria-pressed="false"><span>缓存命中率 <span class="usage-help" title="累计缓存读取 Token / 累计规范化输入 Token。">ⓘ</span></span><strong id="usage-cache">—</strong></button>
         </div>
-        <div class="usage-chart-heading"><h2 id="usage-chart-title">Tokens · 按天</h2><span id="usage-updated" class="caption"></span></div>
-        <div id="usage-chart" class="usage-chart" role="img" aria-labelledby="usage-chart-title"></div>
+        <div id="usage-trend"><div class="usage-chart-heading"><h2 id="usage-chart-title">Tokens · 按天</h2><span id="usage-updated" class="caption"></span></div>
+        <div id="usage-chart" class="usage-chart" role="img" aria-labelledby="usage-chart-title"></div></div>
       </section>
       <section class="usage-log-panel" aria-label="请求日志">
-        <header class="usage-log-heading"><h2>请求日志</h2><span id="usage-key-count" class="caption"></span></header>
+        <header class="usage-log-heading"><h2 id="usage-log-title" class="usage-log-title">请求日志 <span id="usage-log-count">—</span></h2><span id="usage-key-count" class="caption"></span></header>
+        <div id="usage-log-view" aria-labelledby="usage-log-title">
         <div class="usage-table-scroll" tabindex="0" role="region" aria-label="请求日志表格，可横向滚动">
-          <table class="usage-table"><thead><tr><th scope="col">时间</th><th scope="col">工具</th><th scope="col">模型</th><th scope="col">API Key</th><th scope="col">费用</th><th scope="col">输入</th><th scope="col">输出</th><th scope="col">缓存命中</th><th scope="col">状态</th><th scope="col">耗时</th><th scope="col">首字</th></tr></thead><tbody id="usage-rows"><tr><td colspan="11">打开页面后加载用量。</td></tr></tbody></table>
+          <table class="usage-table"><thead><tr><th scope="col">时间</th><th scope="col">工具</th><th scope="col">模型</th><th scope="col">费用</th><th scope="col">输入</th><th scope="col">输出</th><th scope="col">缓存命中</th><th scope="col">状态</th><th scope="col">耗时</th><th scope="col">首字</th></tr></thead><tbody id="usage-rows"><tr><td colspan="10">打开页面后加载用量。</td></tr></tbody></table>
         </div>
-        <footer class="usage-pagination"><label>每页<select id="usage-page-size"><option value="20">20 条</option><option value="50">50 条</option><option value="100">100 条</option></select></label><span id="usage-page-label">第 1 页</span><button id="usage-prev" disabled>上一页</button><button id="usage-next" disabled>下一页</button></footer>
+        <footer class="usage-pagination"><div class="usage-pagination-summary"><span id="usage-total-count" role="status" aria-live="polite">共 — 条</span><label for="usage-page-size">每页</label><span class="usage-page-size-control"><select id="usage-page-size" aria-label="每页条数"><option value="20">20 条</option><option value="50">50 条</option><option value="100">100 条</option></select><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span></div><span id="usage-page-label">第 1 页</span><button id="usage-prev" disabled>上一页</button><button id="usage-next" disabled>下一页</button></footer>
+        </div>
       </section>
       <p class="usage-footnote">包含本设备在当前空间创建的全部历史工具 Key，费用单位与平台流水一致。已断开工具和更换 Key 前的流水仍会保留。时间按北京时间显示。</p>
     </section>
@@ -139,6 +154,10 @@
   <button id="change-account" hidden>切换账号</button><button id="logout" hidden>退出登录</button>
 </section>
 <section id="settings-standalone" class="settings-standalone" hidden><header class="settings-standalone-header"><div class="brand"><img src="assets/token-market.svg" alt="">Token Market</div><button id="settings-return-login" class="quiet">返回登录</button></header><main id="settings-standalone-content"></main></section>
+<dialog id="usage-request-detail" class="usage-detail-drawer" aria-labelledby="usage-detail-title" aria-modal="true">
+  <header class="usage-detail-header"><h2 id="usage-detail-title">请求详情</h2><button id="usage-detail-close" type="button" class="quiet" aria-label="关闭请求详情" title="关闭请求详情" autofocus><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
+  <div id="usage-detail-body" class="usage-detail-body"></div>
+</dialog>
 <dialog id="desktop-close-dialog" aria-labelledby="desktop-close-title">
   <h2 id="desktop-close-title">关闭窗口后仍在后台运行</h2>
   <p>Token Market 将继续在后台运行。可通过 Dock／托盘图标或再次打开应用恢复窗口；彻底关闭请使用“退出应用”。</p>
@@ -151,6 +170,8 @@
 <script src="workspace.js"></script>
 <script src="tools.js"></script>
 <script src="connection-test.js"></script>
+<script src="usage-date-picker.js"></script>
+<script src="usage-detail.js"></script>
 <script src="usage.js"></script>
 <script src="window-lifecycle.js"></script>
 <script src="app.js"></script>
