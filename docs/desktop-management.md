@@ -21,6 +21,14 @@ Missing model metadata is supplemented from the bundled [model capability
 catalogue](model-capabilities.md), while valid server values retain priority.
 Harness also receives per-model reasoning controls and protocol compatibility.
 
+WorkBuddy displays imported models as `Token Market · <display name>` (falling
+back to the model ID); API requests keep the original model ID. CLI and desktop
+share the WorkBuddy capability projection: input/context and output limits,
+tool calls, image input, reasoning support, always-on reasoning, permitted
+efforts and default effort. See the [field mapping](model-capabilities.md#workbuddy).
+Reasoning settings are managed per field so unrelated settings inside the
+`reasoning` object survive reconnect and disconnect.
+
 Connect saves the credential, loads the model catalogue and publishes managed
 configuration with encrypted restoration records. It sends no generation request.
 Reconnect validates and reuses a saved credential when possible. A different

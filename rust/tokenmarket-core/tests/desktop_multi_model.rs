@@ -232,9 +232,11 @@ async fn workbuddy_imports_all_compatible_models_and_restores_only_owned_fields_
         );
         assert_eq!(
             rows[1],
-            json!({"id":"vendor/zeta~1","name":"Zeta","url":format!("{url}/v1/chat/completions"),"apiKey":"sk-fixture","vendor":"Token Market","useCustomProtocol":true})
+            json!({"id":"vendor/zeta~1","name":"Token Market · Zeta","url":format!("{url}/v1/chat/completions"),"apiKey":"sk-fixture","vendor":"Token Market","useCustomProtocol":true,"supportsToolCall":true})
         );
-        assert!(rows[2].get("supportsToolCall").is_none());
+        assert_eq!(rows[2]["name"], "Token Market · alpha");
+        assert_eq!(rows[2]["supportsToolCall"], true);
+        assert_eq!(rows[2]["maxInputTokens"], 65536);
         assert!(rows[2].get("defaultEffort").is_none());
         if applied.is_object() {
             assert_eq!(
@@ -284,6 +286,111 @@ async fn workbuddy_imports_all_compatible_models_and_restores_only_owned_fields_
         }
         assert!(manager.list().unwrap().is_empty());
         assert_eq!(server.await.unwrap().len(), 2);
+    }
+}
+
+#[tokio::test]
+async fn workbuddy_syncs_capabilities_and_restores_nested_fields_after_reconnect() {
+    use tokenmarket_core::connections::DisconnectRequest;
+    for wrapped in [false, true] {
+        let root = tempdir().unwrap();
+        let inventory = inventory(root.path());
+        let path = root.path().join("models.json");
+        let original_rows = json!([{"id":"glm-5.3","name":"Manual","maxInputTokens":1234,"supportsReasoning":false,"reasoning":{"defaultEffort":"low","summary":"auto"}}]);
+        let original = if wrapped {
+            json!({"models":original_rows,"availableModels":["glm-5.3"]})
+        } else {
+            original_rows
+        };
+        std::fs::write(&path, serde_json::to_vec(&original).unwrap()).unwrap();
+        let catalogue = json!({"data":[
+            {"id":"glm-5.3","model_types":["TEXT_GENERATION"],"max_input_tokens":128000,"max_output_tokens":8192,"input_modalities":["text","image"]},
+            {"id":"deepseek-v4.1-flash","model_types":["TEXT_GENERATION"]},
+            {"id":"kimi-k2.6","model_types":["TEXT_GENERATION"]},
+            {"id":"minimax-m2.5","model_types":["TEXT_GENERATION"]},
+            {"id":"custom","model_types":["TEXT_GENERATION"],"context_window_tokens":32000,"input_modalities":["text"]}
+        ]});
+        let next = json!({"data":[{"id":"glm-5.3","model_types":["TEXT_GENERATION"],"supports_reasoning":false}]});
+        let (url, server) = platform_sequence(vec![catalogue, next], 3).await;
+        let manager = support::manager(root.path().join("state"), url.clone(), url);
+        manager
+            .connect(context(), ToolId::WorkBuddy, &inventory, path.clone())
+            .await
+            .unwrap();
+        let mut applied = read(&path);
+        let rows = if wrapped {
+            applied["models"].as_array_mut().unwrap()
+        } else {
+            applied.as_array_mut().unwrap()
+        };
+        assert_eq!(rows[0]["maxInputTokens"], 128000);
+        assert_eq!(rows[0]["maxOutputTokens"], 8192);
+        assert_eq!(rows[0]["supportsImages"], true);
+        assert_eq!(rows[0]["onlyReasoning"], true);
+        assert_eq!(
+            rows[0]["reasoning"]["supportedEfforts"],
+            json!(["low", "high", "max"])
+        );
+        assert_eq!(rows[0]["reasoning"]["defaultEffort"], "high");
+        assert_eq!(rows[0]["reasoning"]["summary"], "auto");
+        assert_eq!(rows[1]["maxOutputTokens"], 384000);
+        assert_eq!(rows[1]["reasoning"]["canDisableThinking"], true);
+        assert_eq!(
+            rows[2]["reasoning"],
+            json!({"supportedEfforts":[],"canDisableThinking":true})
+        );
+        assert_eq!(rows[3]["onlyReasoning"], true);
+        assert_eq!(rows[3]["reasoning"]["supportedEfforts"], json!([]));
+        assert_eq!(rows[4]["maxInputTokens"], 32000);
+        assert_eq!(rows[4]["supportsImages"], false);
+        assert!(rows[4].get("supportsReasoning").is_none());
+        assert!(rows
+            .iter()
+            .all(|r| r.get("compat").is_none() && r.get("reasoningEfforts").is_none()));
+        rows[0]["reasoning"]["summary"] = json!("detailed");
+        rows[0]["reasoning"]["custom"] = json!(true);
+        rows.reverse();
+        std::fs::write(&path, serde_json::to_vec(&applied).unwrap()).unwrap();
+        manager
+            .reconnect(
+                context(),
+                ToolId::WorkBuddy,
+                "9001",
+                &inventory,
+                path.clone(),
+            )
+            .await
+            .unwrap();
+        let current = read(&path);
+        let rows = if wrapped {
+            current["models"].as_array().unwrap()
+        } else {
+            current.as_array().unwrap()
+        };
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["supportsReasoning"], false);
+        assert_eq!(rows[0]["reasoning"]["supportedEfforts"], json!([]));
+        assert_eq!(rows[0]["reasoning"]["defaultEffort"], "low");
+        assert_eq!(rows[0]["reasoning"]["summary"], "detailed");
+        manager
+            .disconnect(
+                ToolId::WorkBuddy,
+                "9001",
+                None,
+                DisconnectRequest::default(),
+            )
+            .await
+            .unwrap();
+        let mut expected = original;
+        let row = if wrapped {
+            &mut expected["models"][0]
+        } else {
+            &mut expected[0]
+        };
+        row["reasoning"]["summary"] = json!("detailed");
+        row["reasoning"]["custom"] = json!(true);
+        assert_eq!(read(&path), expected);
+        server.await.unwrap();
     }
 }
 

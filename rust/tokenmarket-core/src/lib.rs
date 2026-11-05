@@ -22,4 +22,5 @@ pub mod connections;
 mod dumate;
 mod qwenwork;
 pub mod qwenwork_runtime;
+mod workbuddy;
 mod yaml;

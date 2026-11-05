@@ -219,14 +219,7 @@ impl MultiModelConfig {
                     rows.len() - 1
                 };
                 let row = rows[index].as_object_mut().unwrap();
-                let mut values = vec![
-                    (
-                        "name",
-                        json!(model["display_name"]
-                            .as_str()
-                            .filter(|name| !name.is_empty())
-                            .unwrap_or(id)),
-                    ),
+                let values = vec![
                     (
                         "url",
                         json!(format!(
@@ -238,16 +231,40 @@ impl MultiModelConfig {
                     ("vendor", json!("Token Market")),
                     ("useCustomProtocol", json!(true)),
                 ];
-                if let Some(tokens) = model["max_output_tokens"].as_u64().filter(|n| *n > 0) {
-                    values.push(("maxOutputTokens", json!(tokens)));
-                }
-                for (name, applied) in values {
+                let mut settings = crate::workbuddy::model_settings(model);
+                let reasoning = settings.as_object_mut().unwrap().remove("reasoning");
+                for (name, applied) in values
+                    .into_iter()
+                    .map(|(name, value)| (name.to_owned(), value))
+                    .chain(
+                        settings
+                            .as_object()
+                            .unwrap()
+                            .iter()
+                            .map(|(name, value)| (name.clone(), value.clone())),
+                    )
+                {
                     fields.push(FieldReceipt {
                         retired: false,
                         pointer: format!("{selector}/{name}"),
-                        before: row.insert(name.into(), applied.clone()),
+                        before: row.insert(name, applied.clone()),
                         applied,
                     });
+                }
+                if let Some(reasoning) = reasoning {
+                    if !row.contains_key("reasoning") {
+                        row.insert("reasoning".into(), json!({}));
+                        created_containers.push(format!("{selector}/reasoning"));
+                    }
+                    let target = row.get_mut("reasoning").unwrap().as_object_mut().unwrap();
+                    for (name, applied) in reasoning.as_object().unwrap() {
+                        fields.push(FieldReceipt {
+                            retired: false,
+                            pointer: format!("{selector}/reasoning/{name}"),
+                            before: target.insert(name.clone(), applied.clone()),
+                            applied: applied.clone(),
+                        });
+                    }
                 }
             }
             if let Some(available) = self

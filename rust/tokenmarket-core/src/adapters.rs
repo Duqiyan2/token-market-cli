@@ -9,7 +9,7 @@ use std::{
 use crate::config::{
     create_backup, home_dir, read_json_if_exists, write_private_file, write_private_json,
 };
-use crate::models::{resolve_model_capabilities, ToolConfig};
+use crate::models::ToolConfig;
 
 /// Keep desktop connections and terminal setup aligned on every Claude model selector.
 pub(crate) fn claude_model_environment(model: &str) -> [(&'static str, &str); 10] {
@@ -563,27 +563,21 @@ impl Adapter {
                             .and_then(Value::as_str)
                             .is_some_and(|id| id.starts_with("tokenmarket-")))
                 });
-                let capabilities = resolve_model_capabilities(&config.model)?;
                 let mut entry = json!({
                     "id": config.model,
-                    "name": "Token Market",
                     "model": config.model,
                     "vendor": "Token Market",
                     "url": format!("{}/v1/chat/completions", config.base_url.trim_end_matches('/')),
                     "apiKey": config.api_key,
-                    "supportsToolCall": true,
-                    "supportsImages": false,
-                    "supportsReasoning": true,
                     "useCustomProtocol": true,
-                    "reasoning": {
-                        "defaultEffort": capabilities.default_effort,
-                        "supportedEfforts": capabilities.supported_efforts,
-                        "canDisableThinking": capabilities.can_disable_thinking,
-                    }
                 });
-                if let Some(tokens) = config.context_window_tokens {
-                    entry["maxInputTokens"] = json!(tokens);
-                }
+                let metadata = json!({"id": config.model, "context_window_tokens": config.context_window_tokens});
+                entry.as_object_mut().unwrap().extend(
+                    crate::workbuddy::model_settings(&metadata)
+                        .as_object()
+                        .unwrap()
+                        .clone(),
+                );
                 entries.push(entry);
                 write_private_json(&config_path, &Value::Array(entries))?;
             }

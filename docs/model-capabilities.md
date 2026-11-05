@@ -31,6 +31,25 @@ GLM-5.3、Qwen3.8 等不支持关闭推理的模型使用网关标准 `reasoning
 
 所有长度单位均为 token。`input` 是文本/图片模态，不是输入长度。Harness 模型配置没有独立 `maxInputTokens`，本次不添加不存在的输入长度字段；系统提示、工具、历史和输出共享上下文窗口。小上下文模型仍需在 Harness 中配置适合窗口的压缩余量。
 
+## WorkBuddy
+
+CLI 与桌面接入、重新接入共用同一投影，适配本机 WorkBuddy 5.9.3 的自定义模型字段：
+
+| 数据 | WorkBuddy 字段与规则 |
+| --- | --- |
+| 显示名称 | `name`：`Token Market · <显示名或模型 ID>`，请求 ID 不变 |
+| 输入长度、上下文窗口 | `maxInputTokens`：优先输入上限，无输入上限时使用上下文窗口；两者都有时取较小值。WorkBuddy 无独立字段表达两项限制 |
+| 输出长度 | `maxOutputTokens`：模型实际输出上限，不套用 Harness 的默认请求预算截断 |
+| Agent 类型 | `TEXT_GENERATION` 模型的 `supportsToolCall: true` |
+| 输入模态 | `supportsImages`：根据 `input_modalities` 是否含 `image` |
+| 推理能力 | `supportsReasoning` |
+| 关闭推理 | `reasoning.canDisableThinking`：仅已知 `off` 选项的模型允许关闭；`onlyReasoning` 隐藏不适用的关闭入口 |
+| 推理强度 | `reasoning.supportedEfforts`：按已知档位生成；只有开关或常开、没有强度参数的模型使用空数组 |
+| 默认强度 | `reasoning.defaultEffort`：在已知可用档位中依次选择 Medium / High / Low / Minimal / X-High / Max；只有开关的模型不生成默认强度 |
+| 温度 | 元数据提供有效 `temperature` 时同步，缺失时不强加值 |
+
+接口有效值优先，内置目录补齐缺失项；未知模型不推测长度或推理控制。只确认具备推理能力但未确认开关/强度的条目不开放这些控制。WorkBuddy 自身根据原始模型 ID 选择请求格式，不写入 Harness 专用的 `compat` 或 `reasoningEfforts` 字段。新增托管字段也加入逐字段恢复记录，重连移除过期能力，断开时还原接入前的值并保留未托管的后续编辑。
+
 ## 来源与维护
 
 快照提取自本机 DeepSeek Harness `0.2.1-rc.5` 随附的 `@earendil-works/pi-ai` `1.1.0` 模型目录，核查日期为 2026-11-05。来源 provider 保存在各条目的 `source_provider` 中，MIT 授权保存在快照及 [授权文件](../scripts/licenses/pi-ai-MIT.txt) 中。
