@@ -48,6 +48,7 @@ fn fixture_guardian() {
         return;
     };
     let root = PathBuf::from(root);
+    fs::create_dir_all(root.join(".tokenmarket/client-login/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")).unwrap();
     let plan = GuardianPlan {
         home: root.clone(),
         origin: "https://fixture.invalid".into(),
@@ -139,19 +140,40 @@ fn fixture_legacy_mutator() {
     let Some(root) = std::env::var_os("GUARDIAN_PROBE_ROOT") else {
         return;
     };
-    let path = PathBuf::from(root).join(".tokenmarket/desktop-connections/operation.lock");
-    let file = fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(path)
-        .unwrap();
-    if file.try_lock().is_ok() {
-        println!("MUTATED");
-    } else {
-        println!("BUSY");
+    let root = PathBuf::from(root);
+    let mut locked = 0;
+    let mut acquired = Vec::new();
+    for path in [
+        ".tokenmarket/desktop-connections/operation.lock",
+        ".tokenmarket/install-locks/claude-code.lock",
+        ".tokenmarket/install-locks/codex.lock",
+        ".tokenmarket/install-locks/workbuddy.lock",
+        ".tokenmarket/install-locks/deepseek-harness.lock",
+        ".tokenmarket/install-locks/openclaw.lock",
+        ".tokenmarket/install-locks/opencode.lock",
+        ".tokenmarket/install-locks/grok-build.lock",
+        ".tokenmarket/install-locks/hermes.lock",
+        ".tokenmarket/install-locks/pi.lock",
+        ".tokenmarket/install-locks/minimax-code.lock",
+        ".tokenmarket/install-locks/oh-my-pi.lock",
+        ".tokenmarket/install-locks/kimi-code.lock",
+        ".tokenmarket/install-locks/dumate.lock",
+        ".tokenmarket/client-login/65622f37e6d4c2b67cd1f675e3c3a89982a65a38d41a4157161a27c0297eeb80/operation.lock",
+        ".tokenmarket/client-login/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/operation.lock",
+    ] {
+        let file = fs::OpenOptions::new().read(true).write(true).open(root.join(path)).unwrap();
+        if file.try_lock().is_ok() { acquired.push(file); } else { locked += 1; }
     }
+    println!(
+        "{}",
+        if locked == 16 {
+            "BUSY"
+        } else if locked == 0 {
+            "MUTATED"
+        } else {
+            "PARTIAL"
+        }
+    );
 }
 
 #[test]
