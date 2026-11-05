@@ -101,6 +101,7 @@ pub fn bridge(directory: &Path, backend: String) -> String {
                                 )
                             )
                         });
+                        response["credential_matches"] = json!(valid);
                         response["status"] =
                             json!(if matches!(binding.stage.as_str(), "PENDING" | "SAVED") {
                                 binding.stage.as_str()
@@ -196,6 +197,7 @@ pub fn bridge(directory: &Path, backend: String) -> String {
                     success = false;
                 }
             }
+            response["naming_version"] = json!(if response["key_id"].is_null() { 0 } else { 1 });
             let body = json!({"success":success,"data":response}).to_string();
             let _ = socket.write_all(format!("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}", body.len(), body).as_bytes()).await;
         }

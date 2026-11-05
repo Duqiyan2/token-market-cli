@@ -168,6 +168,14 @@ impl ConfigurationLocation {
 
     pub(crate) async fn authorize(&self, tool: ToolId) -> Result<()> {
         self.verify(tool)?;
+        if tool == ToolId::QwenWork {
+            let home = if self.follows_process_home {
+                crate::config::home_dir()
+            } else {
+                self.environment.home.clone()
+            };
+            crate::qwenwork::require_ready(&home, self.environment.platform)?;
+        }
         if tool == ToolId::DuMateEnterprise {
             let home = if self.follows_process_home {
                 crate::config::home_dir()
@@ -301,7 +309,10 @@ impl ToolInventory {
     /// List distinct artifacts in resolver order. Duplicate PATH entries and
     /// symlink aliases for the same artifact do not become extra installations.
     pub fn installation_locations(&self, tool: ToolId) -> Vec<InstallationLocation> {
-        let commands = if matches!(tool, ToolId::DuMate | ToolId::DuMateEnterprise) {
+        let commands = if matches!(
+            tool,
+            ToolId::DuMate | ToolId::DuMateEnterprise | ToolId::QwenWork
+        ) {
             vec![]
         } else {
             self.environment.command_paths(tool.command())
@@ -318,7 +329,11 @@ impl ToolInventory {
             .collect::<Vec<_>>();
         let prefer_application = matches!(
             tool,
-            ToolId::WorkBuddy | ToolId::DeepSeekHarness | ToolId::DuMate | ToolId::DuMateEnterprise
+            ToolId::WorkBuddy
+                | ToolId::DeepSeekHarness
+                | ToolId::DuMate
+                | ToolId::DuMateEnterprise
+                | ToolId::QwenWork
         );
         let candidates = if prefer_application {
             applications
@@ -369,6 +384,12 @@ impl ToolInventory {
     }
     /// Desktop discovery and desktop writes share this path. Terminal CLI paths are unchanged.
     pub fn config_path(&self, tool: ToolId) -> PathBuf {
+        if tool == ToolId::QwenWork {
+            return crate::qwenwork::database_path(
+                &self.environment.home,
+                self.environment.platform,
+            );
+        }
         if matches!(tool, ToolId::DuMate | ToolId::DuMateEnterprise) {
             return if tool == ToolId::DuMateEnterprise {
                 crate::dumate::enterprise_display_config(
@@ -476,6 +497,10 @@ impl ToolInventory {
         Ok(())
     }
     pub fn connection_guard(&self, tool: ToolId) -> Result<crate::installation::InstallationGuard> {
+        if tool == ToolId::QwenWork {
+            crate::qwenwork::require_ready(&self.environment.home, self.environment.platform)?;
+            crate::qwenwork::require_stopped(&self.config_path(tool))?;
+        }
         if matches!(tool, ToolId::DuMate | ToolId::DuMateEnterprise) {
             let path = if tool == ToolId::DuMateEnterprise {
                 crate::dumate::enterprise_config(&self.environment.home, self.environment.platform)?
@@ -492,7 +517,10 @@ impl ToolInventory {
         .connection_guard(tool)
     }
     pub fn is_installed(&self, tool: ToolId) -> bool {
-        if matches!(tool, ToolId::DuMate | ToolId::DuMateEnterprise) {
+        if matches!(
+            tool,
+            ToolId::DuMate | ToolId::DuMateEnterprise | ToolId::QwenWork
+        ) {
             return self.application_path(tool).is_some();
         }
         self.environment
@@ -507,6 +535,7 @@ impl ToolInventory {
         let (folders, files): (&[&str], &[&str]) = match tool {
             ToolId::DuMate | ToolId::DuMateEnterprise => (&["DuMate", "dumate"], &["DuMate.exe"]),
             ToolId::WorkBuddy => (&["WorkBuddy"], &["WorkBuddy.exe"]),
+            ToolId::QwenWork => (&["QwenWorkCN"], &["QwenWorkCN.exe"]),
             ToolId::DeepSeekHarness => (
                 &["DeepSeek Harness", "deepseek-harness"],
                 &["DeepSeek Harness.exe", "deepseek-harness.exe"],
@@ -533,6 +562,18 @@ impl ToolInventory {
                             })
                             .as_deref()
                             == Some("com.baidu.qianfan.desktop");
+                    let identified = identified
+                        && (tool != ToolId::QwenWork
+                            || plist::Value::from_file(bundle.join("Contents/Info.plist"))
+                                .ok()
+                                .and_then(|v| {
+                                    v.as_dictionary()?
+                                        .get("CFBundleIdentifier")?
+                                        .as_string()
+                                        .map(str::to_owned)
+                                })
+                                .as_deref()
+                                == Some("cn.qwenwork.desktop.mac"));
                     if identified && macos_bundle_installed(&bundle) {
                         return Some(bundle);
                     }
@@ -569,6 +610,7 @@ pub fn official_download_url(tool: ToolId) -> &'static str {
         ToolId::ClaudeCode => "https://code.claude.com/docs/en/setup",
         ToolId::Codex => "https://developers.openai.com/codex/cli/",
         ToolId::WorkBuddy => "https://www.workbuddy.ai/",
+        ToolId::QwenWork => "https://qwenwork.cn/download",
         ToolId::DeepSeekHarness => "https://www.deepseek.com/download/",
         ToolId::OpenClaw => "https://docs.openclaw.ai/install",
         ToolId::OpenCode => "https://opencode.ai/docs/",
@@ -784,7 +826,10 @@ impl ToolInventory {
     /// are required for a private wrapper; execution remains an explicit action.
     pub fn terminal_launch_plan(&self, tool: ToolId) -> Result<ToolLaunchPlan> {
         self.require_installed(tool)?;
-        if matches!(tool, ToolId::DuMate | ToolId::DuMateEnterprise) {
+        if matches!(
+            tool,
+            ToolId::DuMate | ToolId::DuMateEnterprise | ToolId::QwenWork
+        ) {
             return self.launch_plan(tool);
         }
         let command = tool.command();

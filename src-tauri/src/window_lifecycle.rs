@@ -112,7 +112,7 @@ pub fn show_main_window(app: &AppHandle) {
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
-        let _ = window.emit("desktop-check-tool-updates", ());
+        let _ = window.emit("desktop-activated", ());
     }
 }
 
@@ -188,6 +188,9 @@ fn create_tray(app: &AppHandle) -> tauri::Result<()> {
 pub fn on_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
     if window.label() != "main" {
         return;
+    }
+    if matches!(event, tauri::WindowEvent::Focused(true)) {
+        let _ = window.emit("desktop-activated", ());
     }
     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
         let Some(state) = window.try_state::<WindowLifecycle>() else {

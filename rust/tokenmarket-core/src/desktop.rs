@@ -13,6 +13,10 @@ use std::{
 };
 use url::Url;
 
+#[cfg(target_os = "macos")]
+#[path = "desktop/macos_credentials.rs"]
+mod macos_credentials;
+
 pub const CALLBACK_URL: &str = "tokenmarket://auth/callback";
 
 #[derive(Debug)]
@@ -126,7 +130,7 @@ impl DesktopCredentialStore for CachedDesktopCredentials {
     }
 }
 
-/// Native persistence: macOS Keychain / Windows Credential Store, with no plaintext fallback.
+/// OS persistence: macOS Keychain / Windows Credential Store, with no plaintext fallback.
 /// Credentials are scoped to the configured service address.
 pub struct NativeDesktopCredentials {
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -156,7 +160,7 @@ impl NativeDesktopCredentials {
             Self {}
         }
     }
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    #[cfg(target_os = "windows")]
     fn entry(&self) -> Result<keyring::Entry> {
         keyring::Entry::new(self.service, &self.account)
             .map_err(|_| anyhow::anyhow!("无法访问系统私密存储"))
@@ -164,13 +168,17 @@ impl NativeDesktopCredentials {
 }
 impl DesktopCredentialStore for NativeDesktopCredentials {
     fn read(&self) -> Result<Option<String>> {
-        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        #[cfg(target_os = "windows")]
         {
             match self.entry()?.get_password() {
                 Ok(value) => Ok(Some(value)),
                 Err(keyring::Error::NoEntry) => Ok(None),
                 Err(_) => bail!("无法读取系统私密存储中的桌面会话"),
             }
+        }
+        #[cfg(target_os = "macos")]
+        {
+            macos_credentials::read(self.service, &self.account)
         }
         #[cfg(target_os = "linux")]
         {
@@ -182,11 +190,15 @@ impl DesktopCredentialStore for NativeDesktopCredentials {
         }
     }
     fn write(&self, value: &str) -> Result<()> {
-        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        #[cfg(target_os = "windows")]
         {
             self.entry()?
                 .set_password(value)
                 .map_err(|_| anyhow::anyhow!("无法保存桌面会话到系统私密存储"))
+        }
+        #[cfg(target_os = "macos")]
+        {
+            macos_credentials::write(self.service, &self.account, value)
         }
         #[cfg(target_os = "linux")]
         {
@@ -199,12 +211,16 @@ impl DesktopCredentialStore for NativeDesktopCredentials {
         }
     }
     fn delete(&self) -> Result<()> {
-        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        #[cfg(target_os = "windows")]
         {
             match self.entry()?.delete_credential() {
                 Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
                 Err(_) => bail!("无法移除系统私密存储中的桌面会话"),
             }
+        }
+        #[cfg(target_os = "macos")]
+        {
+            macos_credentials::delete(self.service, &self.account)
         }
         #[cfg(target_os = "linux")]
         {

@@ -18,6 +18,8 @@ pub mod inventory;
 
 pub mod connections;
 mod dumate;
+mod qwenwork;
+pub mod qwenwork_runtime;
 mod yaml;
 
 pub mod client_update;

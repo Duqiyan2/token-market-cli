@@ -8,6 +8,7 @@ use toml_edit::DocumentMut;
 
 pub(super) enum ConfigDocument {
     Claude(Value),
+    QwenWork(super::qwenwork::QwenWorkConfig),
     Codex(DocumentMut),
     Harness(Option<HarnessConfig>),
     MultiModel(MultiModelConfig),
@@ -32,6 +33,24 @@ pub(super) struct PreparedConfiguration {
 }
 
 impl ConfigDocument {
+    pub fn parse_for_connection(
+        tool: ToolId,
+        before: &Option<Vec<u8>>,
+        path: &Path,
+        reconnect: bool,
+    ) -> Result<Self> {
+        if tool == ToolId::QwenWork && reconnect {
+            return Ok(Self::QwenWork(
+                super::qwenwork::QwenWorkConfig::parse_for_connection(before, path, true)?,
+            ));
+        }
+        Self::parse(tool, before, path)
+    }
+    pub fn set_qwenwork_runtime(&mut self, runtime: crate::qwenwork_runtime::RuntimeInstallation) {
+        if let Self::QwenWork(config) = self {
+            config.set_runtime(runtime);
+        }
+    }
     pub fn select_models(&self, models: &[Value]) -> Result<Vec<Value>> {
         match self {
             Self::Provider(provider) => provider.select_models(models),
@@ -64,6 +83,7 @@ impl ConfigDocument {
             Self::MultiModel(value) => return value.credential(gateway),
             Self::Provider(value) => return value.credential(gateway),
             Self::DuMateEnterprise(value) => return value.credential(gateway),
+            Self::QwenWork(value) => return value.credential(gateway),
             Self::Harness(value) => {
                 return Ok(value.as_ref().and_then(|value| value.credential(gateway)))
             }
@@ -78,6 +98,11 @@ impl ConfigDocument {
             .map(str::to_owned))
     }
     pub fn parse(tool: ToolId, before: &Option<Vec<u8>>, path: &Path) -> Result<Self> {
+        if tool == ToolId::QwenWork {
+            return Ok(Self::QwenWork(super::qwenwork::QwenWorkConfig::parse(
+                before, path,
+            )?));
+        }
         if tool == ToolId::DuMateEnterprise {
             return Ok(Self::DuMateEnterprise(
                 super::dumate_enterprise::EnterpriseConfig::parse(before)?,
@@ -205,6 +230,7 @@ impl ConfigDocument {
             .context("模型目录缺少模型 ID")?;
         match self {
             Self::MultiModel(config) => config.apply(gateway, key, models),
+            Self::QwenWork(config) => config.apply(gateway, key, models),
             Self::Provider(config) => config.apply(gateway, key, models),
             Self::DuMateEnterprise(config) => config.apply(gateway, key, models),
             Self::Harness(config) => {

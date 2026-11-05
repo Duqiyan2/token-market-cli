@@ -75,7 +75,12 @@ enum Commands {
 
 #[tokio::main]
 async fn main() {
-    if let Err(error) = run().await {
+    let result = if tokenmarket_core::connections::qwenwork_relay::is_invocation() {
+        tokenmarket_core::connections::qwenwork_relay::run_stdio().await
+    } else {
+        run().await
+    };
+    if let Err(error) = result {
         eprintln!("error: {error}");
         std::process::exit(1);
     }

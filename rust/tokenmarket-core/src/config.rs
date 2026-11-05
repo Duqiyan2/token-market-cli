@@ -171,6 +171,7 @@ pub fn parse_tool_id(value: &str) -> Result<ToolId> {
         "kimi-code" => Ok(ToolId::KimiCode),
         "dumate" => Ok(ToolId::DuMate),
         "dumate-enterprise" => Ok(ToolId::DuMateEnterprise),
+        "qwenwork" => Ok(ToolId::QwenWork),
         other => bail!("unsupported tool: {other}"),
     }
 }

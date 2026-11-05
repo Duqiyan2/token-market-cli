@@ -1,0 +1,51 @@
+{
+  "checked_at": "2026-11-05",
+  "matching_policy": "structural routing contract plus offline probe; hashes are evidence, not an allowlist",
+  "probe_host": "macOS arm64, QwenWorkCN Electron Node 22.22.0",
+  "windows_native_acceptance": false,
+  "builds": [
+    {
+      "worker_version": "1.1.71",
+      "sdk_version": "1.0.53",
+      "target": "darwin-arm64",
+      "source": "installed QwenWorkCN 1.5.0 (26110307), includes vendor QwenWork patches",
+      "sha256": "32c3138c25989bdba74807550ac2f318ee5f901f53ca2e1d4af94a66448c597a",
+      "offline_contract_probe_passed": true
+    },
+    {
+      "worker_version": "1.1.71",
+      "target": "darwin-arm64",
+      "source": "https://static.qoder.com.cn/qoder-cli-cn/releases/1.1.71/qoderclicn-worker-runtime-darwin-arm64.tgz",
+      "sha256": "61aa160d7ede98eea51d494837939a68901b9804f3790cd3a5fefe6c45af9be8",
+      "offline_contract_probe_passed": true
+    },
+    {
+      "worker_version": "1.1.70",
+      "target": "darwin-arm64",
+      "source": "https://static.qoder.com.cn/qoder-cli-cn/releases/1.1.70/qoderclicn-worker-runtime-darwin-arm64.tgz",
+      "sha256": "98738b61c82e442c76179f4746b5f6fa172912020f4b665290bb4943a1c621d5",
+      "offline_contract_probe_passed": true
+    },
+    {
+      "worker_version": "1.1.69",
+      "target": "darwin-arm64",
+      "source": "https://static.qoder.com.cn/qoder-cli-cn/releases/1.1.69/qoderclicn-worker-runtime-darwin-arm64.tgz",
+      "sha256": "b1494b39ecb713e06d3c8fb9b4aab9dff571942557d750be33870d06eb8e8b5a",
+      "offline_contract_probe_passed": true
+    },
+    {
+      "worker_version": "1.1.60",
+      "target": "darwin-arm64",
+      "source": "https://static.qoder.com.cn/qoder-cli-cn/releases/1.1.60/qoderclicn-worker-runtime-darwin-arm64.tgz",
+      "sha256": "7443b871d8872832304c774885ff1d9208a0231a4302df361f46ee64e17f2b6f",
+      "offline_contract_probe_passed": true
+    },
+    {
+      "worker_version": "1.1.71",
+      "target": "win32-x64",
+      "source": "https://static.qoder.com.cn/qoder-cli-cn/releases/1.1.71/qoderclicn-worker-runtime-win32-x64.tgz",
+      "sha256": "61aa160d7ede98eea51d494837939a68901b9804f3790cd3a5fefe6c45af9be8",
+      "offline_contract_probe_passed": true
+    }
+  ]
+}

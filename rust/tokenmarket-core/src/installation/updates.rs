@@ -125,6 +125,14 @@ impl InstallationManager {
             .ok()
             .flatten()
             .filter(|v| version(v).is_some());
+        if tool == ToolId::QwenWork {
+            result.state = "manual_update".into();
+            result.manual_upgrade = true;
+            result.note =
+                "请通过官网或客户端更新千问办公；升级、降级或重新安装后，请点击“重新接入”，程序会自动检查并修复配置；如提示尚未适配，请联系管理员适配"
+                    .into();
+            return result;
+        }
         let (latest, digest) =
             match latest.and_then(|(v, d)| Ok((upgrades::normalized_version(&v)?, d))) {
                 Ok(release) => release,
@@ -300,6 +308,7 @@ fn release_source(
             "https://api.github.com/repos/can1357/oh-my-pi/releases/latest".into(),
             "tag",
         ),
+        ToolId::QwenWork => ("https://qwenwork.cn/download".into(), "manual"),
         ToolId::WorkBuddy => (
             "https://www.codebuddy.cn/docs/workbuddy/Download-History".into(),
             "workbuddy",
@@ -346,6 +355,9 @@ async fn fetch_release(
     env: &crate::inventory::InstallationEnvironment,
     arch: &str,
 ) -> Result<(String, Option<String>)> {
+    if tool == ToolId::QwenWork {
+        bail!("千问办公版本请通过官网或客户端查看")
+    }
     let latest =
         upgrades::normalized_version(&fetch_latest(client, tool, env.platform, arch).await?)?;
     let digest = if matches!(

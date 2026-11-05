@@ -91,12 +91,14 @@ Select a tool in the app, or use its ID in CLI commands. Available tools and ins
 | Kimi Code | `kimi-code` |
 | Baidu DuMate Personal | `dumate` |
 | Baidu DuMate Enterprise | `dumate-enterprise` |
+| QwenWorkCN | `qwenwork` |
 
 ### Connection tips
 
 - **Model selection**: Claude Code and Codex use the client's designated default model. DuMate Personal configures one model at a time. Other tools import compatible text-generation models; follow the tool's prompts to select one after connecting.
 - **Grok Build, Pi and Oh My Pi**: Use `/model` to select a Token Market model after connecting. If Pi already has a saved `tokenmarket` credential, log out of that provider in Pi before connecting.
 - **DuMate Personal**: Sign in to DuMate first, then fully quit it before connecting or disconnecting. Reopen it when done.
+- **QwenWorkCN**: Install from its official website and sign in first. Fully quit before connecting or disconnecting, then reopen and select a Token Market model. Reconnect in Token Market after updating QwenWorkCN. See [configuration and limitations](docs/qwenwork.md).
 - **DuMate Enterprise**: An administrator must enable custom models and model selection. Fully quit DuMate before connecting. Keep it closed while selecting and confirming a model test in Token Market, then reopen DuMate and select a passing model in the conversation.
 
 ## Manage connections

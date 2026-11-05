@@ -91,12 +91,14 @@ tokenmarket test claude-code
 | Kimi Code | `kimi-code` |
 | 百度搭子 DuMate 个人版 | `dumate` |
 | 百度搭子 DuMate 企业版 | `dumate-enterprise` |
+| [千问办公](docs/qwenwork.md) | `qwenwork` |
 
 ### 接入提示
 
 - **模型选择**：Claude Code 和 Codex 使用客户端指定的默认模型；DuMate 个人版一次配置一个模型。其他工具导入兼容的文本生成模型，接入后按工具提示选择。
 - **Grok Build、Pi、Oh My Pi**：接入后通过 `/model` 选择 Token Market 模型。Pi 已保存 `tokenmarket` 凭据时，请先在 Pi 中退出该 provider，再接入。
 - **DuMate 个人版**：先登录 DuMate，完全退出应用后再接入或取消接入，完成后重新打开。
+- **千问办公**：先登录并完全退出应用后接入或取消接入；重新打开后选择 Token Market 模型。更新千问办公版本后，需要返回 Token Market 重新接入。
 - **DuMate 企业版**：管理员须开放自定义模型和模型选择权限。完全退出 DuMate 后接入，保持退出状态，在 Token Market 中选择模型并确认测试；重新打开 DuMate，在会话中选择通过检查的模型。
 
 ## 管理连接

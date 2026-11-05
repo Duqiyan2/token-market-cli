@@ -2,6 +2,7 @@ const invoke = (...args) => window.__TAURI__.core.invoke(...args);
 const el = id => document.getElementById(id);
 let pending = null;
 let starting = false;
+let statusExpiryTimer = null;
 function feedback(message, isError = false) {
   el('feedback').textContent = message;
   el('feedback').className = isError ? 'error' : '';
@@ -25,6 +26,12 @@ function render(status) {
   el('copy').disabled = !pending;
   el('reopen').disabled = !pending;
   if (status.error) feedback(status.error, true);
+  clearTimeout(statusExpiryTimer);
+  const expiresAt = status.context?.expires_at || pending?.expires_at;
+  const remaining = Date.parse(expiresAt) - Date.now();
+  if (Number.isFinite(remaining) && remaining >= 0) {
+    statusExpiryTimer = setTimeout(refresh, Math.min(remaining + 50, 2147483647));
+  }
 }
 el('begin').onclick = async () => {
   starting = true;
@@ -62,16 +69,15 @@ async function renewSession() {
   try { render(await invoke('refresh_desktop_session')); }
   catch (_) { feedback('无法验证桌面会话，请重新登录', true); }
 }
-window.addEventListener('focus', renewSession);
-setInterval(renewSession, 5 * 60 * 1000);
+window.TokenMarketSession = { sync: renewSession };
 async function refresh() {
   try { render(await invoke('desktop_login_status')); }
   catch (_) { feedback('无法读取登录状态，请重新打开应用', true); }
 }
 if (window.__TAURI__) {
-  window.__TAURI__.event.listen('desktop-login-status', event => render(event.payload));
-  refresh();
-  setInterval(refresh, 1000);
+  // Subscribe before the initial read, then use native notifications and a
+  // single expiry deadline instead of polling unchanged status every second.
+  window.__TAURI__.event.listen('desktop-login-status', event => render(event.payload)).then(refresh);
 } else {
   el('begin').disabled = true;
   feedback('请在 Token Market 桌面应用中打开此界面。');

@@ -24,6 +24,12 @@ _Avoid_: Agent API key, authorization code
 **Default Workspace**:
 The user's platform-stored workspace preference shared by the browser and Token Market Client.
 
+**Personal Workspace**:
+A workspace for an individual user's own use, distinct from the user's Default Workspace preference.
+
+**Enterprise Workspace**:
+A workspace for an enterprise and its members to manage shared access and usage. It may have only one member.
+
 **Current Workspace**:
 The workspace selected in the Token Market Client for viewing balance, opening recharge, and establishing subsequent tool connections. The CLI and desktop share this selection; selecting it does not change existing connections.
 _Avoid_: Bound workspace
@@ -50,6 +56,10 @@ _Avoid_: Workspace switch, refresh of the old connection's catalogue
 **Agent API Key**:
 A model-access credential issued for a particular user's device, tool, and bound workspace. The CLI and desktop reuse the same credential; workspace switches, disconnection, other devices, and client logout do not revoke it.
 _Avoid_: Client Session, CLI-specific key, desktop-specific key
+
+**Key Display Name**:
+A human-readable label identifying an Agent API Key's Tool and, in an Enterprise Workspace, its owning user. It is distinct from the key's identity and secret.
+_Avoid_: Key ID, API key secret
 
 **Key Fingerprint**:
 An irreversible identifier of a complete Agent API Key, used to determine whether a locally saved credential matches the platform's current credential.

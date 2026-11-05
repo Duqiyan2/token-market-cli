@@ -402,7 +402,10 @@ impl InstallationManager {
     pub fn installed_version(&self, tool: ToolId) -> Result<Option<String>> {
         // Installed GUI metadata is readable even on a fixture host without a
         // matching installer architecture. DuMate has no official CLI identity.
-        if matches!(tool, ToolId::DuMate | ToolId::DuMateEnterprise) {
+        if matches!(
+            tool,
+            ToolId::DuMate | ToolId::DuMateEnterprise | ToolId::QwenWork
+        ) {
             return ToolInventory::new(self.environment.clone())
                 .application_path(tool)
                 .map(|path| self.executor.tool_application_version(tool, &path))

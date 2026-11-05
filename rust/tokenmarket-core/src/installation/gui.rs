@@ -14,7 +14,11 @@ use std::{
 pub(super) fn is_gui(tool: ToolId) -> bool {
     matches!(
         tool,
-        ToolId::WorkBuddy | ToolId::DeepSeekHarness | ToolId::DuMate | ToolId::DuMateEnterprise
+        ToolId::WorkBuddy
+            | ToolId::DeepSeekHarness
+            | ToolId::DuMate
+            | ToolId::DuMateEnterprise
+            | ToolId::QwenWork
     )
 }
 pub(super) fn instructions(tool: ToolId, platform: HostPlatform) -> &'static str {
@@ -40,6 +44,9 @@ pub(super) fn plan(
     environment: &InstallationEnvironment,
     architecture: &str,
 ) -> Result<InstallPlan> {
+    if tool == ToolId::QwenWork {
+        bail!("请通过千问办公官网安装，登录后完全退出再接入；更新版本后需要重新接入")
+    }
     if matches!(tool, ToolId::DuMate | ToolId::DuMateEnterprise) {
         let mut plan = super::dumate::plan(environment, architecture)?;
         plan.tool = tool;

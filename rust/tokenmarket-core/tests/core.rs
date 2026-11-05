@@ -22,7 +22,8 @@ fn registers_all_supported_tools() {
             "oh-my-pi",
             "kimi-code",
             "dumate",
-            "dumate-enterprise"
+            "dumate-enterprise",
+            "qwenwork"
         ]
     );
 }
@@ -49,6 +50,7 @@ fn serializes_every_tool_with_the_server_contract_id() {
         ("kimi-code", "kimi-code"),
         ("dumate", "dumate"),
         ("dumate-enterprise", "dumate-enterprise"),
+        ("qwenwork", "qwenwork"),
     ] {
         let tool = tool_id(input).unwrap();
         let value = serde_json::to_value(&tool).unwrap();

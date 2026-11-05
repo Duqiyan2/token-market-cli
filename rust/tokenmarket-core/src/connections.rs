@@ -1,6 +1,9 @@
 //! Desktop tool connections: public summaries exclude credentials and private receipts.
 mod configuration;
+mod configuration_io;
 mod issuance;
+mod qwenwork;
+pub mod qwenwork_relay;
 pub use issuance::CredentialLoss;
 mod dumate;
 mod dumate_enterprise;
@@ -180,6 +183,7 @@ pub struct ConnectionManager {
     gate: tokio::sync::Mutex<()>,
     private: private_storage::PrivateStorage,
     client_login: Option<crate::desktop::DesktopLogin>,
+    qwen_runtime: Arc<dyn crate::qwenwork_runtime::RuntimeInstaller>,
 }
 /// Release the completed operation even if a concurrently spawned version probe
 /// briefly inherited its descriptor before exec (as with InstallationGuard).
@@ -237,7 +241,16 @@ impl ConnectionManager {
             gate: tokio::sync::Mutex::new(()),
             private,
             client_login: None,
+            qwen_runtime: Arc::new(crate::qwenwork_runtime::NativeRuntimeInstaller),
         }
+    }
+    /// Inject the installation boundary for native/offline validation.
+    pub fn with_qwenwork_runtime(
+        mut self,
+        runtime: Arc<dyn crate::qwenwork_runtime::RuntimeInstaller>,
+    ) -> Self {
+        self.qwen_runtime = runtime;
+        self
     }
     pub fn list(&self) -> Result<Vec<ConnectionRecord>> {
         let path = self.directory.join("connections.json");
@@ -426,10 +439,12 @@ impl ConnectionManager {
             .map_err(|_| anyhow::anyhow!("接入正在进行，请稍候"))?;
         inventory.require_installed(tool)?;
         let _installation_guard = inventory.connection_guard(tool)?;
-        if matches!(tool, ToolId::DuMate | ToolId::DuMateEnterprise)
-            && path != inventory.config_path(tool)
+        if matches!(
+            tool,
+            ToolId::DuMate | ToolId::DuMateEnterprise | ToolId::QwenWork
+        ) && path != inventory.config_path(tool)
         {
-            bail!("DuMate 活动账号已改变，请重新检测后接入")
+            bail!("工具活动配置已改变，请重新检测后接入")
         }
         if !matches!(
             tool,
@@ -447,6 +462,7 @@ impl ConnectionManager {
                 | ToolId::KimiCode
                 | ToolId::DuMate
                 | ToolId::DuMateEnterprise
+                | ToolId::QwenWork
         ) {
             bail!("此工具的桌面接入尚未开放")
         }
@@ -474,25 +490,29 @@ impl ConnectionManager {
         }
         let configuration_location = inventory.configuration_location(tool)?;
         configuration_location.authorize(tool).await?;
-        let before = match fs::read(&path) {
-            Ok(v) => Some(v),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-            Err(_) => bail!("无法读取工具配置"),
-        };
-        ConfigDocument::parse(tool, &before, &path)?;
+        let before = configuration_io::read(&path)?;
+        ConfigDocument::parse_for_connection(tool, &before, &path, replacement.is_some())?;
         let _operation = self.operation_lock()?;
-        let latest = match fs::read(&path) {
-            Ok(bytes) => Some(bytes),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-            Err(_) => bail!("无法读取工具配置"),
-        };
+        let latest = configuration_io::read(&path)?;
         if latest != before {
             bail!("工具配置已改变，请重新接入")
         }
-        let mut config = ConfigDocument::parse(tool, &latest, &path)?;
+        let mut config =
+            ConfigDocument::parse_for_connection(tool, &latest, &path, replacement.is_some())?;
+        if tool == ToolId::QwenWork {
+            let app = inventory
+                .application_path(tool)
+                .context("无法确认千问办公安装位置")?;
+            let runtime = self.qwen_runtime.prepare(&app, &path, &self.gateway_url)?;
+            config.set_qwenwork_runtime(runtime);
+        }
         let mut records = self.list()?;
         self.migrate_records(&records)?;
-        let previous = records.iter().find(|r| r.tool == tool).cloned();
+        let previous = records
+            .iter()
+            .find(|r| r.tool == tool)
+            .map(|record| restore::reconnect_baseline(record, &self.private))
+            .transpose()?;
         match (replacement, &previous) {
             (None, Some(_)) => bail!("已有连接，请使用重新接入操作"),
             (Some(expected), Some(old)) if old.key_id == expected => {
@@ -658,13 +678,12 @@ impl ConnectionManager {
         if matches!(tool, ToolId::DuMate | ToolId::DuMateEnterprise) {
             crate::dumate::require_stopped(path)?;
         }
+        if tool == ToolId::QwenWork {
+            crate::qwenwork::require_stopped(path)?;
+        }
         let mut receipts = vec![];
         for file in &files {
-            let current = match fs::read(&file.path) {
-                Ok(bytes) => Some(bytes),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-                Err(e) => return Err(e.into()),
-            };
+            let current = configuration_io::read(&file.path)?;
             if current != file.before {
                 bail!("配置在接入期间已变化，请重试")
             }
@@ -749,18 +768,15 @@ impl ConnectionManager {
         let mut applied = 0;
         let transaction = (|| -> Result<()> {
             for file in &files {
-                atomic_write(&file.path, &file.bytes)?;
+                configuration_io::write(&file.path, &file.before, &Some(file.bytes.clone()))?;
                 applied += 1;
             }
             atomic_write(&store, &serialized)
         })();
         if transaction.is_err() {
             for file in files[..applied].iter().rev() {
-                let rollback = if let Some(bytes) = &file.before {
-                    atomic_write(&file.path, bytes)
-                } else {
-                    fs::remove_file(&file.path).map_err(Into::into)
-                };
+                let rollback =
+                    configuration_io::write(&file.path, &Some(file.bytes.clone()), &file.before);
                 rollback.context("接入保存失败，且配置回滚失败；请使用备份恢复")?;
             }
             bail!("接入保存失败，原配置已恢复")
@@ -791,6 +807,14 @@ impl ConnectionManager {
         let record = records[index].clone();
         if !matches!(record.version, 1 | 2) {
             bail!("连接记录版本不支持安全恢复")
+        }
+        if tool == ToolId::QwenWork {
+            let path = &record
+                .receipts
+                .first()
+                .context("千问办公连接缺少配置记录")?
+                .path;
+            crate::qwenwork::require_stopped(path)?;
         }
         let plan = restore::prepare(&record, &request, &self.private)?;
         if !plan.conflicts.is_empty() {

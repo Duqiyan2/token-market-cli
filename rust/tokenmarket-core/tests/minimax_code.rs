@@ -112,7 +112,7 @@ async fn platform_mode(
                 json!({"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"OK"}}]})
             } else if direct {
                 assert!(request.starts_with("POST /api/client/keys/inspect "));
-                json!({"success":true,"data":{"status":"VALID","key_id":"9020","owner":{"id":"u1","name":"Ada"},"bound_workspace":{"id":"42","name":"Research"}}})
+                json!({"success":true,"data":{"naming_version":1,"credential_matches":true,"status":"VALID","key_id":"9020","owner":{"id":"u1","name":"Ada"},"bound_workspace":{"id":"42","name":"Research"}}})
             } else {
                 assert!(request.contains("Bearer desktop-secret"));
                 json!({"success":true,"data":{"api_key":key,"key_id":"9018","owner":{"id":"u1","name":"Ada"},"bound_workspace":{"id":"42","name":"Research"}}})

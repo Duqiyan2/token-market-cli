@@ -2,10 +2,9 @@ use super::{atomic_write, ConnectionRecord, DisconnectRequest, RestoreChoice, Re
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
+#[cfg(test)]
+use std::fs;
+use std::path::{Path, PathBuf};
 
 pub(super) struct Change {
     pub path: PathBuf,
@@ -18,14 +17,44 @@ pub(super) struct RestorePlan {
     pub conflicts: Vec<RestoreConflict>,
 }
 fn read(path: &Path) -> Result<Option<Vec<u8>>> {
-    if fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
-        bail!("配置路径是符号链接，请先确认实际路径")
+    super::configuration_io::read(path)
+}
+
+/// Explicit QwenWork reconnection reapplies our owned fields, including edits.
+/// Disconnect retains its ordinary conflict checks and other tools are unchanged.
+pub(super) fn reconnect_baseline(
+    record: &ConnectionRecord,
+    private: &super::private_storage::PrivateStorage,
+) -> Result<ConnectionRecord> {
+    let mut record = record.clone();
+    if record.tool != crate::ToolId::QwenWork {
+        return Ok(record);
     }
-    match fs::read(path) {
-        Ok(bytes) => Ok(Some(bytes)),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(_) => bail!("无法读取配置，未执行恢复"),
+    record.receipts = baseline_receipts(&record, private)?;
+    record.version = 2;
+    for receipt in &mut record.receipts {
+        let bytes = read(&receipt.path)?;
+        let value = Format::for_tool(record.tool, &receipt.path)?.parse(bytes.as_deref())?;
+        if bytes.is_none() {
+            receipt.existed = false;
+            receipt.backup_path = None;
+        }
+        for field in &mut receipt.fields {
+            let owned = field.pointer.starts_with("/models/byok-tokenmarket-")
+                || matches!(
+                    field.pointer.as_str(),
+                    "/ALLOW_CUSTOM_BYOK" | "/QW_QODER_WORKER_RUNTIME_PATH"
+                );
+            if owned {
+                if let Some(current) = lookup(&value, &tokens(&field.pointer)?)? {
+                    field.applied = current.clone();
+                } else {
+                    field.before = None;
+                }
+            }
+        }
     }
+    Ok(record)
 }
 /// Upgrade ambiguous version-1 receipts using only their original owned-field baseline.
 pub(super) fn baseline_receipts(
@@ -57,6 +86,22 @@ pub(super) fn baseline_receipts(
                     .transpose()?
                     .flatten()
                     .cloned();
+            }
+        }
+    }
+    if record.tool == crate::ToolId::QwenWork {
+        for receipt in &mut receipts {
+            for field in &mut receipt.fields {
+                if field.pointer.starts_with("/models/byok-tokenmarket-")
+                    || field.pointer == "/QW_QODER_WORKER_RUNTIME_PATH"
+                        && field
+                            .before
+                            .as_ref()
+                            .and_then(Value::as_str)
+                            .is_some_and(crate::qwenwork_runtime::is_legacy_worker)
+                {
+                    field.before = None;
+                }
             }
         }
     }
@@ -136,6 +181,7 @@ pub(super) fn prepare(
     let revision = format!("{:x}", hash.finalize());
     let approved = request.revision.as_ref() == Some(&revision);
     let mut conflicts = vec![];
+    let mut keep_qwen_byok = false;
     for (file, (receipt, change)) in record.receipts.iter().zip(changes.iter_mut()).enumerate() {
         let format = Format::for_tool(record.tool, &receipt.path)?;
         let mut value = format.parse(change.before.as_deref())?;
@@ -167,13 +213,31 @@ pub(super) fn prepare(
         ordered_fields
             .sort_by_key(|(_, field)| bootstrap_field(record.tool, &receipt.path, &field.pointer));
         for (field, receipt) in ordered_fields {
+            // A user-retained model still needs the device's model-selection gate.
+            if record.tool == crate::ToolId::QwenWork
+                && keep_qwen_byok
+                && change.path.file_name().is_some_and(|v| v == ".env")
+                && receipt.pointer == "/ALLOW_CUSTOM_BYOK"
+            {
+                continue;
+            }
             if bootstrap_field(record.tool, &change.path, &receipt.pointer)
                 && external_credential_content(&value)
             {
                 continue;
             }
             let path = tokens(&receipt.pointer)?;
-            let baseline = if record.version == 1 {
+            let baseline = if record.tool == crate::ToolId::QwenWork
+                && (receipt.pointer.starts_with("/models/byok-tokenmarket-")
+                    || receipt.pointer == "/QW_QODER_WORKER_RUNTIME_PATH"
+                        && receipt
+                            .before
+                            .as_ref()
+                            .and_then(Value::as_str)
+                            .is_some_and(crate::qwenwork_runtime::is_legacy_worker))
+            {
+                None
+            } else if record.version == 1 {
                 legacy_baseline
                     .as_ref()
                     .map(|v| lookup(v, &path))
@@ -236,6 +300,8 @@ pub(super) fn prepare(
             // A later standalone TOML comment is user content even if every managed key is gone.
             let comment_remains = (matches!(format, Format::Jsonc)
                 && super::jsonc::has_comments(&rendered)?)
+                || matches!(format, Format::Dotenv)
+                    && rendered.iter().any(|b| !b.is_ascii_whitespace())
                 || matches!(format, Format::Toml)
                     && std::str::from_utf8(&rendered)?
                         .lines()
@@ -246,6 +312,13 @@ pub(super) fn prepare(
                 Some(rendered)
             }
         };
+        if record.tool == crate::ToolId::QwenWork && crate::qwenwork::is_database(&change.path) {
+            keep_qwen_byok = value["models"].as_object().is_some_and(|models| {
+                models
+                    .keys()
+                    .any(|key| key.starts_with(crate::qwenwork::PREFIX))
+            });
+        }
     }
     Ok(RestorePlan {
         changes,
@@ -378,6 +451,7 @@ pub(super) enum Format {
     Jsonc,
     Toml,
     Yaml,
+    Dotenv,
 }
 impl Format {
     fn for_tool(tool: crate::ToolId, path: &Path) -> Result<Self> {
@@ -388,6 +462,12 @@ impl Format {
         }
     }
     pub(super) fn for_path(path: &Path) -> Result<Self> {
+        if path.file_name().is_some_and(|v| v == ".env") {
+            return Ok(Self::Dotenv);
+        }
+        if crate::qwenwork::is_database(path) {
+            return Ok(Self::Json);
+        }
         match path.extension().and_then(|v| v.to_str()) {
             Some("json") => Ok(Self::Json),
             Some("jsonc") => Ok(Self::Jsonc),
@@ -402,6 +482,7 @@ impl Format {
         };
         let result: Value = match self {
             Self::Jsonc => super::jsonc::parse(bytes)?,
+            Self::Dotenv => crate::qwenwork::parse_dotenv(Some(bytes))?,
             Self::Json => serde_json::from_slice(bytes).context("配置不是有效 JSON，未执行恢复")?,
             Self::Yaml => {
                 let value: Value =
@@ -432,6 +513,7 @@ impl Format {
     ) -> Result<Vec<u8>> {
         match self {
             Self::Json => Ok(serde_json::to_vec_pretty(value)?),
+            Self::Dotenv => crate::qwenwork::render_dotenv(bytes, value, touched),
             Self::Jsonc => super::jsonc::render(bytes, value),
             Self::Yaml => Ok(crate::yaml::to_string(value)?.into_bytes()),
             Self::Toml => {
@@ -535,7 +617,8 @@ impl RestorePlan {
             if change.before == change.after {
                 continue;
             }
-            if apply(&change.path, &change.after).is_err() {
+            if super::configuration_io::write(&change.path, &change.before, &change.after).is_err()
+            {
                 rollback(&written)?;
                 bail!("本地恢复失败，原配置和连接记录已保留")
             }
@@ -548,20 +631,9 @@ impl RestorePlan {
         Ok(())
     }
 }
-fn apply(path: &Path, bytes: &Option<Vec<u8>>) -> Result<()> {
-    if let Some(bytes) = bytes {
-        atomic_write(path, bytes)
-    } else {
-        match fs::remove_file(path) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(e.into()),
-        }
-    }
-}
 fn rollback(written: &[&Change]) -> Result<()> {
     for change in written.iter().rev() {
-        apply(&change.path, &change.before)
+        super::configuration_io::write(&change.path, &change.after, &change.before)
             .context("本地恢复失败且回滚失败，请保留备份并检查配置")?;
     }
     Ok(())
@@ -591,7 +663,10 @@ pub(super) fn verify_applied(record: &ConnectionRecord) -> Result<()> {
     for receipt in &record.receipts {
         let bytes = read(&receipt.path)?.context("工具配置已移除，请重新接入后测试")?;
         // Reuse adapter preflight to catch newly added competing auth mechanisms.
-        if record.tool != crate::ToolId::DeepSeekHarness {
+        if record.tool != crate::ToolId::DeepSeekHarness
+            && !(record.tool == crate::ToolId::QwenWork
+                && receipt.path.file_name().is_some_and(|v| v == ".env"))
+        {
             super::configuration::ConfigDocument::parse(
                 record.tool,
                 &Some(bytes.clone()),
@@ -641,6 +716,47 @@ fn external_credential_content(value: &Value) -> bool {
 mod transaction_tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn qwenwork_record_commit_failure_rolls_back_rows_and_device_switch() {
+        let root = tempfile::tempdir().unwrap();
+        let database = root.path().join("agents.db");
+        let db = rusqlite::Connection::open(&database).unwrap();
+        db.execute_batch(include_str!("../../tests/fixtures/qwenwork-schema.sql"))
+            .unwrap();
+        db.execute("INSERT INTO byok_custom_models(key,display_name,model) VALUES ('byok-tokenmarket-fixture','Managed','fixture')", []).unwrap();
+        let snapshot = crate::qwenwork::read_snapshot(&database).unwrap();
+        let empty = serde_json::to_vec(&json!({"models":{}})).unwrap();
+        let env = root.path().join(".env");
+        fs::write(&env, "ALLOW_CUSTOM_BYOK=1\n").unwrap();
+        let state = root.path().join("state");
+        fs::create_dir(&state).unwrap();
+        let store = state.join("connections.json");
+        fs::write(&store, b"active-record").unwrap();
+        let plan = RestorePlan {
+            changes: vec![
+                Change {
+                    path: database.clone(),
+                    before: Some(snapshot.clone()),
+                    after: Some(empty),
+                },
+                Change {
+                    path: env.clone(),
+                    before: Some(b"ALLOW_CUSTOM_BYOK=1\n".to_vec()),
+                    after: None,
+                },
+            ],
+            revision: String::new(),
+            conflicts: vec![],
+        };
+        fs::set_permissions(&state, fs::Permissions::from_mode(0o500)).unwrap();
+        let result = plan.commit(&store, b"active-record", b"[]", &[]);
+        fs::set_permissions(&state, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(result.is_err());
+        assert_eq!(crate::qwenwork::read_snapshot(&database).unwrap(), snapshot);
+        assert_eq!(fs::read(env).unwrap(), b"ALLOW_CUSTOM_BYOK=1\n");
+        assert_eq!(fs::read(store).unwrap(), b"active-record");
+    }
 
     #[test]
     fn record_commit_failure_restores_configuration_and_the_cleared_credential_file() {

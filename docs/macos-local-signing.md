@@ -1,9 +1,9 @@
 # macOS 构建与共享钥匙串签名
 
 CLI 和桌面是同一个 Token Market Client 的两个入口。macOS 本地构建使用
-**固定自签名证书、相同的 designated requirement（DR）**，让两端都满足
-新建钥匙串记录的可信程序规则。无需 Apple Developer 账号，凭证仍存放在
-系统钥匙串，工具 Key、连接和恢复记录继续使用原有加密存储。
+**固定自签名证书、相同的 designated requirement（DR）**，维持签名身份。
+客户端凭据通过系统 `security` 工具保存在钥匙串；无需 Apple Developer 账号，
+工具 Key、连接和恢复记录继续使用原有加密存储。
 
 固定自签名证书不提供 Developer ID、公证或 Gatekeeper 信任。
 下载后首次打开应用的系统信任提示与钥匙串访问弹窗是两类不同问题。
@@ -29,7 +29,7 @@ python3 scripts/macos-local-signing.py --profile production package \
 ```
 
 `production` 和 `local` 分别只允许自己的 App/CLI 标识，同一证书下两组
-程序也不互相授权。正式组为 `cn.tokenmarket.setup` 和
+程序具有各自签名规则。凭据经由系统工具访问时，隔离边界见文末说明。正式组为 `cn.tokenmarket.setup` 和
 `cn.tokenmarket.setup.cli`。两组继续使用原来的凭据命名空间和存储格式。
 
 ## GitHub 发布所需的固定身份
@@ -117,7 +117,8 @@ python3 scripts/macos-local-signing.py package \
 
 ## 原生验证与既有数据
 
-`smoke` 编译两个不同的独立程序，签成 CLI 和桌面的同一共享 DR，使用
+`smoke` 验证独立的签名/ACL 探针，不代表当前系统工具凭据后端的端到端验证。
+它编译两个不同的独立程序，签成 CLI 和桌面的同一共享 DR，使用
 独立临时钥匙串和虚拟内容。每个进程在访问前关闭钥匙串交互；需要授权
 弹窗会变成失败。覆盖双向读取和更新、进程重启、可执行文件移动、重新
 编译后的签名更新，以及临时签名/其他标识程序被拒绝。它不读取真实登录
@@ -129,10 +130,16 @@ python3 scripts/macos-local-signing.py package \
 **旧临时签名包创建的钥匙串记录保留原 ACL，新签名不能绕过其授权。**
 访问这些记录时可能仍出现一次授权；CLI 和桌面可能各需授权一次。不会静默
 删除旧会话、加密主密钥、工具 Key 或恢复记录来掩盖弹窗，也不会重发 Key。
-全新记录由这套共享签名身份创建后，两端正常互读不需要该授权弹窗。
+全新记录由系统工具创建并默认信任该工具；App 和 CLI 经由同一工具读写。
 
 ## 依据
 
 - [Apple：Sharing a designated requirement](https://developer.apple.com/library/archive/documentation/Security/Conceptual/CodeSigningGuide/Procedures/Procedures.html)：允许协同程序使用相同 DR 共享钥匙串访问。
 - [Apple：Understanding the Code Signature](https://developer.apple.com/library/archive/documentation/Security/Conceptual/CodeSigningGuide/AboutCS/AboutCS.html)：钥匙串支持自签名身份，但自签名不提供 Gatekeeper 分发信任。
 - [Apple：Access Control Lists](https://developer.apple.com/documentation/security/access-control-lists)：可信应用满足 ACL 时直接访问，否则需要用户确认。
+
+## 凭据内容更新与访问权限
+
+macOS 客户端通过系统 `/usr/bin/security` 读写系统钥匙串。保存会话时不传 `-T`：对已有条目设置受信任应用会调用 `SecKeychainItemSetAccess`，每次续期均可能要求确认“更改访问权限”。新条目默认信任创建它的系统工具，更新只修改内容并保留已有访问规则。旧条目的首次访问仍可能要求授权。
+
+此实现不使用 `-A`，也不更改全局钥匙串权限；同一系统用户的其他进程仍可调用系统工具，因此其隔离边界是系统用户，而非仅允许 Token Market 的签名应用访问。
