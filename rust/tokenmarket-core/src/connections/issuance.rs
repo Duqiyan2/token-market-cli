@@ -8,6 +8,9 @@ pub(super) struct IssuanceReceipt {
     generation: u64,
     #[serde(default)]
     applied: bool,
+    // Authoritative platform adoption; absent historical receipts remain legacy.
+    #[serde(default)]
+    naming_version: u32,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -17,6 +20,8 @@ struct PendingRequest {
 
 #[derive(Deserialize)]
 struct Reply {
+    #[serde(default)]
+    naming_version: u32,
     status: String,
     key_id: Option<String>,
     request_id: Option<String>,
@@ -78,7 +83,7 @@ impl ConnectionManager {
         action: &str,
         extra: Value,
     ) -> Result<Reply> {
-        let mut body = json!({"workspace_id":context.workspace_id,"device_id":device,"tool":tool});
+        let mut body = json!({"workspace_id":context.workspace_id,"device_id":device,"tool":tool,"naming_version":1});
         body.as_object_mut()
             .unwrap()
             .extend(extra.as_object().unwrap().clone());
@@ -247,6 +252,7 @@ impl ConnectionManager {
             (Some(request_id), Some(generation)) => Some(IssuanceReceipt {
                 request_id,
                 generation,
+                naming_version: reply.naming_version,
                 applied: matches!(reply.status.as_str(), "VALID" | "APPLIED"),
             }),
             _ if matches!(reply.status.as_str(), "VALID" | "APPLIED") => None,

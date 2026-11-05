@@ -33,6 +33,7 @@ struct State {
     inspect_business_failure: bool,
     inspect_tool_error: Option<&'static str>,
     block_cache: Option<PathBuf>,
+    require_naming_capability: bool,
     logout_on_catalogue: Option<Arc<support::Credentials>>,
 }
 struct Platform {
@@ -103,6 +104,9 @@ impl Platform {
                     } else {
                         assert!(route.starts_with("/api/client/keys/"));
                         assert!(header.contains("Bearer management-fixture"));
+                        if s.require_naming_capability && body["naming_version"] != 1 {
+                            s.fail_inspect = true;
+                        }
                         let action = route.rsplit('/').next().unwrap();
                         let fingerprint = body["fingerprint"].as_str();
                         let valid = fingerprint == Some(hash(&s.secret).as_str());
@@ -184,7 +188,7 @@ impl Platform {
                         if failure {
                             status = "UNAVAILABLE".into();
                         }
-                        let mut reply = json!({"status":status,"key_id":if s.id==0 {None}else{Some(s.id.to_string())},"request_id":s.request,"generation":s.generation,"owner":{"id":"u1","name":"Fixture"},"bound_workspace":{"id":"42","name":"Scope"}});
+                        let mut reply = json!({"naming_version":1,"status":status,"key_id":if s.id==0 {None}else{Some(s.id.to_string())},"request_id":s.request,"generation":s.generation,"owner":{"id":"u1","name":"Fixture"},"bound_workspace":{"id":"42","name":"Scope"}});
                         if status == "ISSUED" {
                             reply["api_key"] = json!(s.secret);
                         }
@@ -519,4 +523,40 @@ async fn logout_from_other_entry_during_catalogue_load_prevents_configuration_co
     assert_eq!(s.issues, 1);
     assert_eq!(s.stage, "SAVED");
     assert_eq!(s.retired, 0);
+}
+
+#[tokio::test]
+async fn fresh_scope_negotiates_naming_and_both_client_entries_reuse_safely_saved_key() {
+    let root = tempdir().unwrap();
+    let api = Platform::start().await;
+    api.state.lock().unwrap().require_naming_capability = true;
+    let path = root.path().join("settings.json");
+    let inv = inventory(root.path());
+    let first = api
+        .manager(root.path())
+        .connect(context(), ToolId::ClaudeCode, &inv, path.clone())
+        .await
+        .unwrap();
+    let next = api
+        .manager(root.path())
+        .reconnect(
+            context(),
+            ToolId::ClaudeCode,
+            &first.key_id,
+            &inv,
+            path.clone(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(first.key_id, next.connection.key_id);
+    let state = api.state.lock().unwrap();
+    assert_eq!(state.issues, 1);
+    assert_eq!(state.rotations, 0);
+    assert!(std::fs::read_to_string(path)
+        .unwrap()
+        .contains(&state.secret));
+    let saved: Value =
+        serde_json::from_slice(&support::read_private(&root.path().join("state/keys.json")))
+            .unwrap();
+    assert_eq!(saved[0]["key"]["issuance"]["naming_version"], 1);
 }
