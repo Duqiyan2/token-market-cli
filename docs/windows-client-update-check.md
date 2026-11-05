@@ -13,7 +13,7 @@ On a disposable Windows x64 runner with Rust installed:
 ```powershell
 cargo test --manifest-path rust/tokenmarket-core/Cargo.toml --test client_update_guard --test client_update_guardian --locked
 cargo test --manifest-path src-tauri/Cargo.toml --lib --locked
-cargo test --manifest-path src-tauri/Cargo.toml --test windows_guardian --locked -- --nocapture
+cargo test --manifest-path src-tauri/Cargo.toml --features windows-update-fixtures --test windows_guardian --locked -- --nocapture
 ```
 
 The Windows fixture copies the actual built desktop executable outside its
@@ -23,14 +23,21 @@ the test releases it. The parent exits as a real process; legacy lock probes
 must still refuse work throughout installation. The fixture checks an exact
 process handle, stage write denial, the native unquoted final `/D=` command line
 with spaces and Chinese names, cancellation/retry and old-version reconciliation.
-The shared portable fixture additionally covers known launch failure and
-nonzero installer termination. It accesses only a temporary synthetic home and
-never launches the normal desktop or credential setup.
+The native fixture also checks known launch failure/nonzero termination,
+signature reverification of actual staging bytes, the protected staging DACL
+and refusal of raw, unmarked, mismatched, MSI and system-owned installations.
+It accesses only a temporary synthetic home and fresh scoped test registry
+subtrees and never launches the normal desktop or credential setup.
 
 These tests are process/OS-lock evidence, not an installed NSIS upgrade, physical
-device, production endpoint or credential-retention acceptance. Production
-registration remains closed until the Windows native fixture has actually
-passed for the candidate revision; a build environment variable cannot enable it.
+device, production endpoint or credential-retention acceptance. The
+[hosted Windows validation](https://github.com/Duqiyan2/token-market-cli/actions/runs/41964120322/job/127037038487)
+passed for candidate `db7eadd` (Actions PR merge `cbaf5f3`): all **8 Windows
+guardian fixtures** passed, along with **20 desktop library tests** and the
+shared core process tests. The production factory now registers only on x86_64
+after the normal current-user NSIS bundle/registry ownership checks succeed;
+fixture features do not bypass production registration checks. A whole-package
+NSIS build and installed-client acceptance remain separate checks.
 
 ## Installed-client check still required
 
