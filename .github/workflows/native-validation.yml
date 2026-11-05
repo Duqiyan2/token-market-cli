@@ -62,7 +62,15 @@ jobs:
         shell: bash
         run: |
           identity="$RUNNER_TEMP/tokenmarket-signing-fixture"
-          trap '/usr/bin/security delete-keychain "$identity/signing.keychain-db"' EXIT
+          cleanup() {
+            status=$?
+            if [ "$status" -ne 0 ]; then
+              python3 scripts/macos-identity-probe.py "$identity" || true
+            fi
+            /usr/bin/security delete-keychain "$identity/signing.keychain-db" || true
+            exit "$status"
+          }
+          trap cleanup EXIT
           python3 scripts/macos-local-signing.py --identity-dir "$identity" init
           python3 scripts/macos-local-signing.py --identity-dir "$identity" --profile production smoke
 
@@ -98,8 +106,25 @@ jobs:
         run: cargo check --manifest-path src-tauri/Cargo.toml --locked
 
       - name: Test desktop window lifecycle
+        id: desktop-tests
         if: ${{ !cancelled() && runner.os != 'Linux' }}
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib --locked
+
+
+      - name: Diagnose Windows desktop loader
+        if: ${{ !cancelled() && runner.os == 'Windows' && steps.desktop-tests.outcome == 'failure' }}
+        shell: pwsh
+        run: |
+          $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUNNER = 'python "' + (Join-Path $env:GITHUB_WORKSPACE 'scripts/windows-import-probe.py') + '"'
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $installation = & $vswhere -latest -products '*' -property installationPath
+          $dumpbin = Get-ChildItem "$installation\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" | Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+          Get-ChildItem src-tauri/target/debug/deps/app_lib-*.exe | ForEach-Object {
+            Write-Output "[DEBUG-ci-loader-20261105] Static and delay imports: $($_.FullName)"
+            & $dumpbin /nologo /imports $_.FullName
+          }
+          cargo test --manifest-path src-tauri/Cargo.toml --lib --locked -- --nocapture
+          exit $LASTEXITCODE
 
   desktop-ui:
     name: Desktop DOM/IPC fixtures
