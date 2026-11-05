@@ -842,21 +842,22 @@ async fn macos_installs_a_verified_archive_under_guard_and_only_acknowledges_tar
         ClientUpdateJournal::read(&home).unwrap().unwrap().phase(),
         ClientUpdatePhase::AwaitingStartup
     );
-    assert!(super::macos::reconcile(&home, "1.0.0", &executable)
-        .unwrap()
-        .is_some());
+    assert!(matches!(
+        super::macos::reconcile(&home, "1.0.0", &executable).unwrap(),
+        ClientUpdateStartup::Pending(_)
+    ));
     assert_eq!(
         ClientUpdateJournal::read(&home).unwrap().unwrap().phase(),
         ClientUpdatePhase::AwaitingStartup
     );
-    assert!(
-        super::macos::reconcile(&home, "1.1.0", &fixture.path().join("other"))
-            .unwrap()
-            .is_some()
-    );
-    assert!(super::macos::reconcile(&home, "1.1.0", &executable)
-        .unwrap()
-        .is_none());
+    assert!(matches!(
+        super::macos::reconcile(&home, "1.1.0", &fixture.path().join("other")).unwrap(),
+        ClientUpdateStartup::Pending(_)
+    ));
+    assert!(matches!(
+        super::macos::reconcile(&home, "1.1.0", &executable).unwrap(),
+        ClientUpdateStartup::Clear
+    ));
     assert_eq!(
         ClientUpdateJournal::read(&home).unwrap().unwrap().phase(),
         ClientUpdatePhase::Succeeded
@@ -1230,9 +1231,10 @@ fn macos_reconciles_interrupted_synchronous_install_only_after_guard_and_actual_
         ClientUpdatePhase::InstallerRunning
     );
     drop(active);
-    assert!(super::macos::reconcile(home.path(), "1.0.0", &executable)
-        .unwrap()
-        .is_some());
+    assert!(matches!(
+        super::macos::reconcile(home.path(), "1.0.0", &executable).unwrap(),
+        ClientUpdateStartup::Pending(_)
+    ));
     assert_eq!(
         ClientUpdateJournal::read(home.path())
             .unwrap()
@@ -1240,9 +1242,10 @@ fn macos_reconciles_interrupted_synchronous_install_only_after_guard_and_actual_
             .phase(),
         ClientUpdatePhase::AwaitingStartup
     );
-    assert!(super::macos::reconcile(home.path(), "1.1.0", &executable)
-        .unwrap()
-        .is_none());
+    assert!(matches!(
+        super::macos::reconcile(home.path(), "1.1.0", &executable).unwrap(),
+        ClientUpdateStartup::Clear
+    ));
     assert_eq!(
         ClientUpdateJournal::read(home.path())
             .unwrap()
@@ -1254,9 +1257,10 @@ fn macos_reconciles_interrupted_synchronous_install_only_after_guard_and_actual_
         ClientUpdateJournal::begin(home.path(), "1.1.0", "1.2.0", &executable).unwrap();
     abandoned.record(ClientUpdatePhase::Guarded).unwrap();
     abandoned.record(ClientUpdatePhase::Committed).unwrap();
-    assert!(super::macos::reconcile(home.path(), "1.1.0", &executable)
-        .unwrap()
-        .is_none());
+    assert!(matches!(
+        super::macos::reconcile(home.path(), "1.1.0", &executable).unwrap(),
+        ClientUpdateStartup::RetryableFailure(_)
+    ));
     assert_eq!(
         ClientUpdateJournal::read(home.path())
             .unwrap()
@@ -1264,4 +1268,29 @@ fn macos_reconciles_interrupted_synchronous_install_only_after_guard_and_actual_
             .phase(),
         ClientUpdatePhase::Failed
     );
+}
+
+#[tokio::test]
+async fn known_terminal_install_failure_survives_startup_and_allows_explicit_manual_check() {
+    let app = app();
+    let mut updater = ClientUpdater::new("1.0.0".into());
+    updater.config.endpoint = None;
+    updater.config.public_key = None;
+    updater.reconcile_startup_result(Ok(ClientUpdateStartup::RetryableFailure(
+        "上次客户端安装失败，退出码 17，请检查或使用官方安装包恢复".into(),
+    )));
+    let startup = updater.startup_check(app.handle()).await;
+    assert_eq!(startup.status, "install_failed");
+    assert!(startup.error.unwrap().contains("退出码 17"));
+    assert!(!startup.automatic);
+    assert!(startup.show_recovery_notice);
+    assert!(!updater.acknowledge_failure_notice().show_recovery_notice);
+    assert!(!updater.status().show_recovery_notice);
+    assert_eq!(
+        updater.startup_check(app.handle()).await.status,
+        "install_failed"
+    );
+    let manual = updater.check(app.handle()).await;
+    assert_eq!(manual.status, "failed");
+    assert!(manual.error.unwrap().contains("稳定版清单地址"));
 }

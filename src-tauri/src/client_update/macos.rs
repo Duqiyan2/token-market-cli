@@ -1,6 +1,9 @@
 //! Apple Silicon app-bundle updates. The official installer is synchronous on
 //! macOS; this owned handoff retains every legacy operation lock until it ends.
-use super::{ClientUpdateCommit, ClientUpdateHandoff, ClientUpdateInstaller, VerifiedClientUpdate};
+use super::{
+    ClientUpdateCommit, ClientUpdateHandoff, ClientUpdateInstaller, ClientUpdateStartup,
+    VerifiedClientUpdate,
+};
 use std::{
     fs,
     path::{Component, Path, PathBuf},
@@ -307,18 +310,18 @@ pub(super) fn reconcile(
     home: &Path,
     running_version: &str,
     executable: &Path,
-) -> Result<Option<String>, String> {
+) -> Result<ClientUpdateStartup, String> {
     if ClientUpdateJournal::read(home)
         .map_err(|e| format!("{e:#}"))?
         .is_none()
     {
-        return Ok(None);
+        return Ok(ClientUpdateStartup::Clear);
     }
     let _guard =
         ClientUpdateGuard::acquire(home, &tokenmarket_core::config::console_api_base_url())
             .map_err(|e| format!("{e:#}"))?;
     let Some(mut journal) = ClientUpdateJournal::read(home).map_err(|e| format!("{e:#}"))? else {
-        return Ok(None);
+        return Ok(ClientUpdateStartup::Clear);
     };
     // macOS installation runs only synchronously inside the guard-owning
     // desktop. Owning the same full guard now proves that earlier in-process
@@ -333,7 +336,9 @@ pub(super) fn reconcile(
             journal
                 .record(ClientUpdatePhase::Failed)
                 .map_err(|e| format!("{e:#}"))?;
-            return Ok(None);
+            return Ok(ClientUpdateStartup::RetryableFailure(
+                "上次客户端更新准备已中断，未开始安装，请重新检查更新或使用官方安装包恢复".into(),
+            ));
         }
         ClientUpdatePhase::InstallerRunning => {
             journal
@@ -343,21 +348,23 @@ pub(super) fn reconcile(
         _ => {}
     }
     match journal.phase() {
-        ClientUpdatePhase::Succeeded => Ok(None),
-        ClientUpdatePhase::Failed => Ok(None),
+        ClientUpdatePhase::Succeeded => Ok(ClientUpdateStartup::Clear),
+        ClientUpdatePhase::Failed => Ok(ClientUpdateStartup::RetryableFailure(
+            "上次客户端安装未完成，请重新检查更新或使用官方安装包恢复".into(),
+        )),
         ClientUpdatePhase::AwaitingStartup => {
             match journal.acknowledge_startup(running_version, executable) {
-                Ok(()) => Ok(None),
-                Err(error) => Ok(Some(format!("{error:#}"))),
+                Ok(()) => Ok(ClientUpdateStartup::Clear),
+                Err(error) => Ok(ClientUpdateStartup::Pending(format!("{error:#}"))),
             }
         }
-        _ => Ok(Some(
+        _ => Ok(ClientUpdateStartup::Pending(
             "上次客户端更新交接中断，尚未确认完成，请使用官方安装包检查恢复".into(),
         )),
     }
 }
 
-pub(super) fn reconcile_startup() -> Result<Option<String>, String> {
+pub(super) fn reconcile_startup() -> Result<ClientUpdateStartup, String> {
     let executable = std::env::current_exe().map_err(|e| e.to_string())?;
     reconcile(
         &tokenmarket_core::config::home_dir(),

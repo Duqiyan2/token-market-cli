@@ -91,3 +91,15 @@ that actual-version startup acknowledgment.
 Automated fixtures prove legacy lock conflicts in both directions, partial
 release, explicit retries and native/UI handoff behavior. They are not platform
 installation, Windows execution, code-signing or actual-device evidence.
+
+## Startup recovery outcomes
+
+Platform reconciliation returns `ClientUpdateStartup::Clear`, `Pending`, or
+`RetryableFailure`. Pending/read errors retain a nonretryable handoff with the
+native recovery explanation. A known terminal failure uses `install_failed`,
+keeps the actual failure reason visible, and suppresses the startup network check
+so blank host configuration cannot erase it. Manual **Check for Client Updates**
+remains available. A native process flag acknowledges the nonmodal global failure
+notice once when displayed; renderer reload does not repeat it. Settings retains
+the explanation and configured official recovery action. Neither outcome claims
+that an old-version relaunch completed the update.

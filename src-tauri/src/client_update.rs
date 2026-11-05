@@ -28,6 +28,7 @@ pub struct ClientUpdateStatus {
     pub remind: bool,
     pub install_available: bool,
     pub recovery_available: bool,
+    pub show_recovery_notice: bool,
 }
 
 /// Constructed only from a successfully verified native download. Never IPC data.
@@ -66,6 +67,12 @@ pub trait ClientUpdateHandoff: Send {
 pub enum ClientUpdateCommit {
     Handoff,
     HandoffWithWarning(String),
+}
+
+pub enum ClientUpdateStartup {
+    Clear,
+    Pending(String),
+    RetryableFailure(String),
 }
 
 struct UpdateConfig {
@@ -175,6 +182,7 @@ impl ClientUpdater {
                     remind: false,
                     install_available: false,
                     recovery_available: false,
+                    show_recovery_notice: false,
                 },
                 candidate: None,
                 verified_bytes: None,
@@ -244,19 +252,35 @@ impl ClientUpdater {
     }
 
     /// Preserve unresolved native installation facts before any network/config check.
-    fn reconcile_startup_result(&self, recovery: Result<Option<String>, String>) {
-        if let Some(error) = recovery.unwrap_or_else(|error| Some(error)) {
-            let mut state = self.state.lock().expect("client update state");
-            state.status.status = "handoff".into();
-            state.status.error = Some(error);
-            state.status.automatic = false;
-            state.status.remind = false;
-        }
+    fn reconcile_startup_result(&self, recovery: Result<ClientUpdateStartup, String>) {
+        let outcome = recovery.unwrap_or_else(ClientUpdateStartup::Pending);
+        let (status, error, show_notice) = match outcome {
+            ClientUpdateStartup::Clear => return,
+            ClientUpdateStartup::Pending(error) => ("handoff", error, false),
+            ClientUpdateStartup::RetryableFailure(error) => {
+                // Preserve this known native outcome until a manual check. The
+                // automatic network/config check must not erase recovery help.
+                self.startup_started.store(true, Ordering::SeqCst);
+                ("install_failed", error, true)
+            }
+        };
+        let mut state = self.state.lock().expect("client update state");
+        state.status.status = status.into();
+        state.status.show_recovery_notice = show_notice;
+        state.status.error = Some(error);
+        state.status.automatic = false;
+        state.status.remind = false;
     }
 
     pub fn status(&self) -> ClientUpdateStatus {
         let mut state = self.state.lock().expect("client update state");
         state.status.recovery_available = self.recovery_url().is_ok();
+        state.status.clone()
+    }
+
+    pub fn acknowledge_failure_notice(&self) -> ClientUpdateStatus {
+        let mut state = self.state.lock().expect("client update state");
+        state.status.show_recovery_notice = false;
         state.status.clone()
     }
 
@@ -338,6 +362,7 @@ impl ClientUpdater {
             state.candidate = None;
             state.verified_bytes = None;
             state.status.status = "checking".into();
+            state.status.show_recovery_notice = false;
             state.status.available_version = None;
             state.status.release_notes = None;
             state.status.error = None;
@@ -566,4 +591,9 @@ pub async fn install_client_update(
 #[tauri::command]
 pub fn open_client_update_recovery(app: AppHandle) -> Result<(), String> {
     app.state::<ClientUpdater>().open_recovery(&app)
+}
+
+#[tauri::command]
+pub fn acknowledge_client_update_failure(app: AppHandle) -> ClientUpdateStatus {
+    app.state::<ClientUpdater>().acknowledge_failure_notice()
 }

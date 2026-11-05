@@ -30,13 +30,15 @@ explicit restart; neither launch nor the old process exiting means success.
 Early native setup reconciles the journal before checking distribution
 configuration, including when the host URL/key is blank. Only the target
 compiled version running from the recorded executable path acknowledges
-`Succeeded`. Old/wrong executable startup remains pending with recovery guidance. After
+`Succeeded`. Old/wrong executable startup remains pending with recovery guidance.
+After
 reacquiring the whole guard, macOS can prove its earlier synchronous installer
 is inactive: an interrupted `InstallerRunning` advances to `AwaitingStartup`,
 then the same strict actual-version/path acknowledgment applies. Interrupted
 `Preparing`, `Guarded` or `Committed` phases never called install, so they become
 known failures under that guard and allow a fresh explicit retry. These facts
-do not apply to an independent Windows installer process. Known failed installation keeps verified bytes for retry;
+do not apply to an independent Windows installer process. Known failed
+installation keeps verified bytes for retry;
 an uncertain completed replacement returns a typed pending handoff with an
 actionable recovery warning and cannot silently become a new attempt. A failure
 to persist the final startup-wait phase does not restart or enable retry; actual

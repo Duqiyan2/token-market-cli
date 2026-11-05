@@ -85,10 +85,11 @@
         ? '没有更新的受支持稳定版本' : value.status === 'downloading'
           ? '正在下载客户端更新…' : value.status === 'verifying'
             ? '下载完成，正在验证更新包签名…' : value.status === 'ready'
-              ? `更新包 ${value.availableVersion} 签名验证通过，等待安装` : value.status === 'failed'
+              ? `更新包 ${value.availableVersion} 签名验证通过，等待安装` : value.status === 'install_failed'
+                ? `客户端安装失败：${value.error || '请重新检查更新或使用官方安装包恢复'}` : value.status === 'failed'
                 ? `${value.availableVersion ? '下载或验证失败' : '检查失败'}：${value.error || '请重试'}` : '';
-    el('client-update-status').className = value.status === 'failed' ? 'error' : '';
-    check.textContent = value.status === 'failed' && !value.availableVersion ? '重试检查客户端更新' : '检查客户端更新';
+    el('client-update-status').className = ['failed','install_failed'].includes(value.status) ? 'error' : '';
+    check.textContent = ['failed','install_failed'].includes(value.status) && !value.availableVersion ? '重试检查客户端更新' : '检查客户端更新';
     const busy = ['downloading','verifying','ready','installing','handoff'].includes(value.status);
     check.disabled = checking || busy;
     download.hidden = !value.availableVersion || ['ready','installing','handoff'].includes(value.status);
