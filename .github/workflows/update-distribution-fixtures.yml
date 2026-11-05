@@ -3,6 +3,11 @@ name: Update distribution fixtures
 on:
   workflow_dispatch:
 
+# All future candidate and production writers MUST use this exact group.
+concurrency:
+  group: token-market-client-update-distribution
+  cancel-in-progress: false
+
 permissions:
   contents: read
 

@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "fixture": false,
+  "repository": "",
+  "workflow": "",
+  "run_url": "",
+  "run_attempt": 0,
+  "source_commit": "",
+  "version": "",
+  "target": "",
+  "artifacts": [],
+  "prepared_sha256": "",
+  "signing_identity": "",
+  "compiled": {
+    "endpoint": "",
+    "recovery_url": "",
+    "public_key_sha256": ""
+  }
+}
