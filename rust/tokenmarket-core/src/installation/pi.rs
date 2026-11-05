@@ -121,6 +121,7 @@ chmod u+x "$2/pi"
         download: None,
     });
     Ok(InstallPlan {
+        method: super::InstallMethod::Standalone,
         tool: ToolId::Pi,
         version: version.into(),
         command: "pi".into(),

@@ -330,7 +330,7 @@ impl InstallExecutor for Installer {
 }
 
 #[test]
-fn grok_installs_the_official_pinned_version_and_is_redetected_without_connecting() {
+fn grok_installs_from_the_official_channel_and_is_redetected_without_connecting() {
     let root = tempfile::tempdir().unwrap();
     let tool = tool_id("grok-build").unwrap();
     let manager = InstallationManager::new(
@@ -343,7 +343,7 @@ fn grok_installs_the_official_pinned_version_and_is_redetected_without_connectin
     assert!(manager.availability(tool).supported);
     assert_eq!(
         manager.availability(tool).version.as_deref(),
-        Some("1.0.70")
+        Some("latest")
     );
     manager.start(tool).unwrap();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);

@@ -33,9 +33,14 @@ pub trait RuntimeInstaller: Send + Sync {
 }
 pub struct NativeRuntimeInstaller;
 
-pub(crate) fn is_legacy_worker(path: &str) -> bool {
-    path.replace('\\', "/")
-        .contains("/.qwenworkcn/tokenmarket-direct-sdk/")
+pub(crate) fn is_managed_worker(path: &str) -> bool {
+    let path = path.replace('\\', "/");
+    [
+        "/.qwenworkcn/tokenmarket-direct-sdk/",
+        "/.qwenworkcn/tokenmarket-local-sdk-v2/",
+    ]
+    .iter()
+    .any(|prefix| path.contains(prefix))
 }
 
 pub fn fingerprint(key: &str) -> String {

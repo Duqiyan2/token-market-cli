@@ -37,7 +37,7 @@ impl InstallationEnvironment {
         } else {
             HostPlatform::Unix
         };
-        let mut command_directories: Vec<PathBuf> = std::env::var_os("PATH")
+        let mut command_directories: Vec<PathBuf> = crate::installation::effective_path()
             .map(|p| std::env::split_paths(&p).collect())
             .unwrap_or_default();
         command_directories.extend([
@@ -46,6 +46,12 @@ impl InstallationEnvironment {
             home.join(".npm-global/bin"),
             home.join(".cargo/bin"),
             home.join(".opencode/bin"),
+            home.join(".grok/bin"),
+            home.join(".kimi-code/bin"),
+            home.join(".minimax-code/bin"),
+            home.join(".hermes/bin"),
+            home.join(".volta/bin"),
+            home.join(".local/share/pnpm"),
         ]);
         command_directories.extend(crate::installation::recipes::managed_command_directories(
             &home,
@@ -264,12 +270,17 @@ impl ToolInventory {
             .map(|adapter| {
                 let installed = self.is_installed(adapter.id);
                 let installations = self.installation_locations(adapter.id);
+                let installation = crate::installation::recipes::availability(
+                    adapter.id,
+                    &self.environment,
+                    std::env::consts::ARCH,
+                );
                 let installation_method =
                     installations.first().map(|p| p.method).unwrap_or_else(|| {
-                        crate::installation::discovery::planned_method(
-                            adapter.id,
-                            &self.environment,
-                        )
+                        installation
+                            .method
+                            .map(|method| method.label(self.environment.platform))
+                            .unwrap_or("当前平台暂无安装方案")
                     });
                 let config = absolute_config_path(&self.config_path(adapter.id))
                     .unwrap_or_else(|_| self.config_path(adapter.id));
@@ -278,11 +289,7 @@ impl ToolInventory {
                     id: adapter.id,
                     name: adapter.name,
                     installed,
-                    installation: crate::installation::recipes::availability(
-                        adapter.id,
-                        &self.environment,
-                        std::env::consts::ARCH,
-                    ),
+                    installation,
                     can_connect: installed,
                     download_url: official_download_url(adapter.id),
                     config_path: config.display().to_string(),
@@ -329,11 +336,7 @@ impl ToolInventory {
             .collect::<Vec<_>>();
         let prefer_application = matches!(
             tool,
-            ToolId::WorkBuddy
-                | ToolId::DeepSeekHarness
-                | ToolId::DuMate
-                | ToolId::DuMateEnterprise
-                | ToolId::QwenWork
+            ToolId::WorkBuddy | ToolId::DuMate | ToolId::DuMateEnterprise | ToolId::QwenWork
         );
         let candidates = if prefer_application {
             applications
@@ -625,6 +628,21 @@ pub fn official_download_url(tool: ToolId) -> &'static str {
 }
 
 impl InstallationEnvironment {
+    pub(crate) fn path_default_command(&self, command: &str) -> Option<PathBuf> {
+        // Fixtures explicitly provide their search PATH. For the live home,
+        // common-directory discovery must not masquerade as terminal precedence.
+        if self.home != crate::config::home_dir() {
+            return self.command_path(command);
+        }
+        let mut env = self.clone();
+        env.command_directories = crate::installation::effective_path()
+            .map(|p| std::env::split_paths(&p).collect())
+            .unwrap_or_default();
+        #[cfg(windows)]
+        env.command_directories
+            .extend(registered_command_directories());
+        env.command_path(command)
+    }
     pub(crate) fn has_command(&self, command: &str) -> bool {
         self.command_path(command).is_some()
     }
@@ -913,7 +931,17 @@ impl ToolInventory {
     /// Desktop discovery and foreground CLI launch share the executable/env plan.
     pub fn launch_plan(&self, tool: ToolId) -> Result<ToolLaunchPlan> {
         self.require_installed(tool)?;
-        if let Some(path) = self.application_path(tool) {
+        if let Some(path) = self.application_path(tool).filter(|_| {
+            matches!(
+                tool,
+                ToolId::WorkBuddy | ToolId::DuMate | ToolId::DuMateEnterprise | ToolId::QwenWork
+            ) || self
+                .environment
+                .command_path(tool.command())
+                .is_none_or(|path| {
+                    crate::installation::attempt::incomplete(&self.environment, tool, &path)
+                })
+        }) {
             return match self.environment.platform {
                 HostPlatform::MacOs => Ok(ToolLaunchPlan {
                     program: "open".into(),

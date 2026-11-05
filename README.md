@@ -174,9 +174,9 @@ xattr -cr "/Applications/Token Market.app"
 
 Then reopen the app.
 
-Normal upgrades preserve the signing identity so the app and CLI can reuse their
-Keychain items without repeated access prompts. Older ad-hoc builds may require
-a one-time authorization when migrating. See [macOS signing](docs/macos-local-signing.md)
+macOS builds use the system Keychain tool as a stable credential caller across
+App/CLI updates, including locally signed builds. Older native Keychain records
+may require a one-time authorization or an explicit reset when migrating. See [macOS signing](docs/macos-local-signing.md)
 for build and release configuration.
 
 ## Feedback

@@ -97,7 +97,9 @@ jobs:
           MACOS_SIGNING_CERTIFICATE: ${{ secrets.MACOS_SIGNING_CERTIFICATE }}
           MACOS_SIGNING_PASSWORD: ${{ secrets.MACOS_SIGNING_PASSWORD }}
           MACOS_SIGNING_CERTIFICATE_SHA1: ${{ vars.MACOS_SIGNING_CERTIFICATE_SHA1 }}
-        run: python3 scripts/macos-local-signing.py --profile production --ci smoke
+        run: |
+          python3 scripts/macos-local-signing.py --profile production --ci smoke
+          python3 scripts/macos-local-signing.py --profile production --ci native-smoke
       - name: Sign publishable macOS CLI
         if: runner.os == 'macOS' && env.MACOS_SIGNING_REQUIRED == 'true'
         env:

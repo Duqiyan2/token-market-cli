@@ -9,6 +9,14 @@ These terms distinguish the user's client login from each tool's connection.
 The local application used to manage Agent tools, through either the terminal CLI or desktop interface. These are two interfaces to the same client identity and tool connections on a device.
 _Avoid_: Agent tool
 
+**Client Update**:
+A change to the installed version of the Token Market Client itself. Desktop client updates and CLI updates have separate delivery paths and are independent of Tool Upgrades.
+_Avoid_: Tool upgrade
+
+**Tool Upgrade**:
+A change to the version of an installed Agent Tool managed by the Token Market Client. It is distinct from updating the client and from changing a Tool Connection.
+_Avoid_: Client update, reconnect
+
 **Client Session**:
 The user's reusable login shared by the Token Market CLI and desktop interface on a device. Ending it does not end existing Tool Connections or revoke their Agent API Keys.
 _Avoid_: Agent API key, authorization code
@@ -96,7 +104,11 @@ The origin of an API key, distinguishing credentials issued through client autho
 The target Agent product, such as Claude Code, Codex CLI, WorkBuddy, DeepSeek Harness, OpenClaw, or OpenCode.
 
 **Tool Installation**:
-A locally installed copy of a Tool that can be run on the device. It exists independently of a Tool Connection; installing a Tool does not establish its access to Token Market.
+A locally installed copy of a Tool on the device. It can be present but unable to run, and exists independently of a Tool Connection; installing it does not establish access to Token Market.
+
+**Uninstall**:
+Removal of one selected Tool Installation while retaining tool configuration, user data and any saved Tool Connection. Other installations of the same Tool remain independently available.
+_Avoid_: Disconnect, reset
 
 **Adapter Directory Detection**:
 The discovery of the local configuration location used by a particular tool installation.

@@ -9,11 +9,15 @@ mod kimi;
 mod minimax;
 mod native_cli;
 mod node;
+mod node_requirement;
+mod npm;
 mod oh_my_pi;
 pub mod opencode;
 mod pi;
+mod policy;
 pub(crate) mod portable_git;
 pub mod recipes;
+pub mod uninstall;
 pub mod updates;
 mod upgrades;
 use crate::{
@@ -58,6 +62,34 @@ pub struct InstallationAvailability {
     pub supported: bool,
     pub reason: Option<String>,
     pub version: Option<String>,
+    pub method: Option<InstallMethod>,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InstallMethod {
+    Npm,
+    NpmPreferred,
+    ScriptWithNpmFallback,
+    Script,
+    Standalone,
+    Desktop,
+    Homebrew,
+}
+impl InstallMethod {
+    pub fn label(self, platform: crate::inventory::HostPlatform) -> &'static str {
+        match self {
+            Self::Npm => "通过 npm 安装",
+            Self::NpmPreferred => "优先通过 npm 安装",
+            Self::ScriptWithNpmFallback => "运行官方安装脚本，失败时改用 npm",
+            Self::Script if platform == crate::inventory::HostPlatform::Windows => {
+                "通过官方 PowerShell 脚本安装"
+            }
+            Self::Script => "通过官方安装脚本安装",
+            Self::Standalone => "自动安装命令行工具",
+            Self::Desktop => "通过桌面安装器安装",
+            Self::Homebrew => "通过 Homebrew 安装",
+        }
+    }
 }
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -84,6 +116,7 @@ pub struct InstallPlan {
     pub version: String,
     pub command: String,
     pub steps: Vec<InstallStep>,
+    pub method: InstallMethod,
 }
 
 /// Real downloads and processes use this boundary; tests supply fixture installers.
@@ -95,6 +128,9 @@ pub trait InstallExecutor: Send + Sync {
         output: &mut dyn FnMut(String),
     ) -> Result<()>;
     fn version(&self, command: &Path) -> Result<String>;
+    fn runtime_version(&self, command: &Path, _node: &Path) -> Result<String> {
+        self.version(command)
+    }
     /// Read application version metadata without launching the application.
     fn application_version(&self, _application: &Path) -> Result<Option<String>> {
         Ok(None)
@@ -167,6 +203,9 @@ impl InstallExecutor for NativeInstallExecutor {
         Ok(())
     }
     fn version(&self, command: &Path) -> Result<String> {
+        self.runtime_version(command, command)
+    }
+    fn runtime_version(&self, command: &Path, node: &Path) -> Result<String> {
         let mut lines = vec![];
         // Rust handles Windows CMD/BAT launchers and their nonstandard quoting.
         // Manually embedding a quoted script in `cmd /c` breaks paths with spaces.
@@ -177,7 +216,7 @@ impl InstallExecutor for NativeInstallExecutor {
         run_process(
             &program,
             &args,
-            &[],
+            &[("PATH".into(), npm::runtime_path(node))],
             &AtomicBool::new(false),
             &mut |line| lines.push(line),
             Some(Duration::from_secs(15)),
@@ -347,6 +386,39 @@ fn run_process(
     }
 }
 
+/// A GUI inherits a different PATH from an interactive terminal. Resolve the
+/// login-shell PATH once, with the same bounded process runner as version probes.
+pub(crate) fn effective_path() -> Option<std::ffi::OsString> {
+    static PATH: std::sync::OnceLock<Option<std::ffi::OsString>> = std::sync::OnceLock::new();
+    PATH.get_or_init(|| {
+        #[cfg(unix)]
+        {
+            let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+            let mut found = None;
+            let result = run_process(
+                &shell,
+                &[
+                    "-lic".into(),
+                    "printf '\\n__TOKENMARKET_PATH__%s\\n' \"$PATH\"".into(),
+                ],
+                &[],
+                &AtomicBool::new(false),
+                &mut |line| {
+                    if let Some(path) = line.strip_prefix("__TOKENMARKET_PATH__") {
+                        found = Some(std::ffi::OsString::from(path));
+                    }
+                },
+                Some(Duration::from_secs(3)),
+            );
+            if result.is_ok() && found.is_some() {
+                return found;
+            }
+        }
+        std::env::var_os("PATH")
+    })
+    .clone()
+}
+
 struct Job {
     status: InstallStatus,
     cancelled: Arc<AtomicBool>,
@@ -368,6 +440,7 @@ pub struct InstallationManager {
     executor: Arc<dyn InstallExecutor>,
     jobs: Arc<Mutex<BTreeMap<String, Job>>>,
     upgrade_plans: Arc<Mutex<BTreeMap<String, upgrades::UpgradePlan>>>,
+    node_requirements: Arc<Mutex<BTreeMap<String, String>>>,
 }
 impl InstallationManager {
     pub fn current() -> Self {
@@ -391,6 +464,7 @@ impl InstallationManager {
             executor,
             jobs: Arc::new(Mutex::new(BTreeMap::new())),
             upgrade_plans: Arc::new(Mutex::new(BTreeMap::new())),
+            node_requirements: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
     pub fn availability(&self, tool: ToolId) -> InstallationAvailability {
@@ -412,7 +486,7 @@ impl InstallationManager {
                 .transpose();
         }
         let plan = recipes::plan(tool, &self.environment, &self.architecture)?;
-        if gui::is_gui(tool) {
+        if gui::is_gui(tool) && self.environment.command_path(tool.command()).is_none() {
             if let Some(path) = ToolInventory::new(self.environment.clone()).application_path(tool)
             {
                 return self
@@ -501,6 +575,22 @@ impl InstallationManager {
         self.start_upgrade_to(tool, &target)
     }
     pub fn start_upgrade_to(&self, tool: ToolId, expected_version: &str) -> Result<InstallStatus> {
+        self.start_upgrade_checked(tool, expected_version, None)
+    }
+    pub fn start_upgrade_confirmed(
+        &self,
+        tool: ToolId,
+        expected_version: &str,
+        revision: &str,
+    ) -> Result<InstallStatus> {
+        self.start_upgrade_checked(tool, expected_version, Some(revision))
+    }
+    fn start_upgrade_checked(
+        &self,
+        tool: ToolId,
+        expected_version: &str,
+        revision: Option<&str>,
+    ) -> Result<InstallStatus> {
         let target = self
             .upgrade_plans
             .lock()
@@ -511,16 +601,22 @@ impl InstallationManager {
         if target.plan.version != expected_version {
             bail!("官方版本信息已改变，请重新检查并确认升级");
         }
+        if revision.is_some_and(|revision| revision != target.revision()) {
+            bail!("升级入口或方案已改变，请重新检查并确认")
+        }
         let operation_lock = installation_lock(&self.environment, tool)?;
         if self.environment.command_path(tool.command()).as_ref() != Some(&target.probe) {
             bail!("工具安装路径已改变，请重新检查更新");
         }
+        self.ensure_node_requirement(tool)?;
+        let current_version = self.installed_version(tool).ok().flatten();
         match upgrades::route(
             tool,
             expected_version,
             &self.environment,
             &self.architecture,
             None,
+            current_version.as_deref(),
         )? {
             upgrades::Route::Automatic(fresh)
                 if fresh.probe == target.probe
@@ -530,7 +626,6 @@ impl InstallationManager {
                         .iter()
                         .map(|s| (&s.program, &s.args))
                         .eq(target.plan.steps.iter().map(|s| (&s.program, &s.args))) => {}
-            upgrades::Route::Archive if target.managed => {}
             _ => bail!("工具安装渠道已改变，请重新检查更新"),
         }
         self.validate_upgrade(&target.plan)?;
@@ -716,6 +811,12 @@ impl InstallationManager {
         {
             bail!("已检测到应用安装，请使用原有安装；未自动替换或升级")
         }
+        self.update(plan.tool, |state| {
+            state
+                .output
+                .push(plan.method.label(self.environment.platform).into());
+            state.output_sequence += 1;
+        });
         let native_gui = plan
             .steps
             .iter()
@@ -750,6 +851,7 @@ impl InstallationManager {
             )
         }
         attempt::complete(&self.environment, plan.tool)?;
+        self.update(plan.tool, |state| state.version = Some(version));
         Ok(())
     }
     fn execute_steps(
@@ -798,7 +900,7 @@ impl InstallationManager {
                     }
                 }
             }
-            self.executor.execute(step, cancellation, &mut |line| {
+            let result = self.executor.execute(step, cancellation, &mut |line| {
                 self.update(plan.tool, |state| {
                     if let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) {
                         if value["name"] == "openclaw" {
@@ -816,7 +918,10 @@ impl InstallationManager {
                         state.output.remove(0);
                     }
                 });
-            })?;
+            });
+            let observed = attempt::observe(&self.environment, plan.tool);
+            result?;
+            observed?;
         }
         Ok(())
     }

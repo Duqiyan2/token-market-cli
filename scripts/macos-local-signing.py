@@ -32,8 +32,8 @@ ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_IDENTITY = Path.home() / "Library/Application Support/Token Market/Local Signing"
 
 
-def run(args, *, label=None, input=None):
-    result = subprocess.run([str(arg) for arg in args], input=input, capture_output=True)
+def run(args, *, label=None, input=None, env=None):
+    result = subprocess.run([str(arg) for arg in args], input=input, env=env, capture_output=True)
     if result.returncode:
         # Never include arguments: some security/openssl operations take passwords.
         detail = ""
@@ -278,6 +278,91 @@ def smoke(args):
     print("Passed: bidirectional access, process restart, relocation, rebuild, and rejection of ad-hoc/unrelated readers; keychain UI disabled throughout.")
 
 
+def native_smoke(args):
+    """Exercise the client's actual Rust credential store, including legacy reset.
+
+    Only a random .invalid fixture is written to the user keychain. Native
+    negative probes disable OS UI; real sessions are never read.
+    """
+    app_id, cli_id = PROFILES[args.profile]
+    with tempfile.TemporaryDirectory(prefix="tokenmarket-native-keychain-") as temporary:
+        directory = Path(temporary)
+        binaries = []
+        for variant in ("old", "new"):
+            env = dict(os.environ, TOKEN_MARKET_KEYCHAIN_PROBE_BUILD=variant)
+            output = run(["cargo", "test", "--locked", "--manifest-path",
+                          ROOT / "rust/tokenmarket-core/Cargo.toml", "--test",
+                          "native_keychain_upgrade", "--no-run", "--message-format=json"],
+                         env=env, label="Build native keychain probe")
+            executable = None
+            for line in output.splitlines():
+                item = json.loads(line)
+                if item.get("reason") == "compiler-artifact" and item.get("executable"):
+                    executable = item["executable"]
+            if not executable:
+                raise RuntimeError("Native keychain probe executable missing")
+            target = directory / variant
+            shutil.copy2(executable, target)
+            binaries.append(target)
+        legacy, upgraded = binaries
+        app, cli = directory / "desktop", directory / "cli"
+        shutil.copy2(legacy, app)
+        shutil.copy2(legacy, cli)
+        scope = "https://native-keychain-upgrade-" + secrets.token_hex(16) + ".invalid"
+
+        def probe(binary, operation):
+            env = dict(os.environ, TOKEN_MARKET_KEYCHAIN_PROBE_SCOPE=scope,
+                       TOKEN_MARKET_KEYCHAIN_PROBE_OPERATION=operation)
+            result = subprocess.run([str(binary), "--exact", "native_keychain_upgrade_probe", "--ignored", "--nocapture"],
+                                    env=env, capture_output=True, timeout=15)
+            if result.returncode:
+                # This probe validates its random .invalid namespace before any
+                # access and its errors never include credential contents.
+                detail = (result.stdout + result.stderr).decode(errors="replace").strip()
+                raise RuntimeError(f"Native keychain {operation} failed: {detail}")
+            print(f"Native keychain {binary.name}/{operation}: passed", flush=True)
+
+        with signing_identity(args) as (keychain, digest):
+            run(["/usr/bin/codesign", "--force", "--sign", "-", legacy])
+            sign(app, app_id, keychain, digest, args.profile)
+            sign(cli, cli_id, keychain, digest, args.profile)
+            sign(upgraded, app_id, keychain, digest, args.profile)
+            owner = None
+            try:
+                probe(app, "create")
+                owner = app
+                probe(app, "read")
+                probe(cli, "read")
+                probe(app, "delete")
+                owner = None
+                scope = "https://native-keychain-upgrade-" + secrets.token_hex(16) + ".invalid"
+                probe(legacy, "legacy-create")
+                owner = (legacy, "legacy-delete")
+                probe(app, "native-denied")
+                probe(legacy, "legacy-delete")
+                owner = None
+                probe(app, "missing")
+                probe(app, "create")
+                owner = app
+                probe(app, "read")
+                probe(cli, "read")
+                probe(cli, "update")
+                probe(app, "read-updated")
+                probe(upgraded, "read-updated")
+                moved = directory / "moved-cli"
+                shutil.copy2(cli, moved)
+                probe(moved, "read-updated")
+                run(["/usr/bin/codesign", "--force", "--sign", "-", moved])
+                probe(moved, "native-denied")
+            finally:
+                if owner is not None:
+                    binary, operation = owner if isinstance(owner, tuple) else (owner, "delete")
+                    probe(binary, operation)
+                    if operation == "delete":
+                        probe(binary, "missing")
+    print("Passed using the production credential store: legacy reset/recreate, App/CLI sharing, renewal, restart, relocation, rebuilt upgrade, and direct native-reader rejection.")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--identity-dir", type=Path, default=DEFAULT_IDENTITY)
@@ -286,6 +371,7 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("init", help="Create once; subsequent builds reuse the same private signing identity")
     commands.add_parser("smoke", help="Exercise dummy cross-process keychain access with UI disabled")
+    commands.add_parser("native-smoke", help="Test the actual Rust credential store, legacy reset and signed upgrades with bounded fake-data probes")
     cli_parser = commands.add_parser("sign-cli", help="Sign a built macOS CLI before packaging it for npm")
     cli_parser.add_argument("--cli", type=Path, required=True)
     package_parser = commands.add_parser("package", help="Copy and sign an existing local app/CLI, then create a DMG")
@@ -303,6 +389,8 @@ def main():
             print(f"Stable local signing certificate: {digest}")
     elif args.command == "smoke":
         smoke(args)
+    elif args.command == "native-smoke":
+        native_smoke(args)
     elif args.command == "sign-cli":
         with signing_identity(args) as (keychain, digest):
             sign(args.cli.resolve(), PROFILES[args.profile][1], keychain, digest, args.profile)

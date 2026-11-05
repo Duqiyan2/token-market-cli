@@ -1,8 +1,8 @@
 mod connections;
 mod installation;
+mod usage;
 mod window_lifecycle;
 mod workspace;
-mod usage;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
@@ -278,6 +278,8 @@ pub fn run() {
             prepare_tool_connect,
             download_tool,
             installation::start_tool_installation,
+            installation::tool_uninstall_candidates,
+            installation::start_tool_uninstall,
             installation::check_tool_updates,
             installation::start_tool_upgrade,
             installation::tool_installation_status,

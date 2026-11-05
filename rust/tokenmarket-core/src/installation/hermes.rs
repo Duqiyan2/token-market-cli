@@ -101,6 +101,7 @@ Stage-Complete
         *argument = argument.replace("__TOKENMARKET_PHASE__", "products");
     }
     Ok(InstallPlan {
+        method: super::InstallMethod::Script,
         tool: ToolId::Hermes,
         version: VERSION.into(),
         command: "hermes".into(),

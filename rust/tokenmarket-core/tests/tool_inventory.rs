@@ -225,7 +225,7 @@ fn linux_terminal_launch_resolves_private_wrappers_and_process_environment_witho
 
 #[cfg(unix)]
 #[test]
-fn installation_locations_preserve_selection_and_deduplicate_aliases_without_running_tools() {
+fn installation_locations_preserve_path_order_and_deduplicate_aliases_without_running_tools() {
     use std::os::unix::fs::{symlink, PermissionsExt};
     let root = tempfile::tempdir().unwrap();
     let home = root.path().join("home");
@@ -262,7 +262,7 @@ fn installation_locations_preserve_selection_and_deduplicate_aliases_without_run
     let env = InstallationEnvironment {
         home: home.clone(),
         platform: HostPlatform::MacOs,
-        command_directories: vec![npm.clone(), local.clone(), npm.clone(), alias],
+        command_directories: vec![local.clone(), npm.clone(), npm.clone(), alias],
         application_directories: vec![],
         executable_extensions: vec![],
     };
@@ -272,11 +272,11 @@ fn installation_locations_preserve_selection_and_deduplicate_aliases_without_run
     assert_eq!(codex.installations.len(), 2);
     assert_eq!(
         codex.installations[0].path,
-        npm.join("codex").display().to_string()
+        local.join("codex").display().to_string()
     );
     assert!(codex.installations[0].selected);
-    assert_eq!(codex.installations[0].method, "npm");
-    assert_eq!(codex.installations[1].method, "原生程序");
+    assert_eq!(codex.installations[0].method, "原生程序");
+    assert_eq!(codex.installations[1].method, "npm");
     assert!(!codex.installations[1].selected);
     assert_eq!(
         inventory
@@ -288,6 +288,87 @@ fn installation_locations_preserve_selection_and_deduplicate_aliases_without_run
     assert!(!marker.exists());
     assert!(!home.join(".tokenmarket").exists());
 }
+#[cfg(unix)]
+#[test]
+fn claude_and_codex_keep_path_order_while_identifying_verified_npm() {
+    for platform in [
+        HostPlatform::MacOs,
+        HostPlatform::Windows,
+        HostPlatform::Unix,
+    ] {
+        for (tool, package) in [
+            (ToolId::ClaudeCode, "@anthropic-ai/claude-code"),
+            (ToolId::Codex, "@openai/codex"),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let mut env = environment(root.path(), platform);
+            let native = root.path().join("native");
+            let npm = root.path().join("npm");
+            let command = tool.command();
+            let (native_path, npm_path, package_root) = if platform == HostPlatform::Windows {
+                (
+                    native.join(format!("{command}.exe")),
+                    npm.join(format!("{command}.cmd")),
+                    npm.join("node_modules").join(package),
+                )
+            } else {
+                (
+                    native.join(command),
+                    npm.join("bin").join(command),
+                    npm.join("lib/node_modules").join(package),
+                )
+            };
+            executable(&native_path);
+            executable(&npm_path);
+            #[cfg(unix)]
+            if platform != HostPlatform::Windows {
+                let target = package_root.join("bin/cli.js");
+                executable(&target);
+                std::fs::remove_file(&npm_path).unwrap();
+                std::os::unix::fs::symlink(target, &npm_path).unwrap();
+            }
+            std::fs::create_dir_all(&package_root).unwrap();
+            let metadata = package_root.join("package.json");
+            std::fs::write(&metadata, r#"{"name":"unrelated-package"}"#).unwrap();
+            env.command_directories = vec![native, npm_path.parent().unwrap().into()];
+            let inventory = ToolInventory::new(env);
+            assert_eq!(
+                inventory.installation_locations(tool)[0].path,
+                native_path.to_string_lossy()
+            );
+            std::fs::write(&metadata, format!(r#"{{"name":"{package}"}}"#)).unwrap();
+            let locations = inventory.installation_locations(tool);
+            assert_eq!(
+                locations[0].path,
+                native_path.to_string_lossy(),
+                "{platform:?}: {tool}"
+            );
+            assert_eq!(locations[1].method, "npm");
+            assert!(locations[0].selected);
+            assert!(!locations[1].selected);
+            let launch = inventory.terminal_launch_plan(tool).unwrap();
+            if platform == HostPlatform::Windows {
+                let path = launch
+                    .environment
+                    .iter()
+                    .find(|(key, _)| key == "PATH")
+                    .unwrap();
+                assert_eq!(
+                    path.1.split(';').next().unwrap(),
+                    native_path.parent().unwrap().to_str().unwrap()
+                );
+            } else {
+                assert_eq!(launch.program, native_path.to_string_lossy());
+            }
+            std::fs::remove_file(&npm_path).unwrap();
+            assert_eq!(
+                inventory.installation_locations(tool)[0].path,
+                native_path.to_string_lossy()
+            );
+        }
+    }
+}
+
 #[test]
 fn config_directory_is_the_effective_config_parent_and_missing_tools_describe_their_recipe() {
     let root = tempfile::tempdir().unwrap();
@@ -313,19 +394,19 @@ fn config_directory_is_the_effective_config_parent_and_missing_tools_describe_th
         .find(|e| e.id == ToolId::Codex)
         .unwrap()
         .installation_method
-        .contains("官方安装器"));
+        .contains("npm"));
     assert!(entries
         .iter()
         .find(|e| e.id == ToolId::Pi)
         .unwrap()
         .installation_method
-        .contains("独立安装包"));
+        .contains("npm"));
     assert!(entries
         .iter()
         .find(|e| e.id == ToolId::GrokBuild)
         .unwrap()
         .installation_method
-        .contains("npm"));
+        .contains("官方安装脚本"));
     assert!(entries
         .iter()
         .find(|e| e.id == ToolId::Hermes)

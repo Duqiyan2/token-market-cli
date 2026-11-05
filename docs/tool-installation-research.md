@@ -1,5 +1,7 @@
 # Tool installation research
 
+> 2026-11-04 后续决定：用户已明确撤销此前 npm 优先与固定安装版本策略；当前实现规范以 [工具生命周期](tool-lifecycle.md) 为准。下文保留为当时的调研记录。
+
 Official documentation checked on 2026-11-02 during the design interview for
 [ADR 0005](adr/0005-tool-support-and-installation-scope.md). These are upstream
 documentation findings, not installed-tool, target-deployment or paid-call proof.
@@ -16,7 +18,7 @@ design decision to this round.
 
 | Tool | Upstream installation reference | Integration constraint |
 | --- | --- | --- |
-| Claude Code | [Setup](https://code.claude.com/docs/en/setup): native installers for macOS/Linux/Windows; package-manager alternatives | Prefer a supported native installer rather than requiring Node for every tool. |
+| Claude Code | [Setup](https://code.claude.com/docs/en/setup): native installers for macOS/Linux/Windows; package-manager alternatives | On macOS/Windows, reuse compatible existing Node/npm for the official npm package; retain the native installer when that runtime is unavailable. |
 | Codex CLI | [CLI](https://learn.chatgpt.com/docs/codex/cli), [Windows deployment](https://learn.chatgpt.com/docs/enterprise/windows-deployment): standalone installers and npm | Install for the actual user and re-read effective PATH. |
 | WorkBuddy | [macOS](https://www.codebuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/Installation-Mac-Guide), [Windows](https://www.codebuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/Installation-Win-Guide): native GUI installers | DMG/EXE installation needs a distinct handoff and detection flow. Official [UOS](https://www.codebuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/Installation-UOS-Guide) and [Kylin](https://www.codebuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/Installation-Kylin-Guide) distribution does not establish support for arbitrary Linux distributions. |
 | DeepSeek Harness | [Downloads](https://www.deepseek.com/download/), [repository](https://github.com/deepseek-ai/deepseek-harness), [desktop command registration](https://github.com/deepseek-ai/deepseek-harness/blob/master/apps/desktop/README.md) | Desktop installation and registering the `dsh` command are separate operations. Select the intended CLI/desktop variant explicitly. |
@@ -30,6 +32,23 @@ design decision to this round.
 | Kimi Code | [Current repository](https://github.com/MoonshotAI/kimi-code), [installation](https://github.com/MoonshotAI/kimi-code/blob/main/docs/en/guides/getting-started.md), [providers](https://www.kimi.com/code/docs/en/kimi-code-cli/configuration/providers) | Current upstream is TypeScript/npm `@moonshot-ai/kimi-code`, not the older Python installation. Windows shell prerequisites and tool-use model capabilities need verification. |
 | Antigravity CLI | [CLI getting started](https://antigravity.google/docs/getting-started?tab=cli), [BYOK](https://antigravity.google/docs/install?tab=cli) | Official command `agy` is distinct from the IDE. BYOK uses Gemini protocol with a custom base URL and environment credential. |
 | Oh My Pi | [Official repository](https://github.com/can1357/oh-my-pi) | Official command `omp`; script/binary or Bun installation. Its provider configuration is `~/.omp/agent/models.yml`, distinct from Pi. Verify supported runtime/binary for the selected platform. |
+
+## Existing npm runtime preference (2026-11-04)
+
+The macOS/Windows preference reuses the official npm packages at the same pinned
+versions as the existing recipes. It does not change Linux routes or force npm
+onto tools distributed for another runtime. Runtime checks happen only on an
+explicit installation; passive inventory reports the preferred route from file
+discovery. The installer records the resolved route for retries.
+
+Runtime requirements were checked against [Claude's npm instructions](https://code.claude.com/docs/en/setup#install-with-npm)
+(Node 22+), [Codex's pinned package manifest](https://github.com/openai/codex/blob/rust-v0.166.0/codex-cli/package.json)
+(Node 16+), [Pi 1.4.0](https://github.com/earendil-works/pi/blob/v1.4.0/packages/coding-agent/package.json)
+and [Kimi 2.4.1](https://github.com/MoonshotAI/kimi-code/blob/%40moonshot-ai/kimi-code%402.4.1/apps/kimi-code/package.json)
+(Node 22.19+). OpenCode retains V1 1.19.5 and a Node 20+ installer baseline;
+OpenClaw retains its recipe's supported Node 24.22.1+/26.12.1+ runtime lines.
+MiniMax keeps its existing verified release-archive/npm recipe, including SQLite
+dependency handling; Oh My Pi keeps its standalone Bun distribution.
 
 ## Gemini-family model selection findings
 

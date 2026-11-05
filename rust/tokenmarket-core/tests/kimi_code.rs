@@ -231,10 +231,10 @@ impl tokenmarket_core::installation::InstallExecutor for Installer {
 }
 
 #[test]
-fn kimi_installs_pinned_official_native_artifacts_and_prepares_windows_bash_without_connecting() {
+fn kimi_uses_the_official_installer_on_each_platform_without_connecting() {
     use std::sync::Arc;
     use tokenmarket_core::installation::{InstallStage, InstallationManager};
-    for (platform, arch, asset, sha, command) in [
+    for (platform, arch, _asset, _sha, command) in [
         (
             HostPlatform::MacOs,
             "aarch64",
@@ -272,7 +272,10 @@ fn kimi_installs_pinned_official_native_artifacts_and_prepares_windows_bash_with
             executor.clone(),
         );
         assert!(manager.availability(tool).supported);
-        assert_eq!(manager.availability(tool).version.as_deref(), Some("2.4.1"));
+        assert_eq!(
+            manager.availability(tool).version.as_deref(),
+            Some("latest")
+        );
         manager.start(tool).unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
         loop {
@@ -286,20 +289,14 @@ fn kimi_installs_pinned_official_native_artifacts_and_prepares_windows_bash_with
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         let steps = executor.steps.lock().unwrap();
-        assert!(steps.iter().any(|s|s.download.as_ref().is_some_and(|(url,_)|url==&format!("https://github.com/MoonshotAI/kimi-code/releases/download/%40moonshot-ai/kimi-code%402.4.1/{asset}"))));
-        assert!(steps.iter().any(|s| s.args.join(" ").contains(sha)));
-        assert!(!steps.iter().any(|s| s
-            .args
-            .iter()
-            .any(|arg| arg.contains("npm install") || arg.contains("uv tool"))));
-        if platform == HostPlatform::Windows {
-            assert!(steps.iter().any(|s| s
-                .download
-                .as_ref()
-                .is_some_and(|(url, _)| url
-                    .contains("git-for-windows/git/releases/download/v2.56.0.windows.4/"))));
-        }
-        assert!(!root.path().join(".kimi-code").exists());
+        assert_eq!(steps.len(), 1);
+        let command = steps[0].args.join(" ");
+        assert!(command.contains("https://code.kimi.com/kimi-code/install."));
+        assert!(steps[0].download.is_none());
+        assert!(!root
+            .path()
+            .join(".tokenmarket/desktop-connections")
+            .exists());
     }
 }
 

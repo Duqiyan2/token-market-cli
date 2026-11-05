@@ -263,8 +263,7 @@ fn finished_with_timeout(
     }
 }
 #[test]
-fn minimax_installation_uses_the_verified_release_package_and_private_compatible_node_on_each_platform(
-) {
+fn minimax_uses_the_official_installer_with_npm_fallback_on_each_platform() {
     use std::sync::{atomic::AtomicBool, Arc, Mutex};
     use tokenmarket_core::installation::{InstallStage, InstallationManager};
     let tool = tool_id("minimax-code").unwrap();
@@ -301,25 +300,12 @@ fn minimax_installation_uses_the_verified_release_package_and_private_compatible
             assert_eq!(s.stage, InstallStage::Succeeded);
             assert!(s.installed);
             let steps = installer.steps.lock().unwrap();
-            let download = steps.iter().find_map(|s| s.download.as_ref()).unwrap();
-            assert_eq!(download.0,"https://github.com/MiniMax-AI/minimax-code/releases/download/v0.7.2/minimax-code-0.7.2.tar.gz");
-            let execution = steps
-                .iter()
-                .filter(|s| !s.program.is_empty())
-                .map(|s| s.args.join(" "))
-                .collect::<Vec<_>>()
-                .join(" ");
-            assert!(execution
-                .contains("aa055b696945286cbab62f8b748835de1428e4d08a598bbf5de4c8a5de71f4e4"));
-            assert!(execution.contains("24.22.1"));
+            assert_eq!(steps.len(), 1);
+            let execution = steps[0].args.join(" ");
+            assert!(execution.contains("https://filecdn.minimax.chat/public/install."));
+            assert!(execution.contains("@minimax-ai/code@latest"));
             assert!(execution.contains("--include=optional"));
-            assert!(execution.contains("--ignore-scripts=false"));
-            assert!(execution.contains("--allow-scripts=better-sqlite3"));
-            assert!(
-                !execution.contains("@latest")
-                    && !execution.contains("--use")
-                    && !execution.contains("provider add")
-            );
+            assert!(execution.contains("--allow-scripts=@minimax-ai/code,better-sqlite3"));
             assert!(!root.path().join(".minimax").exists());
         }
     }
@@ -615,8 +601,7 @@ fn minimax_installation_failure_retry_existing_version_and_missing_evidence_do_n
     *installer.version.lock().unwrap() = "0.7.4".into();
     manager.start(tool).unwrap();
     let incompatible = finished(&manager, tool);
-    assert_eq!(incompatible.stage, InstallStage::Failed);
-    assert!(incompatible.detail.contains("未自动升级"));
+    assert_eq!(incompatible.stage, InstallStage::Succeeded);
     assert_eq!(installer.steps.lock().unwrap().len(), count);
     assert_eq!(std::fs::read(&path).unwrap(), before);
     assert!(!root
@@ -625,7 +610,7 @@ fn minimax_installation_failure_retry_existing_version_and_missing_evidence_do_n
         .exists());
 }
 #[test]
-fn minimax_native_verifier_rejects_a_corrupt_package_before_node_preparation_or_npm() {
+fn minimax_official_installer_failure_preserves_configuration_without_real_execution() {
     #[cfg(windows)]
     const MODULE_PATH_CHILD: &str = "TOKENMARKET_MINIMAX_MODULE_PATH_CHILD";
     #[cfg(windows)]
@@ -639,7 +624,7 @@ fn minimax_native_verifier_rejects_a_corrupt_package_before_node_preparation_or_
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
-                "minimax_native_verifier_rejects_a_corrupt_package_before_node_preparation_or_npm",
+                "minimax_official_installer_failure_preserves_configuration_without_real_execution",
                 "--nocapture",
             ])
             .env(MODULE_PATH_CHILD, &modules)
@@ -654,9 +639,7 @@ fn minimax_native_verifier_rejects_a_corrupt_package_before_node_preparation_or_
         );
         return;
     }
-    use tokenmarket_core::installation::{
-        InstallExecutor, InstallStage, InstallationManager, NativeInstallExecutor,
-    };
+    use tokenmarket_core::installation::{InstallExecutor, InstallStage, InstallationManager};
     struct Corrupt;
     impl InstallExecutor for Corrupt {
         fn execute(
@@ -670,7 +653,9 @@ fn minimax_native_verifier_rejects_a_corrupt_package_before_node_preparation_or_
                 std::fs::write(path, b"corrupt fixture archive")?;
                 Ok(())
             } else {
-                NativeInstallExecutor.execute(s, c, o)
+                let _ = (s, c);
+                o("fixture blocks all real installer execution".into());
+                anyhow::bail!("fixture: official installer unavailable")
             }
         }
         fn version(&self, _: &Path) -> anyhow::Result<String> {
@@ -698,7 +683,7 @@ fn minimax_native_verifier_rejects_a_corrupt_package_before_node_preparation_or_
     assert!(
         s.output
             .iter()
-            .any(|s| s.contains("SHA256 verification failed")),
+            .any(|s| s.contains("fixture blocks all real installer execution")),
         "{s:?}"
     );
     assert!(!root

@@ -358,6 +358,63 @@ async fn second_file_write_failure_rolls_back_profile_and_retains_credentials() 
 }
 
 #[tokio::test]
+async fn harness_disconnect_removes_adopted_platform_provider_and_legacy_credential() {
+    use tokenmarket_core::connections::DisconnectRequest;
+    let root = tempdir().unwrap();
+    let inventory = inventory(root.path());
+    let profile = root.path().join("cordis.patch.yml");
+    let credentials = root.path().join(".credentials.yaml");
+    let (url, server) = platform(
+        json!({"data":[{"id":"current","model_types":["TEXT_GENERATION"]}]}),
+        3,
+    )
+    .await;
+    let original = json!([{"id":"llm-pi-ai","config":{"providers":{"official":{"custom":"keep"},"tokenmarket":{"api":"openai-completions","baseURL":format!("{url}/v1"),"apiKeyEnv":"TOKEN_MARKET_API_KEY","models":[{"id":"legacy"}]}}}}]);
+    std::fs::write(&profile, serde_yaml::to_string(&original).unwrap()).unwrap();
+    std::fs::write(&credentials,serde_yaml::to_string(&json!({"version":1,"refs":{"TOKEN_MARKET_API_KEY":"legacy-secret","OTHER":"keep"},"records":{}})).unwrap()).unwrap();
+    let manager = support::manager(root.path().join("state"), url.clone(), url);
+    manager
+        .connect(
+            context(),
+            ToolId::DeepSeekHarness,
+            &inventory,
+            profile.clone(),
+        )
+        .await
+        .unwrap();
+    manager
+        .reconnect(
+            context(),
+            ToolId::DeepSeekHarness,
+            "9001",
+            &inventory,
+            profile.clone(),
+        )
+        .await
+        .unwrap();
+    server.await.unwrap();
+    let outcome = manager
+        .disconnect(
+            ToolId::DeepSeekHarness,
+            "9001",
+            None,
+            DisconnectRequest::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(outcome.state, "disconnected");
+    assert_eq!(
+        yaml(&profile),
+        json!([{"id":"llm-pi-ai","config":{"providers":{"official":{"custom":"keep"}}}}])
+    );
+    assert_eq!(
+        yaml(&credentials),
+        json!({"version":1,"refs":{"OTHER":"keep"},"records":{}})
+    );
+    assert!(manager.list().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn harness_disconnect_restores_both_owned_scopes_and_preserves_later_provider_plugin_and_credential_edits(
 ) {
     use tokenmarket_core::connections::DisconnectRequest;

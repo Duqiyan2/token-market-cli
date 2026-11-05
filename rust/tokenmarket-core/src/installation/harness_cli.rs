@@ -45,6 +45,7 @@ chmod 755 "$prefix/bin/dsh"
 echo 'Harness CLI installed; connect separately before starting a profile'
 "#.replace("__NODE_PREPARE__",&super::node::posix_prepare("const [major,minor,patch]=process.versions.node.split(\".\").map(Number); process.exit((major===24 && (minor>22 || (minor===22 && patch>=1))) || (major>=26 && major%2===0) ? 0 : 1)"));
     Ok(InstallPlan {
+        method: super::InstallMethod::Npm,
         tool: ToolId::DeepSeekHarness,
         version: "0.2.1-rc.5".into(),
         command: "dsh".into(),

@@ -12,6 +12,8 @@ on:
       - "scripts/macos-local-signing.py"
       - "scripts/build-macos-clients.sh"
       - "tests/test_macos_signing.py"
+      - "scripts/reset-macos-client-state.py"
+      - "tests/test_macos_reset.py"
       - "package.json"
       - ".github/workflows/native-validation.yml"
   push:
@@ -56,7 +58,7 @@ jobs:
 
       - name: Test macOS signing release guards
         if: runner.os == 'macOS'
-        run: python3 -m unittest discover -s tests -p test_macos_signing.py -v
+        run: python3 -m unittest discover -s tests -p 'test_macos_*.py' -v
 
       - name: Validate macOS upgrade and CLI/desktop keychain sharing without UI
         if: runner.os == 'macOS'
@@ -66,6 +68,7 @@ jobs:
           trap '/usr/bin/security delete-keychain "$identity/signing.keychain-db"' EXIT
           python3 scripts/macos-local-signing.py --identity-dir "$identity" init
           python3 scripts/macos-local-signing.py --identity-dir "$identity" --profile production smoke
+          python3 scripts/macos-local-signing.py --identity-dir "$identity" --profile production native-smoke
 
       # Keep each external command in its own step: PowerShell must not hide
       # an earlier command failure behind the exit code of a later command.

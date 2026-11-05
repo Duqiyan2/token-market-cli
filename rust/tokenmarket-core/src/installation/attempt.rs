@@ -12,6 +12,10 @@ use std::path::{Path, PathBuf};
 pub(super) struct Attempt {
     version: String,
     commands: Vec<PathBuf>,
+    #[serde(default)]
+    method: Option<super::InstallMethod>,
+    #[serde(default)]
+    observed: std::collections::BTreeMap<PathBuf, String>,
 }
 fn path(environment: &InstallationEnvironment, tool: ToolId) -> PathBuf {
     environment
@@ -59,7 +63,36 @@ pub(super) fn repair(
     if attempt.version != plan.version {
         bail!("上次安装尚未完成且目标版本已改变；请按官方说明检查现有目录，未自动升级或覆盖")
     }
+    if plan.version == "latest"
+        && (attempt.observed.get(command).is_none()
+            || attempt.observed.get(command) != stamp(command).as_ref())
+    {
+        bail!("未完成安装的程序文件已改变，请重新检查；未自动覆盖")
+    }
     Ok(true)
+}
+fn stamp(path: &Path) -> Option<String> {
+    let link = std::fs::symlink_metadata(path).ok()?;
+    let target = std::fs::metadata(path).ok()?;
+    Some(format!(
+        "{:?}:{:?}:{}:{:?}:{}",
+        path.canonicalize().ok()?,
+        link.modified().ok()?,
+        link.len(),
+        target.modified().ok()?,
+        target.len()
+    ))
+}
+pub(super) fn observe(environment: &InstallationEnvironment, tool: ToolId) -> Result<()> {
+    let Some(mut attempt) = read(environment, tool)? else {
+        return Ok(());
+    };
+    attempt.observed = attempt
+        .commands
+        .iter()
+        .filter_map(|p| stamp(p).map(|s| (p.clone(), s)))
+        .collect();
+    crate::config::write_private_json(&path(environment, tool), &attempt)
 }
 pub(super) fn upgrade_pending(
     environment: &InstallationEnvironment,
@@ -120,6 +153,8 @@ pub(super) fn begin_operation(
     let temporary = destination.with_extension("tmp");
     let attempt = Attempt {
         version: plan.version.clone(),
+        method: Some(plan.method),
+        observed: Default::default(),
         commands: super::recipes::owned_command_paths(plan.tool, environment)
             .into_iter()
             .filter(|p| upgrading || !p.exists())

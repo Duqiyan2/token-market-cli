@@ -144,6 +144,7 @@ chmod u+x "$3/kimi"
         download: None,
     });
     Ok(InstallPlan {
+        method: super::InstallMethod::Standalone,
         tool: ToolId::KimiCode,
         version: version.into(),
         command: "kimi".into(),

@@ -526,6 +526,9 @@ test('installation failure preserves the error and offers a retry', async () => 
     await p.locator('[data-tool="openclaw"] .tool-install').click();
     await p.locator('.tool-install-status').filter({hasText:'依赖下载失败'}).waitFor();
     assert.match(await p.locator('.tool-install-output').innerText(),/运行依赖/);
+    await p.getByRole('button',{name:'查看其他安装方式',exact:true}).click();
+    assert.deepEqual((await calls(p,'download_tool'))[0].args,{tool:'openclaw'});
+    assert.equal((await calls(p,'connect_tool')).length,0);
     await p.locator('.tool-install-retry').click();
     await p.locator('.tool-install-status').filter({hasText:'依赖下载失败'}).waitFor();
     assert.equal((await calls(p,'start_tool_installation')).length,2);
@@ -548,8 +551,7 @@ test('idle dashboard never polls installation, workspace, versions or login rene
 test('activation events coalesce and patch changed tool values without replacing rows or open controls', async () => {
   const f=await openFixture();try {
     const p=f.page;await p.locator('.tools-updates-status').filter({hasText:'已检查'}).waitFor();
-    await detail(p,'codex');await p.waitForTimeout(150);
-    await p.locator('#tool-detail-region .tool-menu summary').click();
+    await p.locator('[data-tool="codex"] .tool-lifecycle-menu summary').click();
     const commands=['desktop_tool_inventory','desktop_workspace_context','check_tool_updates','refresh_desktop_session'];
     const before=await Promise.all(commands.map(command=>calls(p,command).then(value=>value.length)));
     await p.evaluate(()=>{
@@ -558,14 +560,14 @@ test('activation events coalesce and patch changed tool values without replacing
       window.__fixture.entries.find(e=>e.id==='codex').connection.state='test_passed';
       window.dispatchEvent(new Event('focus'));document.dispatchEvent(new Event('visibilitychange'));window.__fixture.emit('desktop-activated');
     });
-    await p.locator('[data-tool="codex"] .tool-version').filter({hasText:'0.170.0'}).waitFor({state:'attached'});
+    await p.locator('[data-tool="codex"] .tool-version').filter({hasText:'0.170.0'}).waitFor();
     assert.deepEqual(await Promise.all(commands.map(command=>calls(p,command).then(value=>value.length))),before.map(value=>value+1));
     assert.equal(await p.evaluate(()=>window.__stableNodes.every(node=>node.isConnected)),true);
-    assert.equal(await p.locator('#tool-detail-region .tool-menu').getAttribute('open'),'');
+    assert.equal(await p.locator('[data-tool="codex"] .tool-lifecycle-menu').getAttribute('open'),'');
     assert.match(await p.locator('[data-tool="codex"] > .tool-state').innerText(),/测试通过/);
-    await p.locator('#tool-detail-region .tool-connect').click();
-    await p.locator('.reconnect-dialog[open]').waitFor();
-    assert.equal(await p.locator('#tool-detail-region .tool-menu').getAttribute('open'),null);
+    await p.locator('[data-tool="codex"] .tool-uninstall').click();
+    await p.locator('.tool-uninstall-confirm[open]').waitFor();
+    assert.equal(await p.locator('[data-tool="codex"] .tool-lifecycle-menu').getAttribute('open'),null);
     assert.deepEqual(f.errors,[]);
   }finally{await f.close();}
 });
@@ -675,7 +677,7 @@ test('inventory refresh retains content while waiting and after failure, then di
       window.__inventoryRefresh=window.TokenMarketTools.refresh();
     });
     await p.waitForFunction(()=>Boolean(window.__fixture.resolveInventory));
-    assert.equal(await p.locator('.tool-row').count(),15);
+    assert.equal(await p.locator('.tool-group-heading').count(),2);
     assert.equal(await p.evaluate(()=>window.__inventoryRow===document.querySelector('[data-tool="codex"]')),true);
     assert.equal(await p.evaluate(()=>window.__inventoryDetail===document.querySelector('#tool-detail-region').firstElementChild),true);
     await p.evaluate(async()=>{window.__fixture.deferInventory=false;window.__fixture.resolveInventory();await window.__inventoryRefresh;});
@@ -842,8 +844,7 @@ test('DuMate enterprise imports a catalogue with separate selection and DuMate c
     await p.locator('#tool-detail-region .tool-connect').click();
     await p.locator('.connect-confirm-dialog[open] .connect-confirm').click();
     await p.getByRole('heading',{name:'百度搭子 DuMate（企业版） 已接入'}).waitFor();
-    assert.match(await p.locator('.restart-notice').innerText(),/导入 2 个/);
-    assert.match(await p.locator('.restart-notice').innerText(),/保存该模型的真实检查状态/);
+    assert.match(await p.locator('.restart-notice').innerText(),/测试所选模型.*重新打开 DuMate/);
     assert.equal((await calls(p,'test_tool_connection')).length,0);
     assert.deepEqual((await calls(p,'connect_tool'))[0].args,{tool:'dumate-enterprise',recovery:null});
     await p.locator('dialog[open] .close').click();
@@ -1021,7 +1022,7 @@ test('manual update clearly identifies the original channel and opens latest-ver
 test('missing application preserves its saved connection while installation remains independently available', async () => {
   const f=await openFixture();try {
     const p=f.page;await p.getByRole('button',{name:'检查更新',exact:true}).waitFor();
-    await p.evaluate(async()=>{window.__fixture.entries.find(e=>e.id==='codex').installed=false;await window.TokenMarketTools.refresh(true);});
+    await p.evaluate(async()=>{const e=window.__fixture.entries.find(e=>e.id==='codex');e.installed=false;e.installations=[];await window.TokenMarketTools.refresh(true);});
     const row=p.locator('[data-tool="codex"]');assert.equal(await row.locator('.tool-version-empty').textContent(),'未安装');
     assert.match(await row.locator('.tool-state').textContent(),/已配置，未测试/);assert.equal(await row.locator('.tool-install').isEnabled(),true);
     assert.equal(await row.locator('.tool-launch').isDisabled(),true);assert.equal((await calls(p,'disconnect_tool')).length,0);assert.deepEqual(f.errors,[]);
@@ -1034,7 +1035,7 @@ test('current-to-latest upgrade passes the exact official target and removes fix
     const row=p.locator('[data-tool="claude-code"]');assert.match(await row.locator('.tool-version-target').textContent(),/2\.1\.318/);
     await row.locator('.tool-upgrade').click();assert.match(await p.locator('.tool-upgrade-confirm').textContent(),/2\.1\.311 → 2\.1\.318/);
     await p.getByRole('button',{name:'确认升级',exact:true}).click();await p.waitForFunction(()=>window.__fixture.installation?.stage==='succeeded');
-    assert.deepEqual((await calls(p,'start_tool_upgrade'))[0].args,{tool:'claude-code',targetVersion:'2.1.318'});
+    assert.deepEqual((await calls(p,'start_tool_upgrade'))[0].args,{tool:'claude-code',targetVersion:'2.1.318',planRevision:'fixture-upgrade-claude-code'});
     await p.locator('.tool-install-close').click();await detail(p,'claude-code');
     assert.doesNotMatch(await p.locator('.tool-version-sheet').textContent(),/已验证兼容版|内置安装版本|待验证/);
     assert.equal((await calls(p,'test_tool_connection')).length,0);assert.deepEqual(f.errors,[]);
@@ -1061,13 +1062,25 @@ test('installed tools show their method and selected path and expand additional 
 test('uninstalled tools describe the real installer and details distinguish program, config directory and config file', async () => {
   const f=await openFixture({configPaths:{codex:'/Users/fixture/custom config/codex/config.toml'}});try {
     const p=f.page;
-    assert.match(await p.locator('[data-tool="openclaw"] .tool-planned-method').textContent(),/官方脚本和 npm/);
-    assert.match(await p.locator('[data-tool="pi"] .tool-planned-method').textContent(),/官方独立安装包/);
+    assert.match(await p.locator('[data-tool="openclaw"] .tool-planned-method').textContent(),/npm/);
+    assert.match(await p.locator('[data-tool="pi"] .tool-planned-method').textContent(),/npm/);
     await detail(p,'codex');const info=p.locator('.tool-files-sheet');
     assert.match(await info.textContent(),/安装方式npm/);assert.match(await info.textContent(),/当前入口\/Users\/fixture\/\.npm-global\/bin\/codex/);
     assert.equal(await info.locator('.tool-path-row').filter({hasText:'配置目录'}).locator('code').textContent(),'/Users/fixture/custom config/codex');
     assert.equal(await info.locator('.tool-path-row').filter({hasText:'接入配置文件'}).locator('code').textContent(),'/Users/fixture/custom config/codex/config.toml');
     assert.match(await info.textContent(),/尚未生成/);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+test('uninstalled applications retain the planned installation caption in list and details', async () => {
+  const f=await openFixture({missingGui:true});try {
+    const p=f.page;
+    for (const id of ['workbuddy','deepseek-harness','dumate','dumate-enterprise']) {
+      assert.equal(await p.locator(`[data-tool="${id}"] .tool-planned-method`).count(),1);
+      assert.equal(await p.locator(`[data-tool="${id}"] .tool-install`).isEnabled(),true);
+    }
+    assert.match(await p.locator('[data-tool="hermes"] .tool-planned-method').textContent(),/官方安装脚本/);
+    await detail(p,'workbuddy');assert.match(await p.locator('.tool-files-sheet').textContent(),/安装方案通过桌面安装器安装/);
+    assert.equal((await calls(p,'start_tool_installation')).length,0);assert.deepEqual(f.errors,[]);
   }finally{await f.close();}
 });
 test('installation paths render as selectable text and cannot inject page markup', async () => {
@@ -1079,18 +1092,8 @@ test('installation paths render as selectable text and cannot inject page markup
   }finally{await f.close();}
 });
 
-test('uninstalled filter counts missing tools and combines with search', async () => {
-  const f=await openFixture();try {
-    const p=f.page;await p.locator('[data-tool-filter="uninstalled"]').click();
-    assert.equal(await p.locator('[data-tool-filter="uninstalled"]').innerText(),'未安装 12');
-    assert.equal(await p.locator('.tool-row').count(),12);
-    await p.locator('.tools-search').fill('OpenClaw');assert.equal(await p.locator('[data-tool="openclaw"]').count(),1);
-    await p.locator('.tools-search').fill('Codex');assert.equal(await p.locator('.tool-row').count(),0);
-    assert.deepEqual(f.errors,[]);
-  }finally{await f.close();}
-});
 
-test('QwenWork uses its own identity and explains stopped-app and model-selection requirements', async () => {
+test('QwenWork connection shows only usage guidance and leaves no stale list feedback', async () => {
   const f=await openFixture({installedTools:['qwenwork']});try {
     const p=f.page;const row=p.locator('[data-tool="qwenwork"]');
     await row.locator('img').evaluate(image=>image.decode());
@@ -1098,19 +1101,111 @@ test('QwenWork uses its own identity and explains stopped-app and model-selectio
     await p.locator('.connect-confirm').click();await p.getByRole('heading',{name:'千问办公 已接入'}).waitFor();
     assert.deepEqual((await calls(p,'connect_tool'))[0].args,{tool:'qwenwork',recovery:null});
     const notice = await p.locator('dialog[open] .restart-notice').innerText();
-    assert.match(notice,/模型列表.*完全退出/);
-    assert.match(notice,/升级、降级或重新安装千问办公后.*重新接入/);
-    assert.match(notice,/联系管理员适配/);
-    assert.doesNotMatch(notice,/1\.5\.0|不支持|仅适配/);
+    assert.equal(notice,'请重新打开千问办公，在模型列表中选择 Token Market 模型。');
+    assert.doesNotMatch(await p.locator('dialog[open]').innerText(),/API Key|本地代理|修复配置|兼容模型|尚未测试|费用/);
     assert.equal((await calls(p,'test_tool_connection')).length,0);
-    await p.locator('dialog[open] .close').click();await detail(p,'qwenwork');
-    assert.match(await p.locator('#tool-detail-region').innerText(),/先登录并完全退出/);
-    assert.match(await p.locator('#tool-detail-region').innerText(),/升级、降级或重新安装千问办公后.*重新接入/);
+    await p.locator('dialog[open] .close').click();
+    assert.equal(await p.locator('#tools-region > .tools-feedback').textContent(),'');
+    await detail(p,'qwenwork');
+    assert.match(await p.locator('#tool-detail-region').innerText(),/接入或取消接入前.*完全退出千问办公/);
+    assert.doesNotMatch(await p.locator('#tool-detail-region').innerText(),/API Key|本地代理|修复配置/);
     await manage(p);await p.locator('#tool-detail-region .tool-connect').filter({hasText:'重新接入'}).click();
     await p.locator('.reconnect-dialog[open]').waitFor();
-    assert.match(await p.locator('.qwenwork-reconnect-note').innerText(),/直接替换.*保留其他模型、聊天和设置/);
+    assert.doesNotMatch(await p.locator('.reconnect-dialog').innerText(),/重新生成|直接替换|尚未适配/);
     await p.locator('.reconnect-cancel').click();
     await p.locator('#tool-detail-region .tool-launch').click();
     assert.equal((await calls(p,'launch_connected_tool'))[0].args.tool,'qwenwork');assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('connection failures ask for administrator help without exposing native errors or leaving feedback', async () => {
+  for (const command of ['prepare_tool_connect','prepare_tool_reconnect','connect_tool','reconnect_tool']) {
+    const reconnect=command.includes('reconnect');
+    const f=await openFixture({multi:reconnect});try {
+      const p=f.page;
+      await p.evaluate(command=>{
+        const invoke=window.__TAURI__.core.invoke;
+        window.__TAURI__.core.invoke=(name,args)=>name===command ? Promise.reject(Error('内部实现：凭证校验 SQL naming_version 失败')) : invoke(name,args);
+      },command);
+      if(reconnect) {
+        await detail(p,'workbuddy');await manage(p);
+        await p.locator('#tool-detail-region .tool-connect').filter({hasText:'重新接入'}).click();
+        if(command==='reconnect_tool')await p.locator('.reconnect-confirm').click();
+      } else {
+        await p.locator('[data-tool="workbuddy"] .tool-connect').click();
+        if(command==='connect_tool')await p.locator('.connect-confirm').click();
+      }
+      const result=p.locator('.tool-result-dialog[open]');await result.waitFor();
+      assert.equal(await result.locator('h3').textContent(),'接入失败');
+      assert.equal(await result.locator('.tool-result-detail').textContent(),'请联系管理员。');
+      assert.doesNotMatch(await p.locator('body').innerText(),/内部实现|naming_version/);
+      await result.locator('.result-close').click();
+      assert.equal(await p.locator('#tools-region > .tools-feedback').textContent(),'');
+      assert.deepEqual(f.errors,[]);
+    }finally{await f.close();}
+  }
+});
+
+test('tool action menus dismiss outside, on Escape and navigation without leaving the detail page', async () => {
+  const f=await openFixture();try {
+    const p=f.page;
+    const listMenu=p.locator('[data-tool="codex"] .tool-lifecycle-menu');
+    await listMenu.locator('summary').click();assert.equal(await listMenu.getAttribute('open'),'');
+    await p.locator('.tools-search').click();assert.equal(await listMenu.getAttribute('open'),null);
+    await listMenu.locator('summary').click();await p.keyboard.press('Escape');
+    assert.equal(await listMenu.getAttribute('open'),null);
+    assert.equal(await listMenu.locator('summary').evaluate(node=>node===document.activeElement),true);
+    await detail(p,'codex');
+    const more=p.locator('#tool-detail-region .tool-lifecycle-menu');
+    const connection=p.locator('#tool-detail-region .tool-menu');
+    await more.locator('summary').click();await connection.locator('summary').click();
+    assert.equal(await more.getAttribute('open'),null);assert.equal(await connection.getAttribute('open'),'');
+    await p.keyboard.press('Escape');assert.equal(await connection.getAttribute('open'),null);
+    assert.equal(await p.locator('#tool-detail-page').isVisible(),true);
+    assert.equal(await connection.locator('summary').evaluate(node=>node===document.activeElement),true);
+    await more.locator('summary').click();await p.keyboard.press('Shift+Tab');
+    assert.equal(await more.getAttribute('open'),null);
+    await more.locator('summary').click();await p.locator('#tool-detail-region h1').click();
+    assert.equal(await more.getAttribute('open'),null);
+    await more.locator('summary').click();await p.evaluate(()=>window.TokenMarketShell.show('account'));
+    assert.equal(await more.getAttribute('open'),null);
+    await p.evaluate(()=>window.TokenMarketShell.show('detail','Codex'));
+    await more.locator('summary').click();await more.locator('.tool-uninstall').click();
+    await p.locator('.tool-uninstall-confirm[open]').waitFor();assert.equal(await more.getAttribute('open'),null);
+    assert.equal((await calls(p,'start_tool_uninstall')).length,0);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('ccswitch display hides unknown sources and keeps broken installs available for uninstall', async () => {
+  const f=await openFixture({brokenTool:'claude-code'});try {
+    const p=f.page;await p.waitForFunction(()=>window.__fixture.calls.some(c=>c.command==='check_tool_updates'));
+    const row=p.locator('[data-tool="claude-code"]');await row.getByText('无法运行',{exact:true}).waitFor();
+    assert.equal(await row.locator('.tool-install-method').count(),0);assert.equal(await row.locator('.tool-install,.tool-upgrade').count(),0);
+    await row.locator('.tool-lifecycle-menu summary').click();await row.locator('.tool-uninstall').click();
+    await p.locator('.tool-uninstall-confirm[open]').waitFor();assert.equal((await calls(p,'start_tool_uninstall')).length,0);
+    await p.locator('.tool-uninstall-confirm').getByRole('button',{name:'取消',exact:true}).click();assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('uninstall previews and removes only the selected install while retaining the connection', async () => {
+  const sources=[{path:'/Users/fixture/.local/bin/codex',method:'原生程序',selected:true},{path:'/Users/fixture/.npm-global/bin/codex',method:'npm',selected:false}];
+  const f=await openFixture({installations:{codex:sources}});try {
+    const p=f.page;await p.locator('[data-tool="codex"] .tool-lifecycle-menu summary').click();await p.locator('[data-tool="codex"] .tool-uninstall').click();
+    const dialog=p.locator('.tool-uninstall-confirm');await dialog.waitFor();assert.equal(await dialog.locator('.tool-uninstall-execute').isDisabled(),true);
+    await dialog.locator('input[type="radio"]').nth(1).check();assert.match(await dialog.locator('pre').textContent(),/npm-global/);
+    assert.equal((await calls(p,'start_tool_uninstall')).length,0);await dialog.locator('.tool-uninstall-execute').click();
+    await p.waitForFunction(()=>window.__fixture.installation?.stage==='succeeded');
+    const cmd=(await calls(p,'start_tool_uninstall'))[0];assert.equal(cmd.args.plan.path,sources[1].path);
+    const entry=await p.evaluate(()=>window.__fixture.entries.find(e=>e.id==='codex'));assert.equal(entry.installed,true);assert.equal(entry.installations.length,1);assert.ok(entry.connection);
+    for(const command of ['connect_tool','disconnect_tool','test_tool_connection','start_tool_installation'])assert.equal((await calls(p,command)).length,0);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('unknown uninstall channels display the manual reason without enabling execution', async () => {
+  const f=await openFixture({manualUninstall:'codex'});try {
+    const p=f.page;await p.locator('[data-tool="codex"] .tool-lifecycle-menu summary').click();await p.locator('[data-tool="codex"] .tool-uninstall').click();
+    const dialog=p.locator('.tool-uninstall-confirm');await dialog.waitFor();assert.equal(await dialog.locator('.tool-uninstall-execute').isDisabled(),true);assert.match(await dialog.textContent(),/原安装器/);
+    assert.equal((await calls(p,'start_tool_uninstall')).length,0);assert.deepEqual(f.errors,[]);
   }finally{await f.close();}
 });

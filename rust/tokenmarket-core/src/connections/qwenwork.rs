@@ -167,7 +167,7 @@ impl QwenWorkConfig {
                 .filter(|value| {
                     !value
                         .as_str()
-                        .is_some_and(crate::qwenwork_runtime::is_legacy_worker)
+                        .is_some_and(crate::qwenwork_runtime::is_managed_worker)
                 }),
             applied: json!(worker),
             retired: false,
