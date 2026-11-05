@@ -13,6 +13,59 @@ async function detail(page,id) { await page.locator(`[data-tool="${id}"] .tool-d
 async function switchTeam(page) { await page.locator('.workspace-switch').click();await page.locator('dialog[open] [data-workspace-id="team"]').click();await page.locator('.workspace-switch').filter({hasText:'团队空间'}).waitFor(); }
 async function manage(page) { await page.locator('.tool-menu summary').click(); }
 
+test('signed-out Settings shows a Client Update and release notes without downloading', async () => {
+  const f=await openFixture({signedIn:false,clientUpdate:{status:'available',currentVersion:'1.0.0',availableVersion:'1.1.0',releaseNotes:'修复窗口恢复\n保留已有工具连接',error:null}});try {
+    const p=f.page;await p.locator('#login [data-desktop-settings]').click();
+    await p.getByRole('button',{name:'检查客户端更新',exact:true}).click();
+    await p.locator('#client-update-status').filter({hasText:'发现新版本 1.1.0'}).waitFor();
+    assert.match(await p.locator('#client-current-version').textContent(),/1\.0\.0/);
+    assert.equal(await p.locator('#client-update-notes').textContent(),'修复窗口恢复\n保留已有工具连接');
+    assert.equal((await calls(p,'check_client_update')).length,1);
+    assert.equal((await p.evaluate(()=>window.__fixture.calls.filter(c=>/download|install|restart/.test(c.command)))).length,0);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('Client Update reports no newer supported stable version without workspace balance and stays separate from Tool Upgrades', async () => {
+  const f=await openFixture({noBalance:true});try {
+    const p=f.page;await p.locator('#signed-in [data-desktop-settings]').click();
+    await p.getByRole('button',{name:'检查客户端更新',exact:true}).click();
+    await p.locator('#client-update-status').filter({hasText:'没有更新的受支持稳定版本'}).waitFor();
+    assert.equal(await p.locator('#client-update-notes').isVisible(),false);
+    const toolChecks=(await calls(p,'check_tool_updates')).length;
+    await p.locator('.primary-nav [data-page="tools"]').click();
+    await p.getByRole('button',{name:'检查更新',exact:true}).click();
+    await p.waitForFunction(n=>window.__fixture.calls.filter(c=>c.command==='check_tool_updates').length>n,toolChecks);
+    assert.equal((await calls(p,'check_client_update')).length,1);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('a failed manual Client Update check gives the reason and can retry', async () => {
+  const f=await openFixture({signedIn:false,clientUpdate:{status:'failed',currentVersion:'1.0.0',availableVersion:null,releaseNotes:null,error:'稳定版清单暂时不可用'}});try {
+    const p=f.page;await p.locator('#login [data-desktop-settings]').click();
+    await p.getByRole('button',{name:'检查客户端更新',exact:true}).click();
+    await p.locator('#client-update-status').filter({hasText:'稳定版清单暂时不可用'}).waitFor();
+    await p.evaluate(()=>{window.__fixture.clientUpdate={status:'current',currentVersion:'1.0.0',availableVersion:null,releaseNotes:null,error:null};});
+    await p.getByRole('button',{name:'重试检查客户端更新',exact:true}).click();
+    await p.locator('#client-update-status').filter({hasText:'没有更新的受支持稳定版本'}).waitFor();
+    assert.equal((await calls(p,'check_client_update')).length,2);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('a late initial Client Update status cannot erase a completed manual check', async () => {
+  const f=await openFixture({signedIn:false,deferClientUpdateStatus:true,clientUpdate:{status:'available',currentVersion:'1.0.0',availableVersion:'1.1.0',releaseNotes:'稳定版本',error:null}});try {
+    const p=f.page;await p.locator('#login [data-desktop-settings]').click();
+    await p.getByRole('button',{name:'检查客户端更新',exact:true}).click();
+    await p.locator('#client-update-status').filter({hasText:'发现新版本 1.1.0'}).waitFor();
+    await p.evaluate(()=>window.__fixture.resolveClientUpdateStatus());
+    await p.waitForTimeout(30);
+    assert.match(await p.locator('#client-update-status').textContent(),/发现新版本 1\.1\.0/);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
 test('settings uses a full page from sidebar, login and native menu, including after session polling', async () => {
   for(const signedIn of [true,false]) {
     const f=await openFixture({signedIn});try {

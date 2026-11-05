@@ -1,4 +1,7 @@
 .settings-content { max-width: 1040px; }
+.client-update-result { padding: 0 22px 18px; font-size: 12px; }
+.client-update-result p { margin: 0; }
+#client-update-notes { white-space: pre-wrap; margin-top: 12px; overflow-wrap: anywhere; }
 .settings-section { margin: 30px 0; }
 .settings-section h2 { margin: 0 0 14px; font-size: 16px; font-weight: 600; }
 .settings-group { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--surface); }

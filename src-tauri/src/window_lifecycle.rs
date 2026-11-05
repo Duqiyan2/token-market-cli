@@ -258,17 +258,20 @@ pub fn quit_desktop_app(app: AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicU64;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temporary_path() -> PathBuf {
+        static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
         std::env::temp_dir()
             .join(format!(
-                "tokenmarket-window-{}-{}",
+                "tokenmarket-window-{}-{}-{}",
                 std::process::id(),
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
-                    .as_nanos()
+                    .as_nanos(),
+                NEXT_DIRECTORY.fetch_add(1, Ordering::SeqCst)
             ))
             .join("desktop-preferences.json")
     }
