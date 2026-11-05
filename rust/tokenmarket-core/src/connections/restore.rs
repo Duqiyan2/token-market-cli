@@ -5,6 +5,7 @@ use sha2::{Digest, Sha256};
 #[cfg(test)]
 use std::fs;
 use std::path::{Path, PathBuf};
+mod adopted;
 
 pub(super) struct Change {
     pub path: PathBuf,
@@ -56,7 +57,7 @@ pub(super) fn reconnect_baseline(
     }
     Ok(record)
 }
-/// Upgrade ambiguous version-1 receipts using only their original owned-field baseline.
+/// Resolve original baselines and adopt identifiable historical platform configuration.
 pub(super) fn baseline_receipts(
     record: &ConnectionRecord,
     private: &super::private_storage::PrivateStorage,
@@ -98,13 +99,14 @@ pub(super) fn baseline_receipts(
                             .before
                             .as_ref()
                             .and_then(Value::as_str)
-                            .is_some_and(crate::qwenwork_runtime::is_legacy_worker)
+                            .is_some_and(crate::qwenwork_runtime::is_managed_worker)
                 {
                     field.before = None;
                 }
             }
         }
     }
+    adopted::normalize(record, &mut receipts, private)?;
     Ok(receipts)
 }
 /// Render removal of old catalogue-owned fields in memory; publish only with the new connection.
@@ -159,10 +161,11 @@ pub(super) fn prepare(
     request: &DisconnectRequest,
     private: &super::private_storage::PrivateStorage,
 ) -> Result<RestorePlan> {
+    let receipts = baseline_receipts(record, private)?;
     let mut changes = vec![];
     let mut hash = Sha256::new();
     hash.update(serde_json::to_vec(record)?);
-    for receipt in &record.receipts {
+    for receipt in &receipts {
         if changes.iter().any(|c: &Change| c.path == receipt.path) {
             bail!("连接恢复记录存在重复文件")
         }
@@ -182,27 +185,10 @@ pub(super) fn prepare(
     let approved = request.revision.as_ref() == Some(&revision);
     let mut conflicts = vec![];
     let mut keep_qwen_byok = false;
-    for (file, (receipt, change)) in record.receipts.iter().zip(changes.iter_mut()).enumerate() {
+    for (file, (receipt, change)) in receipts.iter().zip(changes.iter_mut()).enumerate() {
         let format = Format::for_tool(record.tool, &receipt.path)?;
         let mut value = format.parse(change.before.as_deref())?;
         let original = value.clone();
-        // Version 1 serialized missing and explicit null identically. Recover ONLY the owned
-        // baseline fields from the original backup; never publish that backup over current files.
-        let legacy_baseline = if record.version == 1 && receipt.existed {
-            let backup = receipt
-                .backup_path
-                .as_ref()
-                .context("旧连接缺少原始恢复基线，未执行恢复")?;
-            Some(
-                format.parse(Some(
-                    &private
-                        .read(backup)
-                        .context("旧连接恢复基线不可读，未执行恢复")?,
-                ))?,
-            )
-        } else {
-            None
-        };
         let mut touched = vec![];
         let mut ordered_fields: Vec<_> = receipt
             .fields
@@ -234,16 +220,9 @@ pub(super) fn prepare(
                             .before
                             .as_ref()
                             .and_then(Value::as_str)
-                            .is_some_and(crate::qwenwork_runtime::is_legacy_worker))
+                            .is_some_and(crate::qwenwork_runtime::is_managed_worker))
             {
                 None
-            } else if record.version == 1 {
-                legacy_baseline
-                    .as_ref()
-                    .map(|v| lookup(v, &path))
-                    .transpose()?
-                    .flatten()
-                    .cloned()
             } else {
                 receipt.before.clone()
             };

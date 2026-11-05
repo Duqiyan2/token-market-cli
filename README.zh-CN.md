@@ -174,8 +174,8 @@ xattr -cr "/Applications/Token Market.app"
 
 然后重新打开应用。
 
-正常升级保留固定签名身份，App 与 CLI 可复用钥匙串凭据，无需反复授权。
-从旧临时签名包迁移时可能需要一次授权。构建与发布配置见
+macOS 使用系统钥匙串工具保持 App、CLI 和升级后的凭证访问者稳定，自签名构建同样适用。
+旧原生钥匙串条目迁移时可能需要一次授权或显式重置。构建与发布配置见
 [macOS 签名说明](docs/macos-local-signing.md)。
 
 ## 问题反馈

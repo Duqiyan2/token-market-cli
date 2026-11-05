@@ -1,5 +1,5 @@
 //! Passive installation identity. Never launches a tool or reads its credentials.
-use super::{recipes, upgrades, InstallStage};
+use super::{recipes, upgrades};
 use crate::{
     inventory::{HostPlatform, InstallationEnvironment},
     ToolId,
@@ -66,8 +66,41 @@ pub(crate) fn method(
             };
         }
     }
+    let hint = path
+        .to_string_lossy()
+        .replace('\\', "/")
+        .to_ascii_lowercase();
+    if ["/.nvm/", "/.volta/", "/volta/", "fnm_multishells", "/mise/"]
+        .iter()
+        .any(|s| hint.contains(s))
+    {
+        return "npm";
+    }
+    if hint.contains("/.bun/") {
+        return "Bun";
+    }
+    if hint.contains("/pnpm/") {
+        return "pnpm";
+    }
+    if hint.contains("/scoop/") {
+        return "Scoop";
+    }
+    if hint.contains("/site-packages/") || hint.contains("/library/python") {
+        return "pip";
+    }
+    let native = is_native(&resolved);
+    if native {
+        "原生程序"
+    } else if path.starts_with(environment.home.join(".tokenmarket/tools")) {
+        "客户端管理"
+    } else {
+        "命令行程序"
+    }
+}
+
+pub(super) fn is_native(path: &Path) -> bool {
     let mut magic = [0u8; 4];
-    let native = std::fs::File::open(&resolved)
+    let native = std::fs::File::open(path)
         .and_then(|mut f| f.read_exact(&mut magic))
         .is_ok()
         && (magic == [0x7f, b'E', b'L', b'F']
@@ -83,32 +116,5 @@ pub(crate) fn method(
                     | [0xca, 0xfe, 0xba, 0xbf]
                     | [0xbf, 0xba, 0xfe, 0xca]
             ));
-    if native {
-        "原生程序"
-    } else if path.starts_with(environment.home.join(".tokenmarket/tools")) {
-        "客户端管理"
-    } else {
-        "命令行程序"
-    }
-}
-pub(crate) fn planned_method(tool: ToolId, environment: &InstallationEnvironment) -> &'static str {
-    let Ok(plan) = recipes::plan(tool, environment, std::env::consts::ARCH) else {
-        return "当前平台暂无安装方案";
-    };
-    if plan
-        .steps
-        .iter()
-        .any(|s| s.stage == InstallStage::WaitingForUser)
-    {
-        return "通过官方桌面安装包安装";
-    }
-    match tool {
-        ToolId::ClaudeCode | ToolId::Codex => "通过官方安装器安装",
-        ToolId::Hermes => "通过官方安装脚本安装",
-        ToolId::OpenClaw => "通过官方脚本和 npm 安装",
-        ToolId::GrokBuild | ToolId::DeepSeekHarness => "通过 npm 安装（含运行环境）",
-        ToolId::MiniMaxCode => "通过 npm 安装官方发行包",
-        ToolId::Pi | ToolId::OhMyPi | ToolId::KimiCode | ToolId::OpenCode => "下载官方独立安装包",
-        _ => "通过官方安装包安装",
-    }
+    native
 }

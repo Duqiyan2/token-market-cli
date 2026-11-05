@@ -12,6 +12,8 @@ pub const GROK_BUILD_VERSION: &str = "1.0.70";
 pub fn managed_command_directories(home: &Path) -> Vec<PathBuf> {
     vec![
         home.join(".local/bin"),
+        home.join(".tokenmarket/tools/claude-code/bin"),
+        home.join(".tokenmarket/tools/pi/bin"),
         home.join(".tokenmarket/tools/codex/bin"),
         home.join(".tokenmarket/tools/deepseek-harness/bin"),
         home.join(".tokenmarket/tools/deepseek-harness/runtime/bin"),
@@ -37,7 +39,7 @@ pub(super) fn owned_command_paths(
     environment: &InstallationEnvironment,
 ) -> Vec<PathBuf> {
     let home = &environment.home;
-    let directories = match tool {
+    let mut directories = match tool {
         ToolId::ClaudeCode => vec![home.join(".local/bin")],
         ToolId::Codex => vec![home.join(".tokenmarket/tools/codex/bin")],
         ToolId::DeepSeekHarness => vec![home.join(".tokenmarket/tools/deepseek-harness/bin")],
@@ -59,6 +61,13 @@ pub(super) fn owned_command_paths(
         ToolId::KimiCode => vec![home.join(".tokenmarket/tools/kimi-code/bin")],
         ToolId::WorkBuddy | ToolId::DuMate | ToolId::DuMateEnterprise | ToolId::QwenWork => vec![],
     };
+    let npm_bin = home
+        .join(".tokenmarket/tools")
+        .join(tool.to_string())
+        .join("bin");
+    if !directories.contains(&npm_bin) && super::npm::supports(tool) {
+        directories.push(npm_bin);
+    }
     let names: Vec<_> = if environment.platform == HostPlatform::Windows {
         vec![
             tool.command().to_owned(),
@@ -84,15 +93,20 @@ pub fn availability(
             supported: true,
             reason: None,
             version: Some(plan.version),
+            method: Some(plan.method),
         },
         Err(error) => InstallationAvailability {
             supported: false,
             reason: Some(error.to_string()),
             version: None,
+            method: None,
         },
     }
 }
 pub fn compatible_existing_version(tool: ToolId, actual: &str, target: &str) -> bool {
+    if target == "latest" {
+        return super::updates::compare_versions(actual, actual).is_some();
+    }
     if tool == ToolId::Hermes {
         return actual.split_whitespace().any(|part| {
             let version = part.trim_start_matches('v');
@@ -105,6 +119,9 @@ pub fn compatible_existing_version(tool: ToolId, actual: &str, target: &str) -> 
     matches_pinned_version(tool, actual, target)
 }
 pub(super) fn matches_pinned_version(tool: ToolId, actual: &str, target: &str) -> bool {
+    if target == "latest" {
+        return super::updates::compare_versions(actual, actual).is_some();
+    }
     // The official OMP standalone binary reports its identity and version as a
     // single token. Match that prefix only for OMP and retain an exact version.
     if tool == ToolId::OhMyPi {
@@ -117,6 +134,16 @@ pub(super) fn matches_pinned_version(tool: ToolId, actual: &str, target: &str) -
         .any(|part| part.trim_start_matches('v') == target)
 }
 pub fn plan(
+    tool: ToolId,
+    environment: &InstallationEnvironment,
+    architecture: &str,
+) -> Result<InstallPlan> {
+    if !super::policy::is_desktop(tool) {
+        return super::policy::install_plan(tool, environment, architecture);
+    }
+    fallback_plan(tool, environment, architecture)
+}
+pub(super) fn fallback_plan(
     tool: ToolId,
     environment: &InstallationEnvironment,
     architecture: &str,
@@ -204,6 +231,7 @@ pub fn plan(
         download: step.download,
     };
     Ok(InstallPlan {
+        method: super::InstallMethod::Script,
         tool,
         version: OPENCLAW_VERSION.into(),
         command: "openclaw".into(),
@@ -255,6 +283,7 @@ fn grok_plan(environment: &InstallationEnvironment, architecture: &str) -> Resul
         download: None,
     };
     Ok(InstallPlan {
+        method: super::InstallMethod::Script,
         tool: ToolId::GrokBuild,
         version: GROK_BUILD_VERSION.into(),
         command: "grok".into(),

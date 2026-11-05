@@ -1,9 +1,16 @@
 # macOS 构建与共享钥匙串签名
 
-CLI 和桌面是同一个 Token Market Client 的两个入口。macOS 本地构建使用
-**固定自签名证书、相同的 designated requirement（DR）**，维持签名身份。
-客户端凭据通过系统 `security` 工具保存在钥匙串；无需 Apple Developer 账号，
+CLI 和桌面是同一个 Token Market Client 的两个入口。macOS 暂无 Developer ID
+时，通过 Apple 签名的 `/usr/bin/security` 读写用户默认钥匙串，保持升级前后的
+实际钥匙串访问者不变。凭证通过管道传输，不进入命令参数或普通配置文件。
 工具 Key、连接和恢复记录继续使用原有加密存储。
+
+**固定自签名证书和相同 DR 本身不足以消除默认登录钥匙串的升级授权。**
+实际登录钥匙串还检查 partition list；本机验证自签名程序的新条目会绑定
+`cdhash:`，不同二进制或升级后即使 DR 相同也可能被拒绝。之前仅用新建隔离
+钥匙串进行的 C 测试没有覆盖这条规则，因此不能作为真实默认钥匙串的验收。
+实现依据见 [Apple 的分区身份代码](https://github.com/apple-oss-distributions/Security/blob/main/securityd/src/clientid.cpp)
+与 [Apple 对 ACL/partition 独立校验的说明](https://developer.apple.com/forums/thread/845980)。
 
 固定自签名证书不提供 Developer ID、公证或 Gatekeeper 信任。
 下载后首次打开应用的系统信任提示与钥匙串访问弹窗是两类不同问题。
@@ -28,9 +35,9 @@ python3 scripts/macos-local-signing.py --profile production package \
   --output dist/signed-production-clients
 ```
 
-`production` 和 `local` 分别只允许自己的 App/CLI 标识，同一证书下两组
-程序具有各自签名规则。凭据经由系统工具访问时，隔离边界见文末说明。正式组为 `cn.tokenmarket.setup` 和
-`cn.tokenmarket.setup.cli`。两组继续使用原来的凭据命名空间和存储格式。
+`production` 和 `local` 的代码签名分别只接受自己的 App/CLI 标识。
+正式组为 `cn.tokenmarket.setup` 和 `cn.tokenmarket.setup.cli`。凭证访问由
+系统工具执行，仍按配置地址区分账号，不能把代码签名规则当作凭证隔离规则。
 
 ## GitHub 发布所需的固定身份
 
@@ -50,7 +57,7 @@ python3 scripts/macos-local-signing.py --profile production package \
 因此无需访问发布私钥。
 
 正式分发可提供长期保留的 Developer ID Application 身份；本地固定自签名
-身份只能解决钥匙串身份连续性，不能消除 Gatekeeper 的首次打开限制。
+身份保持包的代码身份连续性，不能消除 Gatekeeper 的首次打开限制。
 当前脚本不做公证。证书指纹被固定在 DR 内，换证前必须设计凭据迁移，
 不能在升级中悄悄重新生成证书。首次配置 CI 时应复用本地交付包所用身份，
 避免本地包和 CI 包再次形成不同身份。
@@ -82,17 +89,25 @@ bash scripts/build-local-clients.sh
 该目录包含构建私钥和解锁材料，必须单独安全备份，不得放进 Git、npm、
 DMG 或其他交付包。丢失后重新生成证书会改变签名身份。
 
-## 签名规则与边界
+## 签名规则与凭证访问边界
 
 本地组的共享 DR 同时检查证书指纹，并且只接受以下两个签名标识：
 
 - `cn.tokenmarket.setup.test`：本地桌面 App。
 - `cn.tokenmarket.setup.cli.test`：本地 CLI 二进制。
 
-这不是“允许所有应用访问”。临时签名程序、其他证书签名程序，以及同一
-证书签名但标识不同的程序不满足规则。两端声明相同的 DR，且使用同一张
-长期保留的证书；仅更改文件名、目录或重新编译不会改变这套身份。
-登录凭据按配置地址独立保存，签名不改变连接行为。
+临时签名程序、其他证书签名程序，以及同一证书签名但标识不同的程序不满足
+上述代码签名规则。两端声明相同 DR，复用长期保留的证书。
+
+当前钥匙串条目由 `/usr/bin/security` 创建并信任该系统工具，不使用 `-A`
+允许所有程序直接读取，也不更改全局钥匙串权限。但是同一系统用户下的其他
+程序同样能调用该工具，所以此阶段的隔离边界是系统用户，不能宣称凭证仅能
+由 Token Market 的签名程序访问。这与 Miao 的 go-keyring 实现采用同一路径。
+取得 Developer ID 后如迁移到原生访问组，需要单独验证已有凭据迁移。
+
+保存时仅更新条目内容，不传 `-T` 修改受信任应用列表。新条目默认信任创建它的
+`security` 工具；已有条目保留原访问规则。即使 `-T` 指定同一个工具，系统仍会
+在每次会话续期时要求确认“更改访问权限”，窗口恢复焦点又续期时会连续弹出。
 
 打包只接受文档列出的本地 App 标识，保留原签名中的 entitlements、flags、runtime，
 不添加共享访问组权限，不需要 provisioning profile。生成的签名摘要记录
@@ -117,8 +132,7 @@ python3 scripts/macos-local-signing.py package \
 
 ## 原生验证与既有数据
 
-`smoke` 验证独立的签名/ACL 探针，不代表当前系统工具凭据后端的端到端验证。
-它编译两个不同的独立程序，签成 CLI 和桌面的同一共享 DR，使用
+`smoke` 编译两个不同的独立程序，签成 CLI 和桌面的同一共享 DR，使用
 独立临时钥匙串和虚拟内容。每个进程在访问前关闭钥匙串交互；需要授权
 弹窗会变成失败。覆盖双向读取和更新、进程重启、可执行文件移动、重新
 编译后的签名更新，以及临时签名/其他标识程序被拒绝。它不读取真实登录
@@ -127,19 +141,69 @@ python3 scripts/macos-local-signing.py package \
 该测试验证系统签名与 ACL 行为；真实客户端仍需用同一对新包检查：
 桌面登录后 CLI 复用、CLI 登录后桌面复用，以及更新后再次访问。
 
-**旧临时签名包创建的钥匙串记录保留原 ACL，新签名不能绕过其授权。**
-访问这些记录时可能仍出现一次授权；CLI 和桌面可能各需授权一次。不会静默
+**旧包由 App 原生接口创建的钥匙串记录保留原 ACL。**
+改由系统工具访问时，可能仍出现一次授权。不会静默
 删除旧会话、加密主密钥、工具 Key 或恢复记录来掩盖弹窗，也不会重发 Key。
-全新记录由系统工具创建并默认信任该工具；App 和 CLI 经由同一工具读写。
+全新记录由系统工具创建后，App 和 CLI 都通过同一工具读写，升级不再因
+应用二进制的代码哈希变化而引发这类授权。
+
+## 旧登录凭证清理后重新授权
+
+可重复使用的清理入口（先完全退出 App 和 CLI）：
+
+```bash
+# 仅重置国内正式环境的登录会话
+python3 scripts/reset-macos-client-state.py
+
+# 明确测试“无本地连接/凭据/恢复备份”：同时清理加密主密钥，不创建备份
+python3 scripts/reset-macos-client-state.py --all-connections
+```
+
+完整重置会删除 `.tokenmarket/client-login`、`.tokenmarket/backups`，清空
+`.tokenmarket/desktop-connections`（保留非秘密的 `device-id`），并删除当前
+用户钥匙串中本客户端的会话和工具主密钥。不会撤销服务端 Key，也不会修改
+工具自身配置或安装目录。此前接入前的原始配置不再可由本客户端恢复。
+
+当固定签名版本读取旧包创建的 `cn.tokenmarket.setup.desktop-session` 时，
+旧访问规则可能要求一次授权。可以选择“始终允许”；也可以仅清理旧登录
+会话，再由固定签名版本重新登录创建条目。
+
+先从菜单栏选择退出 Token Market，并停止 CLI；只关闭窗口不会退出常驻进程。
+国内正式环境 `https://console-api.tokensapi.cn` 的精确清理命令是：
+
+```bash
+/usr/bin/security delete-generic-password \
+  -s cn.tokenmarket.setup.desktop-session \
+  -a platform-50c3e1878ab50b8906547806370ef030f3af7ad02d5f0f77075f6e0b8d6518e9 \
+  "$HOME/Library/Keychains/login.keychain-db"
+```
+
+命令只删除该环境的本地登录会话，不撤销平台 API Key。自定义环境的账号名
+是 `platform-` 加配置地址移除尾部 `/` 后的 UTF-8 字节的 SHA-256 十六进制值，
+不要照搬正式环境账号名。若提示条目不存在，不需要扩大清理范围。
+
+然后打开已包含系统工具凭证后端的新 App，重新在浏览器授权；CLI 使用
+配套新二进制。仅重新签名旧代码不能获得这个修复。
+
+不要删除 `cn.tokenmarket.setup.tool-credentials`，它是本地工具凭证、连接恢复
+记录的加密主密钥，重新登录不能恢复它。若旧主密钥单独要求授权，保留条目
+并给系统工具选择“始终允许”。也不要删除构建机器的 `signing.keychain-db`
+或签名证书。
+
+`native-smoke` 直接使用客户端的 Rust `NativeDesktopCredentials` 实现，在
+用户钥匙串中只写随机 `.invalid` 虚拟会话，原生负向探针禁用授权界面，
+每次测试进程有 15 秒时限。
+测试旧临时签名条目拒绝新身份、删除后重建、App/CLI 互读与更新、重启、
+移动、重新编译升级和拒绝绕过系统工具的直接读取；最后只删除自己的虚拟条目：
+
+```bash
+python3 scripts/macos-local-signing.py --profile production native-smoke
+```
+
+该测试不读取真实登录会话和工具主密钥，也不发起浏览器授权或模型请求。
 
 ## 依据
 
 - [Apple：Sharing a designated requirement](https://developer.apple.com/library/archive/documentation/Security/Conceptual/CodeSigningGuide/Procedures/Procedures.html)：允许协同程序使用相同 DR 共享钥匙串访问。
 - [Apple：Understanding the Code Signature](https://developer.apple.com/library/archive/documentation/Security/Conceptual/CodeSigningGuide/AboutCS/AboutCS.html)：钥匙串支持自签名身份，但自签名不提供 Gatekeeper 分发信任。
 - [Apple：Access Control Lists](https://developer.apple.com/documentation/security/access-control-lists)：可信应用满足 ACL 时直接访问，否则需要用户确认。
-
-## 凭据内容更新与访问权限
-
-macOS 客户端通过系统 `/usr/bin/security` 读写系统钥匙串。保存会话时不传 `-T`：对已有条目设置受信任应用会调用 `SecKeychainItemSetAccess`，每次续期均可能要求确认“更改访问权限”。新条目默认信任创建它的系统工具，更新只修改内容并保留已有访问规则。旧条目的首次访问仍可能要求授权。
-
-此实现不使用 `-A`，也不更改全局钥匙串权限；同一系统用户的其他进程仍可调用系统工具，因此其隔离边界是系统用户，而非仅允许 Token Market 的签名应用访问。

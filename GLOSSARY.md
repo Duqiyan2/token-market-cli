@@ -104,7 +104,19 @@ The origin of an API key, distinguishing credentials issued through client autho
 The target Agent product, such as Claude Code, Codex CLI, WorkBuddy, DeepSeek Harness, OpenClaw, or OpenCode.
 
 **Tool Installation**:
-A locally installed copy of a Tool that can be run on the device. It exists independently of a Tool Connection; installing a Tool does not establish its access to Token Market.
+A locally installed copy of a Tool on the device. It can be present but unable to run, and exists independently of a Tool Connection; installing it does not establish access to Token Market.
+
+**Uninstall**:
+Removal of one selected Tool Installation while retaining tool configuration, user data and any saved Tool Connection. Other installations of the same Tool remain independently available.
+_Avoid_: Disconnect, reset
 
 **Adapter Directory Detection**:
 The discovery of the local configuration location used by a particular tool installation.
+
+**Token Market Usage**:
+Model requests, token consumption and charges recorded through Token Market. Usage sent directly to another provider or through an official subscription is outside this scope.
+_Avoid_: All local tool usage
+
+**Device Tool Usage**:
+Token Market Usage attributed to all Agent API Keys created for the current user's Tools on this device in the Current Workspace, including historical keys and disconnected tools.
+_Avoid_: Current-connection usage, workspace-wide usage

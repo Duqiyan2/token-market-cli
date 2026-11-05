@@ -7,10 +7,13 @@ on:
       - "src-tauri/**"
       - "src/tauri-ui/**"
       - "tests/desktop-ui.test.cjs"
+      - "tests/desktop-usage.test.cjs"
       - "tests/helpers/**"
       - "scripts/macos-local-signing.py"
       - "scripts/build-macos-clients.sh"
       - "tests/test_macos_signing.py"
+      - "scripts/reset-macos-client-state.py"
+      - "tests/test_macos_reset.py"
       - "package.json"
       - ".gitattributes"
       - ".github/workflows/native-validation.yml"
@@ -56,7 +59,7 @@ jobs:
 
       - name: Test macOS signing release guards
         if: runner.os == 'macOS'
-        run: python3 -m unittest discover -s tests -p test_macos_signing.py -v
+        run: python3 -m unittest discover -s tests -p 'test_macos_*.py' -v
 
       - name: Validate macOS upgrade and CLI/desktop keychain sharing without UI
         if: runner.os == 'macOS'
@@ -71,6 +74,7 @@ jobs:
           trap cleanup EXIT
           python3 scripts/macos-local-signing.py --identity-dir "$identity" init
           python3 scripts/macos-local-signing.py --identity-dir "$identity" --profile production smoke
+          python3 scripts/macos-local-signing.py --identity-dir "$identity" --profile production native-smoke
 
       # Keep each external command in its own step: PowerShell must not hide
       # an earlier command failure behind the exit code of a later command.
@@ -141,4 +145,4 @@ jobs:
         env:
           NODE_PATH: ${{ runner.temp }}/tokenmarket-ui-runtime/node_modules
           PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/tokenmarket-ui-browsers
-        run: node --test --test-reporter=tap tests/desktop-ui.test.cjs
+        run: node --test --test-reporter=tap tests/desktop-ui.test.cjs tests/desktop-usage.test.cjs

@@ -114,10 +114,8 @@ fn installs_openclaw_and_reports_success_only_after_detecting_the_executable() {
         .join(".tokenmarket/desktop-connections")
         .exists());
     let commands = executor.commands.lock().unwrap();
-    assert_eq!(commands.len(), 2);
-    assert!(commands[1].args.contains(&"--runtime-only".to_string()));
-    assert!(commands[1].args.contains(&"--no-onboard".to_string()));
-    assert!(commands[1].args.contains(&"2026.10.9".to_string()));
+    assert_eq!(commands.len(), 1);
+    assert!(commands[0].args.join(" ").contains("openclaw@latest"));
 }
 
 #[test]
@@ -201,7 +199,7 @@ fn separate_client_instances_cannot_install_the_same_tool_concurrently() {
 }
 
 #[test]
-fn an_incompatible_existing_version_is_not_upgraded_or_overwritten() {
+fn an_existing_version_is_reused_without_an_implicit_upgrade() {
     let root = tempfile::tempdir().unwrap();
     let (manager, executor) = fixture(root.path());
     std::fs::create_dir_all(executor.executable.parent().unwrap()).unwrap();
@@ -215,8 +213,7 @@ fn an_incompatible_existing_version_is_not_upgraded_or_overwritten() {
     *executor.version.lock().unwrap() = "2026.9.1".into();
     manager.start(ToolId::OpenClaw).unwrap();
     let status = finished(&manager);
-    assert_eq!(status.stage, InstallStage::Failed);
-    assert!(status.detail.contains("未自动升级"));
+    assert_eq!(status.stage, InstallStage::Succeeded);
     assert!(executor.commands.lock().unwrap().is_empty());
     assert_eq!(
         std::fs::read_to_string(&executor.executable).unwrap(),
@@ -225,7 +222,7 @@ fn an_incompatible_existing_version_is_not_upgraded_or_overwritten() {
 }
 
 #[test]
-fn windows_install_prepares_a_private_runtime_and_exposes_it_only_to_the_install_process() {
+fn windows_install_uses_system_npm_without_private_runtime_or_path_mutations() {
     let root = tempfile::tempdir().unwrap();
     let home = root.path().join("Quoted ' & home");
     let (manager, executor) = fixture_on(&home, HostPlatform::Windows);
@@ -233,10 +230,8 @@ fn windows_install_prepares_a_private_runtime_and_exposes_it_only_to_the_install
     assert_eq!(finished(&manager).stage, InstallStage::Succeeded);
     let steps = executor.commands.lock().unwrap();
     let script = steps.last().unwrap().args.last().unwrap();
-    assert!(script.contains("-NodeOnly -NodePrefix"));
-    assert!(script.contains("$env:PATH = '"));
-    assert!(script.contains("Quoted '' & home"));
-    assert!(script.contains("'openclaw@2026.10.9'"));
+    assert!(script.contains("openclaw@latest"));
+    assert!(!script.contains("-NodeOnly"));
     assert!(!script.contains("gateway"));
     assert!(!script.contains("setx"));
 }

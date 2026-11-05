@@ -83,6 +83,7 @@ pub fn plan(environment: &InstallationEnvironment, architecture: &str) -> Result
         }
     };
     Ok(InstallPlan {
+        method: super::InstallMethod::Standalone,
         tool: ToolId::OpenCode,
         version: VERSION.into(),
         command: "opencode".into(),

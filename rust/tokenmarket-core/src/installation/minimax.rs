@@ -192,6 +192,7 @@ echo 'MiniMax Code installed; connect separately'
         });
     }
     Ok(InstallPlan {
+        method: super::InstallMethod::Npm,
         tool: ToolId::MiniMaxCode,
         version: VERSION.into(),
         command: "mcode".into(),

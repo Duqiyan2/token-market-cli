@@ -18,6 +18,22 @@
   const expandedInstallations = new Set();
   let selectedTool = null, filter = 'all', search = '';
   const detailRoot = document.getElementById('tool-detail-region');
+  const openToolMenus = () => document.querySelectorAll('.tool-menu[open], .tool-lifecycle-menu[open]');
+  function closeToolMenusOutside(target) {
+    openToolMenus().forEach(menu => { if (!target || !menu.contains(target)) menu.open = false; });
+  }
+  document.addEventListener('pointerdown', event => closeToolMenusOutside(event.target));
+  document.addEventListener('focusin', event => closeToolMenusOutside(event.target));
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || document.querySelector('dialog[open]')) return;
+    const menus = [...openToolMenus()];
+    if (!menus.length) return;
+    const current = menus.find(menu => menu.contains(document.activeElement)) || menus[0];
+    event.preventDefault(); event.stopPropagation();
+    closeToolMenusOutside();
+    current.querySelector('summary')?.focus({preventScroll:true});
+  }, true);
+  window.addEventListener('tokenmarket-page-changed', () => closeToolMenusOutside());
   root.innerHTML = '<div class="tools-controls"><div class="tools-filters" role="group" aria-label="按工具状态筛选"><button data-tool-filter="all" class="selected">全部</button><button data-tool-filter="connected">已接入</button><button data-tool-filter="available">待接入</button><button data-tool-filter="uninstalled">未安装</button></div><input type="search" class="tools-search" placeholder="搜索工具或模型" aria-label="搜索工具或模型"></div><div class="tools-feedback" role="status" aria-live="polite"></div><div class="tools-table-heading" aria-hidden="true"><span>工具名称</span><span class="install-column">版本与安装</span><span>接入状态</span><span class="billing-column">计费空间</span><span>操作</span></div><div class="tools-list"></div><p class="tools-count"></p>';
   const searchInput = root.querySelector('.tools-search');
   searchInput.oninput = () => { search = searchInput.value.toLowerCase().trim(); render(); };
@@ -41,6 +57,7 @@
     resultDialog.querySelector('.tool-result-detail').textContent = detail;
     if (!resultDialog.open) resultDialog.showModal();
   }
+  function showConnectFailure() { feedback(''); showResult('接入失败', '请联系管理员。'); }
   function text(tag, value, className) {
     const element = document.createElement(tag);
     element.textContent = value;
@@ -73,18 +90,19 @@
     svg.innerHTML = direction === 'external' ? '<path d="M14 3h7v7m0-7L11 13M10 5H4v15h15v-6"/>' : direction === 'up' ? '<circle cx="12" cy="12" r="9"/><path d="m8 12 4-4 4 4M12 8v9"/>' : '<path d="M12 3v12m-4-4 4 4 4-4M4 16v5h16v-5"/>';
     button.prepend(svg); return button;
   }
-  const locations = entry => Array.isArray(entry.installations) ? entry.installations : [];
+  const locations = entry => updates.get(entry.id)?.installations || (Array.isArray(entry.installations) ? entry.installations : []);
+  const sourceLabel = method => ({npm:'npm',Homebrew:'Homebrew',pnpm:'pnpm',Bun:'bun',pip:'pip',Scoop:'Scoop'})[method] || '';
+  const isPresent = entry => entry.installed || locations(entry).length > 0 || updates.get(entry.id)?.state === 'broken';
   const matchesFilter = (entry, kind) => kind === 'all'
     || kind === 'connected' && currentConnection(entry)
     || kind === 'available' && entry.installed && !currentConnection(entry)
-    || kind === 'uninstalled' && !entry.installed && locations(entry).length === 0;
+    || kind === 'uninstalled' && !isPresent(entry);
   const selectedLocation = entry => locations(entry).find(location => location.selected) || locations(entry)[0];
   function installationSummary(entry) {
     const source = selectedLocation(entry);
     const summary = text('div', '', 'tool-installation-summary');
     if (source) {
       const line = text('div', '', 'tool-location-line');
-      line.append(text('span', source.method || entry.installationMethod || '本机安装', 'tool-install-method'));
       const path = text('code', source.path, 'tool-location-path'); path.title = source.path; line.append(path); summary.append(line);
       if (locations(entry).length > 1) {
         const toggle = actionButton(`另有 ${locations(entry).length-1} 处安装`, 'quiet tool-installations-toggle', () => {
@@ -93,15 +111,19 @@
         });
         toggle.dataset.installationToggle = entry.id; toggle.setAttribute('aria-expanded',String(expandedInstallations.has(entry.id))); toggle.setAttribute('aria-controls',`tool-installations-${entry.id}`); summary.append(toggle);
       }
-    } else summary.append(text('span', entry.installed ? '安装路径暂未获取' : entry.installationMethod || '通过官方安装方案安装', 'tool-planned-method'));
+    } else {
+      summary.append(text('span', entry.installed ? '安装路径暂未获取' : entry.installationMethod || '自动安装命令行工具', 'tool-planned-method'));
+    }
     return summary;
   }
   function installationPanel(entry) {
     const panel = text('div', '', 'tool-installation-list'); panel.id = `tool-installations-${entry.id}`; panel.setAttribute('role','group'); panel.setAttribute('aria-label',`${entry.name} 的安装位置`);
     locations(entry).forEach(source => {
       const row = text('div', '', 'tool-installation-location');
-      row.append(text('span', source.method || '本机安装', 'tool-install-method'),text('code', source.path, 'tool-path-value'));
-      if (source.selected) row.append(text('span','当前使用','tool-current-installation'));
+      row.append(text('span', sourceLabel(source.method), 'tool-install-method'),text('code', source.path, 'tool-path-value'));
+      if (source.isPathDefault || (source.isPathDefault === undefined && source.selected)) row.append(text('span','终端默认','tool-current-installation'));
+      if (source.version) row.append(text('span',versionDisplay(source.version),'tool-location-version'));
+      if (source.error) row.append(text('span',source.error,'tool-location-error'));
       panel.append(row);
     });
     panel.append(text('p','版本检测与升级使用标记的入口；其他应用可能选择不同的安装。','tool-installation-note'));
@@ -113,7 +135,7 @@
   function installationDetails(entry) {
     const sheet = text('section', '', 'sheet tool-files-sheet'); sheet.append(text('h2','安装与配置'));
     const source = selectedLocation(entry);
-    sheet.append(detailRow(entry.installed ? '安装方式' : '安装方案', source?.method || entry.installationMethod || '暂未获取'));
+    sheet.append(detailRow(entry.installed ? '安装方式' : '安装方案', entry.installed ? sourceLabel(source?.method) || '来源未确认' : entry.installationMethod || '暂未获取'));
     if (source) {
       sheet.append(pathRow('当前入口',source.path));
       if (source.resolvedPath && source.resolvedPath !== source.path) sheet.append(pathRow('实际文件',source.resolvedPath));
@@ -137,7 +159,10 @@
   function versionCell(entry, locked) {
     const cell = text('div', '', `tool-install-state install-column${entry.installed ? ' installed' : ''}`);
     const copy = text('div', '', 'tool-version-copy'), update = updates.get(entry.id);
-    if (!entry.installed && !update?.canUpgrade) {
+    if (update?.state === 'broken') {
+      copy.append(text('span','无法运行','tool-version-empty'),text('small',update.note,'tool-location-error')); cell.append(copy); return cell;
+    }
+    if (!isPresent(entry) && !update?.canUpgrade) {
       copy.append(text('span', '未安装', 'tool-version-empty')); cell.append(copy, installationActions(entry, locked));
       if (!entry.installation?.supported) cell.append(text('span', entry.installation?.reason || '暂无兼容安装方案', 'tool-install-unavailable'));
       return cell;
@@ -146,6 +171,7 @@
     if ((update?.canUpgrade || update?.manualUpgrade) && (update.latestVersion || update.targetVersion)) copy.append(text('small', `新版本 ${versionDisplay(update.latestVersion || update.targetVersion)}`, 'tool-version-target'));
     else if (update?.state === 'unsupported_update') {copy.append(text('small', `新版本 ${versionDisplay(update.latestVersion)}`, 'tool-version-target'),text('small', '接入适配需更新', 'tool-update-badge'));}
     else if (update?.state === 'check_failed' || update?.state === 'unknown') copy.append(text('small', '版本检查未完成', 'tool-update-badge'));
+    else if (update?.state === 'node_required') copy.append(text('small', update.note, 'tool-location-error'));
     if (update?.note) copy.title = update.note;
     cell.append(copy);
     if (update?.canUpgrade) {
@@ -156,10 +182,11 @@
     }
     return cell;
   }
-  async function runInstaller(entry, upgrade, current, onStatus, shouldStop = () => false) {
-    const targetVersion = upgrade ? updates.get(entry.id)?.targetVersion : null;
+  async function runInstaller(entry, upgrade, current, onStatus, shouldStop = () => false, confirmedUpdate = null) {
+    const update = confirmedUpdate || updates.get(entry.id);
+    const targetVersion = upgrade ? update?.targetVersion : null;
     if (upgrade && !targetVersion) throw Error('更新信息已失效，请重新检查更新');
-    let state = await invoke(upgrade ? 'start_tool_upgrade' : 'start_tool_installation', {tool:entry.id,...(upgrade ? {targetVersion} : {})});
+    let state = await invoke(upgrade ? 'start_tool_upgrade' : 'start_tool_installation', {tool:entry.id,...(upgrade ? {targetVersion,planRevision:update?.upgradeRevision || ''} : {})});
     let cancelSent = false;
     while (authenticated && current === generation) {
       onStatus(state);
@@ -174,15 +201,16 @@
   }
   const installDialog = document.createElement('dialog');
   installDialog.className = 'tool-install-dialog';
-  installDialog.innerHTML = '<h3></h3><p class="tool-install-status" role="status" aria-live="polite"></p><pre class="tool-install-output"></pre><div class="tool-actions"><button type="button" class="tool-install-cancel">取消安装</button><button type="button" class="tool-install-stop-wait" title="仅停止客户端等待，取消安装请在原生安装器中操作" hidden>停止等待</button><button type="button" class="tool-install-retry" hidden>重试安装</button><button type="button" class="tool-install-close" hidden>关闭</button></div>';
+  installDialog.innerHTML = '<h3></h3><p class="tool-install-status" role="status" aria-live="polite"></p><pre class="tool-install-output"></pre><div class="tool-actions"><button type="button" class="tool-install-cancel">取消安装</button><button type="button" class="tool-install-stop-wait" title="仅停止客户端等待，取消安装请在原生安装器中操作" hidden>停止等待</button><button type="button" class="tool-install-retry" hidden>重试安装</button><button type="button" class="tool-install-guide" hidden>查看其他安装方式</button><button type="button" class="tool-install-close" hidden>关闭</button></div>';
   document.body.append(installDialog);
-  let installationTool = null, installationIsUpgrade = false;
+  let installationTool = null, installationIsUpgrade = false, installationIsUninstall = false;
   const installTerminal = state => ['succeeded','failed','cancelled'].includes(state?.stage);
   const installStages = {preparing:'正在准备安装',downloading:'正在下载安装程序',dependencies:'正在准备运行依赖',installing:'正在安装',waiting_for_user:'请完成原生安装器中的步骤',detecting:'正在检测实际安装',succeeded:'安装完成',failed:'安装未完成',cancelled:'安装已取消'};
   function renderInstallation(state) {
-    const label = (installStages[state.stage] || '正在安装').replaceAll('安装', installationIsUpgrade ? '升级' : '安装');
-    installDialog.querySelector('.tool-install-cancel').textContent = installationIsUpgrade ? '取消升级' : '取消安装';
-    installDialog.querySelector('.tool-install-retry').textContent = installationIsUpgrade ? '重试升级' : '重试安装';
+    const operation = installationIsUninstall ? '卸载' : installationIsUpgrade ? '升级' : '安装';
+    const label = (installStages[state.stage] || '正在安装').replaceAll('安装', operation);
+    installDialog.querySelector('.tool-install-cancel').textContent = `取消${operation}`;
+    installDialog.querySelector('.tool-install-retry').textContent = installationIsUninstall ? '重新选择安装' : `重试${operation}`;
     installDialog.querySelector('.tool-install-status').textContent = !state.detail ? label : state.detail.startsWith(label) ? state.detail : `${label}：${state.detail}`;
     const output = installDialog.querySelector('.tool-install-output'); output.textContent = (state.output || []).join('\n'); output.scrollTop = output.scrollHeight;
     const terminal = installTerminal(state);
@@ -190,17 +218,18 @@
     installDialog.querySelector('.tool-install-cancel').hidden = terminal || state.stage === 'waiting_for_user';
     installDialog.querySelector('.tool-install-stop-wait').hidden = state.stage !== 'waiting_for_user';
     installDialog.querySelector('.tool-install-retry').hidden = !['failed','cancelled'].includes(state.stage);
+    installDialog.querySelector('.tool-install-guide').hidden = state.stage !== 'failed';
     installDialog.querySelector('.tool-install-close').hidden = !terminal && state.stage !== 'waiting_for_user';
   }
-  async function install(entry, upgrade = false) {
+  async function install(entry, upgrade = false, confirmedUpdate = null) {
     if (!authenticated || installing || batching || checking || connecting || disconnecting || window.TokenMarketConnectionTests?.busy) return;
-    const current = generation; installing = true; installationTool = entry; installationIsUpgrade = upgrade;
+    const current = generation; installing = true; installationTool = entry; installationIsUpgrade = upgrade; installationIsUninstall = false;
     installDialog.querySelector('h3').textContent = `${upgrade ? '升级' : '安装'} ${entry.name}`;
     renderInstallation({stage:'preparing',detail:'安装不会自动接入或发起模型测试',output:[]});
     if (!installDialog.open) installDialog.showModal(); render();
     let operationSucceeded = false;
     try {
-      const state = await runInstaller(entry, upgrade, current, renderInstallation);
+      const state = await runInstaller(entry, upgrade, current, renderInstallation, () => false, confirmedUpdate);
       operationSucceeded = state?.stage === 'succeeded';
       if (upgrade && operationSucceeded) updates.delete(entry.id);
     } catch (error) { if (authenticated && current === generation) renderInstallation({stage:'failed',detail:String(error),output:[]}); }
@@ -210,8 +239,12 @@
       if (authenticated) { render(); if (operationSucceeded || current !== generation) void checkUpdates(); }
     }
   }
+  installDialog.querySelector('.tool-install-guide').onclick = async () => {
+    if (!installationTool) return;
+    try { await invoke('download_tool', {tool:installationTool.id}); } catch (error) { showResult('无法打开安装说明', String(error)); }
+  };
   installDialog.querySelector('.tool-install-close').onclick = () => installDialog.close();
-  installDialog.querySelector('.tool-install-retry').onclick = () => { if (installationTool) void install(installationTool, installationIsUpgrade); };
+  installDialog.querySelector('.tool-install-retry').onclick = () => { if (installationTool) { if (installationIsUninstall) {installDialog.close(); void confirmUninstall(installationTool);} else void install(installationTool, installationIsUpgrade); } };
   installDialog.querySelector('.tool-install-cancel').onclick = async () => { if (!installationTool) return; try { await invoke('cancel_tool_installation', {tool:installationTool.id}); } catch (error) { feedback(String(error),true); } };
   installDialog.querySelector('.tool-install-stop-wait').onclick = installDialog.querySelector('.tool-install-cancel').onclick;
   installDialog.addEventListener('cancel', event => { if (installing) event.preventDefault(); });
@@ -219,6 +252,59 @@
     const current = generation;
     try { await invoke('launch_connected_tool', {tool:entry.id}); if (authenticated && current === generation) feedback('已请求启动。现有会话请退出后重新启动以读取配置。'); }
     catch (error) { if (authenticated && current === generation) showResult('无法打开工具', String(error)); }
+  }
+  const uninstallDialog = document.createElement('dialog'); uninstallDialog.className = 'tool-uninstall-confirm'; document.body.append(uninstallDialog);
+  async function confirmUninstall(entry) {
+    if (!authenticated || installing || batching || checking || connecting || disconnecting || window.TokenMarketConnectionTests?.busy) return;
+    const current = generation; installing = true; render();
+    try {
+      const candidates = await invoke('tool_uninstall_candidates', {tool:entry.id});
+      if (!authenticated || current !== generation) return;
+      uninstallDialog.replaceChildren(text('h3',`卸载 ${entry.name}`),text('p','选择要卸载的安装。只移除选定的程序，保留配置、会话、项目和接入记录。其他安装保留。'));
+      const list = text('div','','tool-uninstall-candidates'), preview = text('pre','','tool-uninstall-command');
+      let selected = candidates.length === 1 ? candidates[0].plan : null;
+      const confirm = actionButton('确认卸载','danger tool-uninstall-execute',() => {
+        if (!selected || !authenticated || current !== generation) return;
+        uninstallDialog.close(); void uninstall(entry,selected);
+      },!selected);
+      candidates.forEach((candidate,index) => {
+        const label = text('label','','tool-uninstall-candidate'), radio = document.createElement('input');
+        radio.type = 'radio'; radio.name = 'uninstall-installation'; radio.value = String(index); radio.disabled = !candidate.plan; radio.checked = Boolean(selected && candidates.length === 1);
+        radio.onchange = () => {selected = candidate.plan; preview.textContent = selected.command; confirm.disabled = false;};
+        const info = text('div'); info.append(text('code',candidate.installation.path,'tool-path-value'));
+        const metadata = text('div','','tool-uninstall-metadata');
+        if (sourceLabel(candidate.installation.method)) metadata.append(text('span',sourceLabel(candidate.installation.method),'tool-install-method'));
+        if (candidate.version) metadata.append(text('span',versionDisplay(candidate.version)));
+        if (candidate.isPathDefault) metadata.append(text('span','终端默认'));
+        info.append(metadata);
+        if (candidate.error) info.append(text('p',candidate.error,'tool-location-error'));
+        if (candidate.unavailableReason) info.append(text('p',candidate.unavailableReason,'tool-location-error'));
+        if (candidate.reinstalledByUpdater) info.append(text('p','Grok 的更新器可能重新安装这份 npm 包，请检查其安装模式。','tool-location-error'));
+        label.append(radio,info); list.append(label);
+      });
+      if (!candidates.length) list.append(text('p','未识别到可卸载的安装，请先检查更新。'));
+      preview.textContent = selected?.command || '选择安装后显示卸载操作';
+      const buttons = text('div','','tool-actions'); buttons.append(actionButton('取消','',()=>uninstallDialog.close()),actionButton('官方说明','quiet',async()=>{try{await invoke('download_tool',{tool:entry.id});}catch(e){feedback(String(e),true);}}),confirm);
+      uninstallDialog.append(list,preview,buttons); uninstallDialog.showModal();
+    } catch(error) {if (authenticated && current === generation) showResult('无法准备卸载',String(error));}
+    finally {installing = false;if(authenticated)render();}
+  }
+  async function uninstall(entry,plan) {
+    if (!authenticated || installing || batching || checking) return;
+    const current = generation; installing = true; installationTool = entry; installationIsUninstall = true; installationIsUpgrade = false;
+    installDialog.querySelector('h3').textContent = `卸载 ${entry.name}`; renderInstallation({stage:'preparing',detail:'配置和用户数据保留',output:[plan.command]}); installDialog.showModal(); render();
+    try {
+      let state = await invoke('start_tool_uninstall',{tool:entry.id,plan});
+      while (authenticated && current === generation) {
+        if (!state) throw Error('卸载状态不可用，请重新检查安装');
+        renderInstallation(state); if (installTerminal(state)) break;
+        await new Promise(resolve=>setTimeout(resolve,300));
+        if (!authenticated || current !== generation) break;
+        state = await invoke('tool_installation_status',{tool:entry.id});
+      }
+      updates.delete(entry.id);
+    } catch(error) {if(authenticated && current===generation)renderInstallation({stage:'failed',detail:String(error),output:[]});}
+    finally {if(authenticated && current===generation)await refresh(true);installing=false;installDialog.querySelector('.tool-install-retry').disabled=false;if(authenticated){render();void checkUpdates();}}
   }
   async function connect(entry) {
     const current = generation;
@@ -228,14 +314,15 @@
       if (!authenticated || current !== generation) return;
       const event = new CustomEvent('tokenmarket-connect-request', {detail:{tool:entry.id}, cancelable:true});
       if (window.dispatchEvent(event)) feedback('接入功能正在准备中。');
-    } catch (error) { if (authenticated && current === generation) { feedback(String(error), true); showResult('接入未完成', String(error)); await refresh(); } }
+    } catch (error) { if (authenticated && current === generation) { showConnectFailure(); await refresh(); } }
   }
   function actions(entry, detailed = false) {
     const testing = Boolean(window.TokenMarketConnectionTests?.busy);
     const locked = loading || connecting || disconnecting || testing || installing || batching || checking;
     const group = text('div', '', 'tool-actions');
+    const broken = updates.get(entry.id)?.state === 'broken';
     if (entry.connection) {
-      group.append(actionButton('打开工具', 'primary tool-launch', () => launch(entry), !entry.installed || locked));
+      group.append(actionButton('打开工具', 'primary tool-launch', () => launch(entry), !entry.installed || broken || locked));
       if (detailed) {
         const test = actionButton('测试连接', 'tool-test', () => window.dispatchEvent(new CustomEvent('tokenmarket-test-request', {detail:{id:entry.id,name:entry.name,connection:entry.connection}})), locked || testBlocked(entry));
         if (testBlocked(entry)) test.title = '请先检查配置或重新接入';
@@ -247,7 +334,7 @@
         menu.append(options); group.append(menu);
       }
     } else if (!entry.connection && entry.installed) {
-      group.append(actionButton('接入', 'primary tool-connect', () => connect(entry), !entry.canConnect || locked));
+      group.append(actionButton('接入', 'primary tool-connect', () => connect(entry), !entry.canConnect || broken || locked));
     }
     if (detailed && !entry.installed && !updates.get(entry.id)?.canUpgrade) {
       group.append(installationActions(entry, locked));
@@ -257,6 +344,10 @@
     if (detailed && update?.canUpgrade) {
       const button = actionButton(entry.installed ? '升级' : '继续升级', 'tool-upgrade', () => confirmUpgrade(entry), locked);
       button.title = `升级至官方最新版 ${update.targetVersion}`; group.append(button);
+    }
+    if (entry.installed || locations(entry).length) {
+      const menu = text('details','','tool-lifecycle-menu'); menu.dataset.liveKey = 'lifecycle-menu'; menu.append(text('summary','更多'));
+      menu.append(actionButton('卸载','danger tool-uninstall',event=>{event.currentTarget.closest('details').open=false;void confirmUninstall(entry);},locked)); group.append(menu);
     }
     return group;
   }
@@ -304,7 +395,7 @@
       const result = text('section', '', 'sheet'); result.append(text('h2', '最近一次接口文本测试'), detailRow('测试模型', connection.testResult.model), detailRow('测试时间', connection.testResult.testedAt), text('p', connection.testResult.detail), text('p', window.TokenMarketConnectionTests.scope, 'test-history-scope')); left.append(result);
     }
     const guidance = text('section', '', 'sheet'); guidance.append(text('h2', '使用前提醒'), text('p', '配置完成后，请完全退出并重新打开已有工具会话。'));
-    if (entry.id === 'qwenwork') guidance.append(text('p', '先登录并完全退出客户端后接入；重新打开后，在模型列表中选择 Token Market 模型。API Key 由 Token Market 在本机保管，模型请求通过本地代理转发。升级、降级或重新安装千问办公后，请返回 Token Market 点击“重新接入”；接入时会自动检查并修复配置，如提示尚未适配，请联系管理员适配。取消接入前也请完全退出。'));
+    if (entry.id === 'qwenwork') guidance.append(text('p', '接入或取消接入前，请完全退出千问办公；接入后重新打开，在模型列表中选择 Token Market 模型。'));
     if (entry.id === 'openclaw') guidance.append(text('p', 'OpenClaw 需要重启 Gateway 或会话，已有模型白名单仍可能限制可选模型。'));
     if (entry.id === 'opencode') guidance.append(text('p', '项目或运行时配置可能覆盖全局模型设置。'));
     left.append(guidance);
@@ -313,8 +404,8 @@
       context.append(text('h2', '连接归属'), detailRow('所属账号', connection.owner?.name || '未知账号'), detailRow('计费空间', connection.boundWorkspace?.name || '未知空间'), detailRow('安装状态', entry.installed ? '已安装' : '未安装'));
       context.append(text('p', '已有连接保留自己的计费空间。需要更换归属时，请确认重新接入。'));
     } else {
-      context.append(text('h2', '工具信息'), detailRow('安装状态', entry.installed ? '已安装' : '未安装'), detailRow('接入空间', window.TokenMarketWorkspace.current?.current_workspace?.name || '当前空间'));
-      context.append(text('p', '接入会配置模型和凭据，不会自动发起模型测试。'));
+      context.append(text('h2', '工具信息'), detailRow('安装状态', entry.installed ? '已安装' : '未安装'), detailRow('接入状态', '未接入'));
+      context.append(text('p', '接入后即可使用当前空间的模型。'));
     }
     grid.append(context, left); nextDetail.append(grid);
     for (const node of nextDetail.children) node.dataset.liveKey = [...node.classList].find(name => name.startsWith('tool-')) || node.classList[0] || node.tagName;
@@ -344,13 +435,19 @@
     } else if (!visible.length) {
       const empty = text('div', '', 'tools-empty'); empty.append(text('h2', '没有匹配的工具'), text('p', '试试其他名称，或查看全部工具。'), actionButton('查看全部工具', '', () => { search = ''; filter = 'all'; searchInput.value = ''; render(); })); nextList.append(empty);
     }
-    const ordered = [...visible.filter(entry => entry.installed), ...visible.filter(entry => !entry.installed)];
+    const ordered = [...visible.filter(isPresent), ...visible.filter(entry => !isPresent(entry))];
+    let previousGroup = null;
     ordered.forEach(entry => {
+      const group = isPresent(entry) ? '已安装' : '未安装';
+      if (!loading && group !== previousGroup) {const heading=text('h3',group,'tool-group-heading');heading.dataset.liveKey=group;nextList.append(heading);previousGroup=group;}
       const row = text('article', '', 'tool-row'); row.dataset.tool = entry.id;
       const name = actionButton('', 'tool-detail tool-name', () => showDetail(entry));
       name.setAttribute('aria-label', `查看 ${entry.name} 详情`);
       const title = text('span', '', 'tool-title');
-      title.append(text('strong', entry.name));
+      const heading = text('span','','tool-title-heading'); heading.append(text('strong',entry.name));
+      const badge = sourceLabel(selectedLocation(entry)?.method);
+      if (badge) heading.append(text('span',badge,'tool-install-method'));
+      title.append(heading);
       if (entry.connection?.models?.length) title.append(text('span', entry.connection.models.length === 1 ? entry.connection.models[0] : `${entry.connection.models.length} 个已配置模型`, 'tool-model-summary'));
       if (entry.connection?.boundWorkspace?.name) title.append(text('span', `计费：${entry.connection.boundWorkspace.name}`, 'tool-bound-summary'));
       name.append(toolIcon(entry), title);
@@ -451,7 +548,7 @@
     finally { disconnecting = false; if (authenticated && current === generation) render(); }
   }
   const reconnectDialog = document.createElement('dialog'); reconnectDialog.className = 'reconnect-dialog';
-  reconnectDialog.innerHTML = '<h3>确认重新接入</h3><p class="reconnect-from"></p><p class="reconnect-to"></p><p>将使用当前账号与空间更新此工具的连接，并重新读取可用模型。接入本身不会发起模型测试。</p><p class="qwenwork-reconnect-note" hidden>将重新生成 Token Market 管理的模型和本地接入配置，直接替换其中丢失或被修改的内容，保留其他模型、聊天和设置。若当前安装尚未适配，将保留原连接并提示联系管理员适配。</p><div class="tool-actions"><button class="reconnect-cancel">取消</button><button class="primary reconnect-confirm">确认重新接入</button></div>';
+  reconnectDialog.innerHTML = '<h3>确认重新接入</h3><p class="reconnect-from"></p><p class="reconnect-to"></p><p>将使用当前账号与空间重新接入此工具。</p><div class="tool-actions"><button class="reconnect-cancel">取消</button><button class="primary reconnect-confirm">确认重新接入</button></div>';
   document.body.append(reconnectDialog);
   reconnectDialog.querySelector('.reconnect-cancel').onclick = () => { pendingReconnect = null; reconnectDialog.close(); };
   reconnectDialog.addEventListener('cancel', () => { pendingReconnect = null; });
@@ -465,7 +562,6 @@
     const preview = await invoke('prepare_tool_reconnect', {tool:entry.id,expectedKeyId:entry.connection.keyId});
     if (!authenticated || current !== generation) return;
     pendingReconnect = {entry,preview};
-    reconnectDialog.querySelector('.qwenwork-reconnect-note').hidden = entry.id !== 'qwenwork';
     reconnectDialog.querySelector('.reconnect-from').textContent = `原连接：${preview.oldOwner.name} · ${preview.oldWorkspace.name}`;
     reconnectDialog.querySelector('.reconnect-to').textContent = `新连接：${preview.currentOwner.name} · ${preview.currentWorkspace.name}`;
     if (!reconnectDialog.open) reconnectDialog.showModal();
@@ -481,7 +577,7 @@
     await window.TokenMarketWorkspace.refresh();
     if (!authenticated || current !== generation) return;
     const context = window.TokenMarketWorkspace.current;
-    if (!context) { showResult('无法确认接入空间', '请先刷新账号与空间后重试。'); return; }
+    if (!context) { showConnectFailure(); return; }
     connectDialog.querySelector('h3').textContent = `接入 ${supportedConnections[tool]}`;
     pendingConnect = {tool,ownerId:context.user.id,workspaceId:context.current_workspace.id};
     connectDialog.querySelector('.connect-target').textContent = `账号：${context.user.display_name || context.user.user_name} · 计费空间：${context.current_workspace.name}`;
@@ -500,18 +596,18 @@
   const supportedConnections = {'claude-code':'Claude Code', codex:'Codex', 'deepseek-harness':'DeepSeek Harness',workbuddy:'WorkBuddy',openclaw:'OpenClaw',opencode:'OpenCode','grok-build':'Grok Build',hermes:'Hermes',pi:'Pi','minimax-code':'MiniMax Code','oh-my-pi':'Oh My Pi','kimi-code':'Kimi Code',dumate:'百度搭子 DuMate（个人版）','dumate-enterprise':'百度搭子 DuMate（企业版）',qwenwork:'千问办公'};
   let launchTool = 'claude-code';
   const dialog = document.createElement('dialog');
-  dialog.innerHTML = '<h3></h3><p class="restart-notice"></p><p>模型测试由你另行发起，可能产生少量费用。</p><div class="tool-actions"><button class="primary launch">打开终端运行 Claude Code</button><button class="close">完成</button></div><p class="launch-error" role="status"></p>';
+  dialog.innerHTML = '<h3></h3><p class="restart-notice"></p><div class="tool-actions"><button class="primary launch">打开终端运行 Claude Code</button><button class="close">完成</button></div><p class="launch-error" role="status"></p>';
   document.body.append(dialog);
   document.body.append(disconnectDialog);
   dialog.querySelector('.close').onclick = () => dialog.close();
   dialog.querySelector('.launch').onclick = async () => {
     try { await invoke('launch_connected_tool', {tool:launchTool}); dialog.close(); }
-    catch(error) { dialog.querySelector('.launch-error').textContent = String(error); }
+    catch(error) { dialog.querySelector('.launch-error').textContent = '打开失败，请联系管理员。'; }
   };
   window.addEventListener('tokenmarket-connect-request', event => {
     const tool = event.detail.tool;
     if (!supportedConnections[tool]) return;
-    event.preventDefault(); confirmInitialConnect(tool).catch(error => { if (authenticated) showResult('无法确认接入空间', String(error)); });
+    event.preventDefault(); confirmInitialConnect(tool).catch(() => { if (authenticated) showConnectFailure(); });
   });
   const recoveryDialog = document.createElement('dialog'); recoveryDialog.className = 'recovery-dialog';
   recoveryDialog.innerHTML = '<h3>确认恢复连接</h3><p>本机保存的连接信息已丢失。确认后将重新建立此工具的连接，并在接入成功后替换对应的旧凭证。</p><p class="recovery-scope"></p><p>其他账号、空间和工具的连接不受影响。</p><div class="tool-actions"><button class="recovery-cancel">暂不恢复</button><button class="primary recovery-confirm">确认恢复并接入</button></div>';
@@ -532,33 +628,31 @@
     const actionGeneration = generation;
     connecting = true; render(); feedback(`正在接入 ${name}，请稍候…`);
     try {
-      const result = replacement
-        ? await invoke('reconnect_tool', {tool,expectedKeyId:replacement.entry.connection.keyId,expectedOwnerId:replacement.preview.currentOwner.id,expectedWorkspaceId:replacement.preview.currentWorkspace.id,recovery})
-        : await invoke('connect_tool', {tool,recovery});
-      const connected = replacement ? result.connection : result;
+      await (replacement
+        ? invoke('reconnect_tool', {tool,expectedKeyId:replacement.entry.connection.keyId,expectedOwnerId:replacement.preview.currentOwner.id,expectedWorkspaceId:replacement.preview.currentWorkspace.id,recovery})
+        : invoke('connect_tool', {tool,recovery}));
       if (!authenticated || actionGeneration !== generation) return;
       await refresh(true);
       if (!authenticated || actionGeneration !== generation) return;
-      const modelNotice = !['claude-code','codex','dumate'].includes(tool) ? `已导入 ${connected.models.length} 个兼容模型，尚未测试。` : `已配置 ${connected.models[0]}，尚未测试。`;
-      feedback(`${name} ${modelNotice}`);
+      feedback('');
       launchTool = tool;
       dialog.querySelector('h3').textContent = `${name} 已接入`;
       const guidance = {
-        'deepseek-harness':'Harness 当前版本可在后续请求重新读取配置；若现有会话仍使用旧设置，请退出后重新打开所选 profile。',
-        qwenwork:'请重新打开千问办公，在模型列表中选择 Token Market 模型。API Key 由 Token Market 在本机保管，模型请求通过本地代理转发。升级、降级或重新安装千问办公后，请返回 Token Market 点击“重新接入”；接入时会自动检查并修复配置，如提示尚未适配，请联系管理员适配。接入与取消接入前须完全退出客户端；语音和多媒体等专项模型仍按千问办公自身配置使用。',
-        workbuddy:'请完全退出并重新打开 WorkBuddy，在模型列表中选择导入模型。',
-        openclaw:'请重启 OpenClaw Gateway 并重新打开会话。原有模型白名单或 agent 专属配置仍可能限制可选模型，请在 OpenClaw 中检查。',
-        opencode:'请退出并重新启动 OpenCode，在模型列表中选择导入模型。项目或运行时的配置覆盖仍按 OpenCode 自身规则生效。',
-        'dumate-enterprise':'请保持 DuMate 完全退出，在本工具详情中选择一个模型并确认费用测试。测试会保存该模型的真实检查状态；通过后重新打开 DuMate 企业版，在会话的模型列表中选择。其他导入模型仍需分别测试，取消接入前也请完全退出 DuMate。',
-        dumate:'请完全退出并重新打开 DuMate。个人版一次配置一个模型；接入时优先使用当前环境默认模型，不可用时保留有效原模型或选择目录中的首个可用模型。取消接入前也请先完全退出 DuMate。',
-        'kimi-code':'在 Kimi Code 的模型选择器中选择 Token Market 模型；已有默认模型和 Thinking 设置保持不变。',
-        'oh-my-pi':'在 Oh My Pi 中用 /model 选择 Token Market 模型；当前 profile 的既有模型角色保持不变。',
-        pi:'在 Pi 中打开 /model 选择 Token Market 模型；已有默认模型保持不变。',
-        'minimax-code':'请重新启动 MiniMax Code，在 /model 中选择 Token Market 模型。已有默认模型会保留；接入不会自动测试或切换模型。',
-        'grok-build':'请重新启动 Grok Build，通过 /model 选择 Token Market 模型。已有默认模型与其他登录信息会保留。',
-        hermes:'请重新启动 Hermes，通过 /model 选择 Token Market provider 下的模型。已有 provider 和默认模型选择会保留；命令行参数可能覆盖本地配置。',
+        'deepseek-harness':'请重新打开所选 profile。',
+        qwenwork:'请重新打开千问办公，在模型列表中选择 Token Market 模型。',
+        workbuddy:'请完全退出并重新打开 WorkBuddy，在模型列表中选择 Token Market 模型。',
+        openclaw:'请重启 OpenClaw Gateway 并重新打开会话。',
+        opencode:'请重新打开 OpenCode，在模型列表中选择 Token Market 模型。',
+        'dumate-enterprise':'请先在工具详情中测试所选模型，通过后重新打开 DuMate 并选择该模型。',
+        dumate:'请完全退出并重新打开 DuMate。',
+        'kimi-code':'请在模型列表中选择 Token Market 模型。',
+        'oh-my-pi':'请通过 /model 选择 Token Market 模型。',
+        pi:'请通过 /model 选择 Token Market 模型。',
+        'minimax-code':'请重新启动 MiniMax Code，通过 /model 选择 Token Market 模型。',
+        'grok-build':'请重新启动 Grok Build，通过 /model 选择 Token Market 模型。',
+        hermes:'请重新启动 Hermes，通过 /model 选择 Token Market 模型。',
       };
-      dialog.querySelector('.restart-notice').textContent = `${modelNotice} ${guidance[tool] || `现有 ${name} 会话需要退出后重新启动，新终端将读取接入配置。`}`;
+      dialog.querySelector('.restart-notice').textContent = guidance[tool] || `请重新启动 ${name}。`;
       dialog.querySelector('.launch').textContent = ['deepseek-harness','workbuddy','dumate','dumate-enterprise','qwenwork'].includes(tool) ? `打开 ${name}` : `打开工具 / 终端运行 ${name}`;
       dialog.querySelector('.launch-error').textContent = ''; dialog.showModal();
     } catch(error) {
@@ -568,7 +662,7 @@
           recoveryDialog.querySelector('.recovery-scope').textContent = `账号：${error.recovery.ownerName} · 计费空间：${error.recovery.workspaceName}`;
           recoveryDialog.showModal(); feedback('请确认是否恢复这条连接。');
         } else {
-          const message = error?.message || String(error); feedback(message, true); showResult('接入未完成', message);
+          showConnectFailure();
         }
       }
     }
@@ -580,8 +674,11 @@
   function confirmUpgrade(entry) {
     const update = updates.get(entry.id); if (!update?.canUpgrade || installing || batching || checking) return;
     upgradeConfirm.replaceChildren(text('h3', `升级 ${entry.name}`), text('p', `${update.currentVersion} → ${update.targetVersion}`, 'upgrade-version'), text('p', '将升级到当前检查到的官方最新版。请先完全退出该工具；升级后重新打开，已有连接无需重新接入。'));
+    if (locations(entry).length > 1) upgradeConfirm.append(installationPanel(entry));
+    if (update.upgradePath) upgradeConfirm.append(pathRow('本次升级入口',update.upgradePath));
+    if (update.upgradeCommand) upgradeConfirm.append(text('pre',update.upgradeCommand,'tool-upgrade-command'));
     const buttons = text('div', '', 'tool-actions');
-    buttons.append(actionButton('取消', '', () => upgradeConfirm.close()), actionButton('确认升级', 'primary', () => { upgradeConfirm.close(); void install(entry, true); }));
+    buttons.append(actionButton('取消', '', () => upgradeConfirm.close()), actionButton('确认升级', 'primary', () => { upgradeConfirm.close(); void install(entry, true, update); }));
     upgradeConfirm.append(buttons); upgradeConfirm.showModal();
   }
   const batchDialog = document.createElement('dialog'); batchDialog.className = 'tool-batch-upgrade-dialog'; document.body.append(batchDialog);
@@ -625,7 +722,7 @@
         try {
           const state = await runInstaller(job.entry, true, current, state => {
             job.status.textContent = (installStages[state.stage] || '升级中').replaceAll('安装','升级'); job.status.title = state.detail || '';
-          }, () => batchStop);
+          }, () => batchStop, job.update);
           if (!state) { skipped = jobs.length-index-1; break; }
           if (state.stage === 'succeeded') { succeeded++; updates.delete(job.entry.id); }
           else { failed++; job.status.textContent = state.stage === 'cancelled' ? '已停止' : `升级失败：${state.detail || '请单独重试'}`; }
@@ -665,7 +762,7 @@
         const available = installed.filter(update => update.canUpgrade).length;
         const manual = installed.filter(update => update.manualUpgrade).length;
         const restricted = installed.filter(update => update.state === 'unsupported_update').length;
-        const failed = installed.filter(update => ['check_failed','unknown','busy'].includes(update.state)).length;
+        const failed = installed.filter(update => ['check_failed','unknown','busy','broken','node_required'].includes(update.state)).length;
         updateStatus.textContent = `已检查 ${installed.length} 个已安装工具 · ${available} 个可升级${manual ? ` · ${manual} 个需手动更新` : ''}${restricted ? ` · ${restricted} 个接入适配需更新` : ''}${failed ? ` · ${failed} 个检查未完成，可重试` : ''} · ${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`;
       } catch (error) {
         if (!silent && authenticated && current === generation) { updates.clear(); updateStatus.textContent = `检查未完成：${String(error)}`; }
@@ -688,6 +785,7 @@
       if (value === authenticated) return;
       authenticated = value; generation += 1;
       if (!value && installDialog.open) installDialog.close();
+      if (uninstallDialog.open) uninstallDialog.close();
       window.dispatchEvent(new CustomEvent('tokenmarket-tools-auth', {detail:{authenticated:value}}));
       checking = false; updatePending = null; checkRequested = false; updates.clear(); expandedInstallations.clear(); updateStatus.textContent = '';
       if (upgradeConfirm.open) upgradeConfirm.close();

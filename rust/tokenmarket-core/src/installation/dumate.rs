@@ -72,7 +72,8 @@ pub(super) fn plan(
             download: None,
         }
     };
-    Ok(InstallPlan {tool: ToolId::DuMate, version: VERSION.into(), command: "dumate".into(), steps: vec![
+    Ok(InstallPlan {
+        method: super::InstallMethod::Desktop,tool: ToolId::DuMate, version: VERSION.into(), command: "dumate".into(), steps: vec![
         InstallStep {stage: InstallStage::Downloading, program: String::new(), args: vec![], environment: vec![], download: Some((format!("https://dumate-app-public.cdn.bcebos.com/release-info/artifacts-update/{filename}"), package))},
         step, handoff,
     ]})

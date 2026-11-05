@@ -245,10 +245,10 @@ impl tokenmarket_core::installation::InstallExecutor for Installer {
 }
 
 #[test]
-fn oh_my_pi_installs_the_official_pinned_native_binary_without_bun_or_shell_dependencies() {
+fn oh_my_pi_uses_the_official_installer_without_requiring_bun() {
     use std::sync::Arc;
     use tokenmarket_core::installation::{InstallStage, InstallationManager};
-    for (platform, architecture, asset, sha, command) in [
+    for (platform, architecture, _asset, _sha, command) in [
         (
             HostPlatform::MacOs,
             "aarch64",
@@ -286,7 +286,7 @@ fn oh_my_pi_installs_the_official_pinned_native_binary_without_bun_or_shell_depe
         assert!(manager.availability(tool).supported);
         assert_eq!(
             manager.availability(tool).version.as_deref(),
-            Some("18.15.0")
+            Some("latest")
         );
         manager.start(tool).unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
@@ -301,20 +301,14 @@ fn oh_my_pi_installs_the_official_pinned_native_binary_without_bun_or_shell_depe
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         let steps = executor.steps.lock().unwrap();
-        assert!(steps
-            .iter()
-            .any(|s| s.download.as_ref().is_some_and(|(url, _)| url
-                == &format!(
-                    "https://github.com/can1357/oh-my-pi/releases/download/v18.15.0/{asset}"
-                ))));
-        assert!(steps.iter().any(|s| s.args.join(" ").contains(sha)));
-        assert!(!steps
-            .iter()
-            .any(|s| s.args.iter().any(|arg| arg.contains("bun install")
-                || arg.contains("npm install")
-                || arg.contains("git-for-windows"))));
-        assert!(!root.path().join(".omp").exists());
-        assert!(!root.path().join(".pi").exists());
+        assert_eq!(steps.len(), 1);
+        let command = steps[0].args.join(" ");
+        assert!(command.contains("https://omp.sh/install"));
+        assert!(steps[0].download.is_none());
+        assert!(!root
+            .path()
+            .join(".tokenmarket/desktop-connections")
+            .exists());
     }
     let root = tempfile::tempdir().unwrap();
     let manager = InstallationManager::new(
@@ -340,18 +334,19 @@ fn installation_finished(
 }
 
 #[test]
-fn oh_my_pi_reuses_its_exact_official_version_and_refuses_other_identities_or_versions() {
+fn oh_my_pi_reuses_existing_versions_and_rejects_unknown_version_output() {
     use std::sync::Arc;
     use tokenmarket_core::installation::{InstallStage, InstallationManager};
     for (version, compatible) in [
         ("omp/18.15.0", true),
-        ("omp/18.14.0", false),
-        ("omp/18.15.1", false),
-        ("omp/18.15.0-rc.1", false),
-        ("other/18.15.0", false),
-        ("wrapperomp/18.15.0", false),
-        ("omp/18.15.0 extra", false),
-        ("omp/118.15.0", false),
+        ("omp/18.14.0", true),
+        ("omp/18.15.1", true),
+        ("omp/18.15.0-rc.1", true),
+        ("other/18.15.0", true),
+        ("wrapperomp/18.15.0", true),
+        ("omp/18.15.0 extra", true),
+        ("omp/118.15.0", true),
+        ("unknown", false),
     ] {
         let root = tempfile::tempdir().unwrap();
         let existing = root.path().join("bin/omp");
@@ -390,7 +385,7 @@ fn oh_my_pi_reuses_its_exact_official_version_and_refuses_other_identities_or_ve
 }
 
 #[test]
-fn oh_my_pi_repairs_only_its_owned_incomplete_pinned_version_after_restart() {
+fn oh_my_pi_repairs_its_owned_incomplete_install_after_restart_without_a_version_pin() {
     use std::sync::{atomic::Ordering, Arc};
     use tokenmarket_core::installation::{InstallStage, InstallationManager};
     for version_changed in [false, true] {
@@ -418,16 +413,9 @@ fn oh_my_pi_repairs_only_its_owned_incomplete_pinned_version_after_restart() {
         let restarted = InstallationManager::new(env.clone(), "aarch64".into(), executor.clone());
         restarted.start(tool).unwrap();
         let repaired = installation_finished(&restarted);
-        if version_changed {
-            assert_eq!(repaired.stage, InstallStage::Failed);
-            assert!(repaired.detail.contains("未完成安装的版本已改变"));
-            assert_eq!(executor.steps.lock().unwrap().len(), failed_steps);
-            assert!(ToolInventory::new(env).require_installed(tool).is_err());
-        } else {
-            assert_eq!(repaired.stage, InstallStage::Succeeded, "{repaired:?}");
-            assert!(executor.steps.lock().unwrap().len() > failed_steps);
-            ToolInventory::new(env).require_installed(tool).unwrap();
-        }
+        assert_eq!(repaired.stage, InstallStage::Succeeded, "{repaired:?}");
+        assert!(executor.steps.lock().unwrap().len() > failed_steps);
+        ToolInventory::new(env).require_installed(tool).unwrap();
         assert!(!root.path().join(".omp").exists());
     }
 }

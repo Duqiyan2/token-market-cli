@@ -379,10 +379,10 @@ impl tokenmarket_core::installation::InstallExecutor for Installer {
     }
 }
 #[test]
-fn pi_installs_verified_official_standalone_archives_and_redetects_without_connection() {
+fn pi_installs_the_npm_release_and_redetects_without_connection() {
     use std::sync::Arc;
     use tokenmarket_core::installation::{InstallStage, InstallationManager};
-    for (platform, architecture, asset, sha, command) in [
+    for (platform, architecture, _asset, _sha, command) in [
         (
             HostPlatform::MacOs,
             "aarch64",
@@ -420,7 +420,10 @@ fn pi_installs_verified_official_standalone_archives_and_redetects_without_conne
             installer.clone(),
         );
         assert!(manager.availability(tool).supported);
-        assert_eq!(manager.availability(tool).version.as_deref(), Some("1.4.0"));
+        assert_eq!(
+            manager.availability(tool).version.as_deref(),
+            Some("latest")
+        );
         manager.start(tool).unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
         loop {
@@ -434,25 +437,14 @@ fn pi_installs_verified_official_standalone_archives_and_redetects_without_conne
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         let steps = installer.steps.lock().unwrap();
-        assert!(steps
-            .iter()
-            .any(|s| s.download.as_ref().is_some_and(|(url, _)| url
-                == &format!(
-                    "https://github.com/earendil-works/pi/releases/download/v1.4.0/{asset}"
-                ))));
-        assert!(steps.iter().any(|s| s.args.join(" ").contains(sha)));
-        assert!(!steps.iter().any(|s| s
-            .args
-            .iter()
-            .any(|a| a.contains("npm install") || a.contains("pi.dev/install"))));
-        assert!(!root.path().join(".pi").exists());
-        if platform == HostPlatform::Windows {
-            assert!(steps
-                .iter()
-                .any(|s| s.download.as_ref().is_some_and(|(url, _)| url.contains(
-                    "git-for-windows/git/releases/download/v2.56.0.windows.4/PortableGit"
-                ))));
-        }
+        assert_eq!(steps.len(), 1);
+        let command = steps[0].args.join(" ");
+        assert!(command.contains("@earendil-works/pi-coding-agent@latest"));
+        assert!(steps[0].download.is_none());
+        assert!(!root
+            .path()
+            .join(".tokenmarket/desktop-connections")
+            .exists());
     }
 }
 

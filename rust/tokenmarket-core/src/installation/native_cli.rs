@@ -74,6 +74,7 @@ pub(super) fn plan_version(
     }
     args.push(version.into());
     Ok(InstallPlan {
+        method: super::InstallMethod::Script,
         tool,
         version: version.into(),
         command: command.into(),

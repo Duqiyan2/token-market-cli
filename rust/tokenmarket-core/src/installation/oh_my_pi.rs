@@ -111,6 +111,7 @@ chmod u+x "$2/omp"
         )
     };
     Ok(InstallPlan {
+        method: super::InstallMethod::Standalone,
         tool: ToolId::OhMyPi,
         version: version.into(),
         command: "omp".into(),

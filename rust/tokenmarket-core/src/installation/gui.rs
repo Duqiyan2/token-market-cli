@@ -99,6 +99,7 @@ pub(super) fn plan(
         }
     };
     Ok(InstallPlan {
+        method: super::InstallMethod::Desktop,
         tool,
         version: version.into(),
         command: "workbuddy".into(),
@@ -208,6 +209,7 @@ fn harness_plan(environment: &InstallationEnvironment, architecture: &str) -> Re
         });
     }
     Ok(InstallPlan {
+        method: super::InstallMethod::Desktop,
         tool: ToolId::DeepSeekHarness,
         version: version.into(),
         command: "dsh".into(),

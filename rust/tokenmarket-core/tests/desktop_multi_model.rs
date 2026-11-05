@@ -124,6 +124,78 @@ fn read(path: &std::path::Path) -> Value {
 }
 
 #[tokio::test]
+async fn workbuddy_disconnect_removes_adopted_platform_models_without_restoring_legacy_credentials()
+{
+    use tokenmarket_core::connections::DisconnectRequest;
+    for wrapped in [false, true] {
+        let root = tempdir().unwrap();
+        let inventory = inventory(root.path());
+        let path = root.path().join("models.json");
+        let catalogue = json!({"data":[{"id":"current","model_types":["TEXT_GENERATION"]}]});
+        let (url, server) = platform_sequence(
+            vec![catalogue.clone(), catalogue],
+            if wrapped { 3 } else { 2 },
+        )
+        .await;
+        let manual =
+            json!({"id":"manual","vendor":"Other","url":"https://manual","apiKey":"manual-secret"});
+        let legacy = |id| json!({"id":id,"vendor":"Token Market","name":id,"url":format!("{url}/v1/chat/completions"),"apiKey":"legacy-secret","supportsToolCall":true});
+        let other_environment = json!({"id":"elsewhere","vendor":"Token Market","url":"https://other.example/v1/chat/completions","apiKey":"other-environment"});
+        let rows = json!([
+            manual.clone(),
+            other_environment.clone(),
+            legacy("current"),
+            legacy("obsolete")
+        ]);
+        let original = if wrapped {
+            json!({"models":rows,"availableModels":["manual","elsewhere","current","obsolete"],"custom":"keep"})
+        } else {
+            rows
+        };
+        std::fs::write(&path, serde_json::to_vec(&original).unwrap()).unwrap();
+        let manager = support::manager(root.path().join("state"), url.clone(), url);
+        manager
+            .connect(context(), ToolId::WorkBuddy, &inventory, path.clone())
+            .await
+            .unwrap();
+        if wrapped {
+            manager
+                .reconnect(
+                    context(),
+                    ToolId::WorkBuddy,
+                    "9001",
+                    &inventory,
+                    path.clone(),
+                )
+                .await
+                .unwrap();
+        }
+        server.await.unwrap();
+        let outcome = manager
+            .disconnect(
+                ToolId::WorkBuddy,
+                "9001",
+                None,
+                DisconnectRequest::default(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(outcome.state, "disconnected");
+        let restored = read(&path);
+        let expected = if wrapped {
+            json!({"models":[manual,other_environment],"availableModels":["manual","elsewhere"],"custom":"keep"})
+        } else {
+            json!([manual, other_environment])
+        };
+        assert_eq!(
+            restored, expected,
+            "disconnect revived legacy platform models"
+        );
+        assert!(manager.list().unwrap().is_empty());
+    }
+}
+
+#[tokio::test]
 async fn workbuddy_imports_all_compatible_models_and_restores_only_owned_fields_after_reordering() {
     use tokenmarket_core::connections::DisconnectRequest;
     for original in [

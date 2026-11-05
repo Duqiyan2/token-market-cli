@@ -15,6 +15,7 @@ function render(status) {
   const signedIn = Boolean(status.context);
   window.TokenMarketShell?.setAuthenticated(status.context);
   window.TokenMarketWorkspace?.setAuthenticated(status.context);
+  window.TokenMarketUsage?.setAuthenticated(status.context);
   el('login').hidden = signedIn || window.TokenMarketShell?.page === 'settings';
   el('signed-in').hidden = !signedIn;
   window.TokenMarketTools?.setAuthenticated(signedIn);

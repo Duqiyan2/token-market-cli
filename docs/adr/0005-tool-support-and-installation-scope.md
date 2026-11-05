@@ -7,6 +7,10 @@ not prove that a tool is installed and usable.
 
 ## Installation behavior
 
+The installation-channel and version-selection decisions below are superseded by
+[ADR 0006](0006-cc-switch-tool-lifecycle.md). The separate model-configuration
+and verification contract remains applicable.
+
 - Reuse compatible installations without automatically upgrading them. Prepare
   missing dependencies in a user-level or tool-private directory when possible.
 - For graphical installers, open the official installer and let the user complete

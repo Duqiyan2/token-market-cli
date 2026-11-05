@@ -416,7 +416,7 @@ impl tokenmarket_core::installation::InstallExecutor for Installer {
     }
 }
 #[test]
-fn hermes_install_uses_the_immutable_stable_source_and_skips_configuration_maintenance() {
+fn hermes_install_uses_the_official_current_script_and_skips_configuration_maintenance() {
     use std::{
         sync::Arc,
         time::{Duration, Instant},
@@ -449,11 +449,11 @@ fn hermes_install_uses_the_immutable_stable_source_and_skips_configuration_maint
         std::thread::sleep(Duration::from_millis(5));
     }
     let steps = executor.steps.lock().unwrap();
-    assert_eq!(steps[0].download.as_ref().unwrap().0,"https://raw.githubusercontent.com/NousResearch/hermes-agent/bf0203a794a07aac3ff764972ab9087baa4e4f4e/scripts/install.sh");
     let execution = steps.last().unwrap().args.join(" ");
-    assert!(execution.contains("--commit"));
-    assert!(execution.contains("bf0203a794a07aac3ff764972ab9087baa4e4f4e"));
-    assert!(execution.contains("--non-interactive"));
+    assert!(execution.contains(
+        "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh"
+    ));
+    assert!(!execution.contains("--commit"));
     assert!(!execution.contains("stage_config"));
     assert!(!execution.contains("stage_products"));
     assert!(!execution.contains("_run_post_update_maintenance"));

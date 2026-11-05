@@ -112,7 +112,7 @@ fn finished(manager: &InstallationManager, tool: ToolId) -> InstallStatus {
 }
 
 #[test]
-fn native_claude_and_codex_install_exact_official_versions_and_preserve_configuration() {
+fn claude_and_codex_follow_upstream_install_routes_and_preserve_configuration() {
     for platform in [
         HostPlatform::MacOs,
         HostPlatform::Unix,
@@ -127,7 +127,7 @@ fn native_claude_and_codex_install_exact_official_versions_and_preserve_configur
             let (manager, installer) = fixture(&home, platform, tool, version);
             let availability = manager.availability(tool);
             assert!(availability.supported, "{tool}: {:?}", availability.reason);
-            assert_eq!(availability.version.as_deref(), Some(version));
+            assert_eq!(availability.version.as_deref(), Some("latest"));
             manager.start(tool).unwrap();
             let status = finished(&manager, tool);
             assert_eq!(status.stage, InstallStage::Succeeded, "{}", status.detail);
@@ -140,37 +140,14 @@ fn native_claude_and_codex_install_exact_official_versions_and_preserve_configur
             assert!(!home.join(".tokenmarket/desktop-connections").exists());
             assert!(!home.join(".tokenmarket/client-keys").exists());
             let steps = installer.steps.lock().unwrap();
-            assert_eq!(steps.len(), 2);
-            let expected_url = match (tool, platform) {
-                (ToolId::ClaudeCode, HostPlatform::Windows) => "https://claude.ai/install.ps1",
-                (ToolId::ClaudeCode, _) => "https://claude.ai/install.sh",
-                (ToolId::Codex, HostPlatform::Windows) => "https://chatgpt.com/codex/install.ps1",
-                (ToolId::Codex, _) => "https://chatgpt.com/codex/install.sh",
-                _ => unreachable!(),
-            };
-            assert_eq!(steps[0].download.as_ref().unwrap().0, expected_url);
-            assert_eq!(steps[1].args.last().unwrap(), version);
-            assert!(!steps[1]
-                .environment
-                .iter()
-                .any(|(key, _)| key == "CODEX_HOME"));
-            if tool == ToolId::Codex {
-                let release_argument = if platform == HostPlatform::Windows {
-                    "-Release"
-                } else {
-                    "--release"
-                };
-                assert_eq!(steps[1].args[steps[1].args.len() - 2], release_argument);
-                assert!(steps[1]
-                    .environment
-                    .contains(&("CODEX_NON_INTERACTIVE".into(), "1".into())));
-                assert!(steps[1].environment.contains(&(
-                    "CODEX_INSTALL_DIR".into(),
-                    home.join(".tokenmarket/tools/codex/bin")
-                        .to_string_lossy()
-                        .into_owned()
-                )));
+            assert_eq!(steps.len(), 1);
+            let command = steps[0].args.join(" ");
+            if tool == ToolId::ClaudeCode && platform != HostPlatform::Windows {
+                assert!(command.contains("https://claude.ai/install.sh"));
+            } else {
+                assert!(command.contains("@latest"));
             }
+            assert!(!command.contains("--release"));
         }
     }
 }
@@ -180,7 +157,7 @@ fn compatible_installs_are_reused_and_unknown_versions_are_not_upgraded() {
     for (tool, version) in [(ToolId::ClaudeCode, "2.1.309"), (ToolId::Codex, "0.166.0")] {
         for compatible in [true, false] {
             let root = tempfile::tempdir().unwrap();
-            let reported = if compatible { version } else { "99.0.0" };
+            let reported = if compatible { version } else { "unknown" };
             let (manager, installer) = fixture(root.path(), HostPlatform::MacOs, tool, reported);
             executable(&installer.executable);
             manager.start(tool).unwrap();

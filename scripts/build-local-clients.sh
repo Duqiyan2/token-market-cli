@@ -17,6 +17,7 @@ local_sign init
 cargo build --release --locked --manifest-path "$root/rust/tokenmarket-cli/Cargo.toml"
 bash "$root/scripts/build-local-desktop.sh" --bundles app
 local_sign smoke
+local_sign native-smoke
 local_sign package \
   --app "$root/src-tauri/target/release/bundle/macos/Token Market Local.app" \
   --cli "$root/rust/tokenmarket-cli/target/release/tokenmarket" --output "$output"

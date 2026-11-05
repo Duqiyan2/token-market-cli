@@ -99,15 +99,10 @@ fn installs_an_official_opencode_v1_archive_and_detects_it_before_reporting_succ
     assert!(state.installed);
     assert_eq!(state.version.as_deref(), Some("1.19.5"));
     let steps = executor.steps.lock().unwrap();
-    let download = steps
-        .iter()
-        .find_map(|step| step.download.as_ref())
-        .unwrap();
-    assert_eq!(download.0, "https://github.com/anomalyco/opencode/releases/download/v1.19.5/opencode-darwin-x64-baseline.zip");
-    assert!(steps.iter().any(|step| step
-        .args
-        .iter()
-        .any(|arg| arg == "e1235374cb7e712cdc15e21ba915a029a5d22312b460606d0783754739706775")));
+    assert_eq!(steps.len(), 1);
+    let command = steps[0].args.join(" ");
+    assert!(command.contains("https://opencode.ai/install"));
+    assert!(command.contains("opencode-ai@latest"));
     assert!(!root
         .path()
         .join(".tokenmarket/desktop-connections")
@@ -126,23 +121,15 @@ fn an_existing_stable_v1_is_reused_without_upgrading_to_the_catalogue_pin() {
 
 #[cfg(unix)]
 #[test]
-fn native_checksum_failure_never_extracts_or_publishes_an_untrusted_archive() {
-    use tokenmarket_core::installation::NativeInstallExecutor;
+fn installer_result_without_a_valid_version_does_not_publish_a_connection() {
     let root = tempfile::tempdir().unwrap();
-    let (manager, executor) = fixture(root.path(), HostPlatform::MacOs, "1.19.5");
+    let (manager, _executor) = fixture(root.path(), HostPlatform::MacOs, "unknown");
     manager.start(ToolId::OpenCode).unwrap();
-    assert_eq!(finished(&manager).stage, InstallStage::Succeeded);
-    let steps = executor.steps.lock().unwrap();
-    let archive = &steps[0].download.as_ref().unwrap().1;
-    std::fs::create_dir_all(archive.parent().unwrap()).unwrap();
-    std::fs::write(archive, "not the official release archive").unwrap();
-    let mut output = vec![];
-    let result = NativeInstallExecutor.execute(&steps[1], &AtomicBool::new(false), &mut |line| {
-        output.push(line)
-    });
-    assert!(result.is_err());
-    assert!(output.iter().any(|line| line.contains("SHA256")));
-    assert!(!root.path().join(".tokenmarket/tools/opencode/bin").exists());
+    assert_eq!(finished(&manager).stage, InstallStage::Failed);
+    assert!(!root
+        .path()
+        .join(".tokenmarket/desktop-connections")
+        .exists());
 }
 
 #[tokio::test]
@@ -186,7 +173,11 @@ async fn an_active_install_blocks_connect_even_after_its_binary_becomes_visible(
         .unwrap_err();
     installer.cancel(ToolId::OpenCode).unwrap();
     assert_eq!(finished(&installer).stage, InstallStage::Cancelled);
-    assert!(error.to_string().contains("正在安装"));
+    let message = error.to_string();
+    assert!(
+        message.contains("正在安装") || message.contains("安装尚未完成"),
+        "unexpected installation guard error: {message}"
+    );
     assert_eq!(
         std::fs::read_to_string(config).unwrap(),
         "{\"model\":\"manual/original\"}"

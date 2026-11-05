@@ -239,50 +239,55 @@ async fn qwenwork_connection_never_writes_the_platform_key_into_tool_configurati
 #[tokio::test]
 async fn qwenwork_migrates_legacy_key_rows_and_never_restores_them_on_disconnect() {
     use base64::Engine;
-    let root = tempfile::tempdir().unwrap();
-    let (inventory, path, env) = fixture(root.path());
-    let legacy_worker = root
-        .path()
-        .join(".qwenworkcn/tokenmarket-direct-sdk/dist/_worker/qoder-worker-runtime.obf.mjs");
-    std::fs::write(
-        &env,
-        format!("QW_QODER_WORKER_RUNTIME_PATH={}\n", legacy_worker.display()),
-    )
-    .unwrap();
-    let (url, server) = platform(vec![catalogue()], 2).await;
-    let encoded = base64::engine::general_purpose::STANDARD.encode("sk-qwenwork-fixture");
-    let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute("INSERT INTO byok_custom_models(key,display_name,model,url,provider,style,encrypted_parameters,extra_params) VALUES (?1,'Legacy model','old-model',?2,'openai','openai',?3,'{\"tokenmarket\":1}')",
-        rusqlite::params!["byok-tokenmarket-legacy",format!("{url}/v1/chat/completions"),json!({"api_key":{"encoding":"plainBase64","value":encoded}}).to_string()]).unwrap();
-    drop(db);
-    let manager = qwen_manager(root.path().join("state"), url.clone(), url);
-    let connected = manager
-        .connect(context(), ToolId::QwenWork, &inventory, path.clone())
-        .await
-        .unwrap();
-    server.await.unwrap();
-    assert_eq!(model_count(&path), 3);
-    assert!(!std::fs::read(&path)
-        .unwrap()
-        .windows(encoded.len())
-        .any(|v| v == encoded.as_bytes()));
-    manager
-        .disconnect(
-            ToolId::QwenWork,
-            &connected.key_id,
-            None,
-            DisconnectRequest::default(),
+    for runtime in [
+        "tokenmarket-direct-sdk",
+        "tokenmarket-local-sdk-v2/previous",
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let (inventory, path, env) = fixture(root.path());
+        let legacy_worker = root.path().join(format!(
+            ".qwenworkcn/{runtime}/dist/_worker/qoder-worker-runtime.obf.mjs"
+        ));
+        std::fs::write(
+            &env,
+            format!("QW_QODER_WORKER_RUNTIME_PATH={}\n", legacy_worker.display()),
         )
-        .await
         .unwrap();
-    assert_eq!(model_count(&path), 1);
-    assert!(!std::fs::read_to_string(env)
-        .unwrap()
-        .contains("tokenmarket-direct-sdk"));
-    assert!(!std::fs::read(&path)
-        .unwrap()
-        .windows(encoded.len())
-        .any(|v| v == encoded.as_bytes()));
+        let (url, server) = platform(vec![catalogue()], 2).await;
+        let encoded = base64::engine::general_purpose::STANDARD.encode("sk-qwenwork-fixture");
+        let db = rusqlite::Connection::open(&path).unwrap();
+        db.execute("INSERT INTO byok_custom_models(key,display_name,model,url,provider,style,encrypted_parameters,extra_params) VALUES (?1,'Legacy model','old-model',?2,'openai','openai',?3,'{\"tokenmarket\":1}')",
+        rusqlite::params!["byok-tokenmarket-legacy",format!("{url}/v1/chat/completions"),json!({"api_key":{"encoding":"plainBase64","value":encoded}}).to_string()]).unwrap();
+        drop(db);
+        let manager = qwen_manager(root.path().join("state"), url.clone(), url);
+        let connected = manager
+            .connect(context(), ToolId::QwenWork, &inventory, path.clone())
+            .await
+            .unwrap();
+        server.await.unwrap();
+        assert_eq!(model_count(&path), 3);
+        assert!(!std::fs::read(&path)
+            .unwrap()
+            .windows(encoded.len())
+            .any(|v| v == encoded.as_bytes()));
+        manager
+            .disconnect(
+                ToolId::QwenWork,
+                &connected.key_id,
+                None,
+                DisconnectRequest::default(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(model_count(&path), 1);
+        assert!(!std::fs::read_to_string(env)
+            .unwrap()
+            .contains("QW_QODER_WORKER_RUNTIME_PATH="));
+        assert!(!std::fs::read(&path)
+            .unwrap()
+            .windows(encoded.len())
+            .any(|v| v == encoded.as_bytes()));
+    }
 }
 
 #[tokio::test]
@@ -402,7 +407,8 @@ fn qwenwork_discovers_only_official_app_and_keeps_platform_config_paths() {
     assert!(update.manual_upgrade);
     assert!(update.note.contains("升级、降级或重新安装"));
     assert!(update.note.contains("重新接入"));
-    assert!(update.note.contains("联系管理员适配"));
+    assert!(update.note.contains("如接入失败，请联系管理员"));
+    assert!(!update.note.contains("修复配置"));
     assert!(!update.note.contains("1.5.0"));
 
     std::fs::write(

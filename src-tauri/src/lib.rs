@@ -4,6 +4,7 @@ pub mod client_update;
 mod client_update;
 mod connections;
 mod installation;
+mod usage;
 mod window_lifecycle;
 mod workspace;
 use std::sync::{
@@ -268,6 +269,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            usage::desktop_usage_logs,
+            usage::desktop_usage_buckets,
             workspace::desktop_workspace_context,
             workspace::switch_desktop_workspace,
             workspace::open_desktop_account_page,
@@ -281,6 +284,8 @@ pub fn run() {
             prepare_tool_connect,
             download_tool,
             installation::start_tool_installation,
+            installation::tool_uninstall_candidates,
+            installation::start_tool_uninstall,
             installation::check_tool_updates,
             installation::start_tool_upgrade,
             installation::tool_installation_status,

@@ -20,6 +20,23 @@ pub struct ToolUpdate {
     pub manual_upgrade: bool,
     pub state: String,
     pub note: String,
+    pub installations: Vec<InstallationInspection>,
+    pub upgrade_path: Option<String>,
+    pub upgrade_command: Option<String>,
+    pub upgrade_revision: Option<String>,
+    pub needs_confirmation: bool,
+    pub conflict: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallationInspection {
+    #[serde(flatten)]
+    pub location: crate::inventory::InstallationLocation,
+    pub version: Option<String>,
+    pub runnable: bool,
+    pub error: Option<String>,
+    pub is_path_default: bool,
 }
 
 // Vendor --version output may include a command name or tag prefix. Refuse
@@ -71,6 +88,37 @@ pub fn compare_versions(left: &str, right: &str) -> Option<Ordering> {
     })
 }
 impl InstallationManager {
+    pub fn inspect_installations(&self, tool: ToolId) -> Vec<InstallationInspection> {
+        let default = self
+            .environment
+            .path_default_command(tool.command())
+            .and_then(|p| p.canonicalize().ok());
+        ToolInventory::new(self.environment.clone())
+            .installation_locations(tool)
+            .into_iter()
+            .map(|location| {
+                let path = std::path::Path::new(&location.path);
+                let is_path_default = default.is_some() && path.canonicalize().ok() == default;
+                let result = if location.method == "桌面应用" {
+                    self.executor.tool_application_version(tool, path)
+                } else {
+                    self.executor.version(path)
+                };
+                let (version, runnable, error) = match result {
+                    Ok(v) if version(&v).is_some() => (Some(v), true, None),
+                    Ok(_) => (None, false, Some("无法读取有效版本，请检查安装".into())),
+                    Err(e) => (None, false, Some(e.to_string())),
+                };
+                InstallationInspection {
+                    location,
+                    version,
+                    runnable,
+                    error,
+                    is_path_default,
+                }
+            })
+            .collect()
+    }
     pub(super) fn validate_upgrade(&self, plan: &InstallPlan) -> Result<()> {
         let probe = self
             .environment
@@ -109,6 +157,12 @@ impl InstallationManager {
             manual_upgrade: false,
             state: "not_installed".into(),
             note: "未安装".into(),
+            installations: vec![],
+            upgrade_path: None,
+            upgrade_command: None,
+            upgrade_revision: None,
+            needs_confirmation: false,
+            conflict: false,
         };
         let inventory = ToolInventory::new(self.environment.clone());
         if !inventory.is_installed(tool) && self.environment.command_path(tool.command()).is_none()
@@ -120,16 +174,32 @@ impl InstallationManager {
             result.note = "工具正在安装、升级或接入，请完成后重试".into();
             return result;
         };
+        result.installations = self.inspect_installations(tool);
+        result.needs_confirmation = result.installations.len() >= 2;
+        result.conflict = result.installations.len() >= 2
+            && result.installations.iter().any(|p| {
+                p.version != result.installations[0].version
+                    || p.runnable != result.installations[0].runnable
+            });
         result.current_version = self
             .installed_version(tool)
             .ok()
             .flatten()
             .filter(|v| version(v).is_some());
+        if result.current_version.is_none() && !result.installations.is_empty() {
+            result.state = "broken".into();
+            result.note = result
+                .installations
+                .first()
+                .and_then(|p| p.error.clone())
+                .unwrap_or_else(|| "已检测到安装，但无法运行".into());
+            return result;
+        }
         if tool == ToolId::QwenWork {
             result.state = "manual_update".into();
             result.manual_upgrade = true;
             result.note =
-                "请通过官网或客户端更新千问办公；升级、降级或重新安装后，请点击“重新接入”，程序会自动检查并修复配置；如提示尚未适配，请联系管理员适配"
+                "请通过官网或客户端更新千问办公；升级、降级或重新安装后，请点击“重新接入”。如接入失败，请联系管理员"
                     .into();
             return result;
         }
@@ -150,9 +220,45 @@ impl InstallationManager {
             &self.environment,
             &self.architecture,
             digest.as_deref(),
+            result.current_version.as_deref(),
         );
         let pending = match &route {
             Ok(upgrades::Route::Automatic(target)) => {
+                if let Err(error) = self.ensure_node_requirement(tool).or_else(|error| {
+                    if result
+                        .current_version
+                        .as_deref()
+                        .and_then(|v| compare_versions(v, &latest))
+                        == Some(Ordering::Less)
+                    {
+                        Err(error)
+                    } else {
+                        Ok(())
+                    }
+                }) {
+                    result.state = "node_required".into();
+                    result.note = error.to_string();
+                    return result;
+                }
+                result.upgrade_path = target
+                    .anchored
+                    .then(|| target.probe.to_string_lossy().into_owned());
+                result.upgrade_revision = Some(target.revision());
+                result.upgrade_command = Some(
+                    target
+                        .plan
+                        .steps
+                        .iter()
+                        .map(|s| {
+                            super::policy::command_text(
+                                &self.environment,
+                                std::path::Path::new(&s.program),
+                                &s.args,
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" && "),
+                );
                 attempt::upgrade_pending(&self.environment, &target.plan, &target.probe)
                     .unwrap_or(false)
             }
@@ -187,22 +293,18 @@ impl InstallationManager {
                     "可升级至官方最新版；升级前请退出工具"
                 }
                 .into();
+                if !target.anchored {
+                    result.note =
+                        "默认入口无法确认，将使用工具的通用更新命令；请检查多处安装".into();
+                }
                 self.upgrade_plans
                     .lock()
                     .unwrap()
                     .insert(tool.to_string(), target);
             }
-            Ok(upgrades::Route::Archive) => {
-                result.state = "check_failed".into();
-                result.note = "官方安装包校验信息尚未就绪，请重新检查更新".into();
-            }
             Ok(upgrades::Route::Manual(reason)) => {
                 result.manual_upgrade = true;
                 result.state = "manual_update".into();
-                result.note = reason;
-            }
-            Ok(upgrades::Route::Restricted(reason)) => {
-                result.state = "unsupported_update".into();
                 result.note = reason;
             }
             Err(error) => {
@@ -248,9 +350,18 @@ impl InstallationManager {
                 } else {
                     Ok((String::new(), None))
                 };
+                if let Ok((version, _)) = &latest {
+                    manager.load_node_requirement(&client, tool, version).await;
+                }
                 tokio::task::spawn_blocking(move || manager.inspect_release(tool, latest))
                     .await
                     .unwrap_or_else(|_| ToolUpdate {
+                        installations: vec![],
+                        upgrade_path: None,
+                        upgrade_command: None,
+                        upgrade_revision: None,
+                        needs_confirmation: false,
+                        conflict: false,
                         tool,
                         current_version: None,
                         target_version: None,
@@ -358,27 +469,28 @@ async fn fetch_release(
     if tool == ToolId::QwenWork {
         bail!("千问办公版本请通过官网或客户端查看")
     }
-    let latest =
-        upgrades::normalized_version(&fetch_latest(client, tool, env.platform, arch).await?)?;
-    let digest = if matches!(
-        upgrades::route(tool, &latest, env, arch, None),
-        Ok(upgrades::Route::Archive)
-    ) {
-        let artifact = async {
-            let (url, asset) = upgrades::archive_request(tool, &latest, env, arch)?;
-            let body = fetch_body(client, &url).await?;
-            upgrades::archive_digest(&serde_json::from_str(&body)?, tool, &latest, &asset)
-        }
-        .await;
-        // The version lookup succeeded even if its platform artifact is not
-        // ready. Keep displaying that version, without enabling execution.
-        artifact.ok()
+    let raw = if tool == ToolId::DeepSeekHarness
+        && (env.command_path(tool.command()).is_some()
+            || ToolInventory::new(env.clone())
+                .application_path(tool)
+                .is_none())
+    {
+        parse_release(
+            "json",
+            &fetch_body(
+                client,
+                "https://registry.npmjs.org/@deepseek-ai%2Fdsh/latest",
+            )
+            .await?,
+        )?
     } else {
-        None
+        fetch_latest(client, tool, env.platform, arch).await?
     };
-    Ok((latest, digest))
+    let latest = upgrades::normalized_version(&raw)?;
+    Ok((latest, None))
 }
-async fn fetch_body(client: &reqwest::Client, url: &str) -> Result<String> {
+
+pub(super) async fn fetch_body(client: &reqwest::Client, url: &str) -> Result<String> {
     let mut response = client.get(url).send().await?.error_for_status()?;
     let mut bytes = vec![];
     while let Some(chunk) = response.chunk().await? {

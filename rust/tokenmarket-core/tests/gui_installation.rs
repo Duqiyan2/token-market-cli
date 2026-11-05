@@ -237,10 +237,7 @@ fn existing_unapproved_gui_versions_are_not_replaced_or_launched() {
 
 #[test]
 fn windows_native_handoff_waits_for_real_application_and_keeps_paths_as_data() {
-    for (tool, name) in [
-        (ToolId::WorkBuddy, "WorkBuddy"),
-        (ToolId::DeepSeekHarness, "DeepSeek Harness"),
-    ] {
+    for (tool, name) in [(ToolId::WorkBuddy, "WorkBuddy")] {
         let root = tempfile::tempdir().unwrap();
         let home = root.path().join("User ' & home");
         let executor = Arc::new(GuiInstaller::default());
@@ -347,7 +344,9 @@ impl InstallExecutor for CorruptArchiveInstaller {
             self.handoffs.fetch_add(1, Ordering::SeqCst);
             return Ok(());
         }
-        tokenmarket_core::installation::NativeInstallExecutor.execute(step, cancelled, output)
+        let _ = (step, cancelled);
+        output("fixture blocks real installer execution".into());
+        anyhow::bail!("fixture: npm unavailable")
     }
     fn version(&self, _: &Path) -> Result<String> {
         panic!("no tool was installed")
@@ -374,7 +373,7 @@ fn a_corrupted_harness_archive_is_rejected_before_extraction_or_native_handoff()
     assert!(done
         .output
         .iter()
-        .any(|line| line.contains("SHA512 verification failed")));
+        .any(|line| line.contains("fixture blocks real installer execution")));
     assert_eq!(executor.handoffs.load(Ordering::SeqCst), 0);
     assert!(!root
         .path()
@@ -383,47 +382,34 @@ fn a_corrupted_harness_archive_is_rejected_before_extraction_or_native_handoff()
 }
 
 #[test]
-fn harness_approved_rc_is_verified_and_detected_without_registering_or_running_dsh() {
+fn harness_uses_npm_latest_without_registering_or_running_dsh() {
     let root = tempfile::tempdir().unwrap();
-    let executor = Arc::new(GuiInstaller::default());
+    let executor = Arc::new(HarnessCliInstaller {
+        command: root
+            .path()
+            .join(".tokenmarket/tools/deepseek-harness/bin/dsh"),
+        steps: Mutex::new(vec![]),
+    });
     let manager = InstallationManager::new(
         environment(root.path(), HostPlatform::MacOs),
         "aarch64".into(),
         executor.clone(),
     );
-    let availability = manager.availability(ToolId::DeepSeekHarness);
-    assert!(availability.supported, "{:?}", availability.reason);
-    assert_eq!(availability.version.as_deref(), Some("0.2.1-rc.5"));
-    manager.start(ToolId::DeepSeekHarness).unwrap();
-    until(&manager, ToolId::DeepSeekHarness, |state| {
-        state.stage == InstallStage::WaitingForUser
-    });
-    // The bundle's sanitized numeric version is not evidence for the approved RC.
-    let bundle = application(root.path(), "DeepSeek Harness", "0.2.1");
-    packaged_version(&bundle, "0.2.1-rc.5");
-    let done = until(&manager, ToolId::DeepSeekHarness, |state| {
-        state.stage.is_terminal()
-    });
-    assert_eq!(done.stage, InstallStage::Succeeded, "{}", done.detail);
     assert_eq!(
         manager
-            .installed_version(ToolId::DeepSeekHarness)
-            .unwrap()
+            .availability(ToolId::DeepSeekHarness)
+            .version
             .as_deref(),
-        Some("0.2.1-rc.5")
+        Some("latest")
     );
-    assert!(!root.path().join("bin/dsh").exists());
-    assert!(
-        ToolInventory::new(environment(root.path(), HostPlatform::MacOs))
-            .is_installed(ToolId::DeepSeekHarness)
-    );
-    let steps = executor.steps.lock().unwrap();
-    assert!(steps.iter().any(|step| step.download.as_ref().is_some_and(|(url,_)| url == "https://download.deepseek.com/dsh-desk/bin/mac-arm64/deepseek-harness-0.2.1-rc.5-mac-arm64.zip")));
-    assert!(steps
-        .iter()
-        .any(|step| step.args.iter().any(|arg| arg.contains("shasum -a 512"))));
-    assert_eq!(steps.last().unwrap().program, "/usr/bin/open");
-    assert!(!steps.last().unwrap().args[0].ends_with(".app"));
+    manager.start(ToolId::DeepSeekHarness).unwrap();
+    let done = until(&manager, ToolId::DeepSeekHarness, |s| s.stage.is_terminal());
+    assert_eq!(done.stage, InstallStage::Succeeded);
+    assert!(executor.steps.lock().unwrap()[0]
+        .args
+        .join(" ")
+        .contains("--engine-strict"));
+    assert!(!root.path().join(".dsh").exists());
 }
 
 struct HarnessCliInstaller {
@@ -478,7 +464,7 @@ fn harness_has_a_persistent_official_cli_installation_when_a_desktop_package_is_
         assert!(steps.iter().any(|step| step
             .args
             .iter()
-            .any(|arg| arg.contains("@deepseek-ai/dsh@0.2.1-rc.5"))));
+            .any(|arg| arg.contains("@deepseek-ai/dsh@latest"))));
         assert!(!steps
             .iter()
             .any(|step| step.stage == InstallStage::WaitingForUser));

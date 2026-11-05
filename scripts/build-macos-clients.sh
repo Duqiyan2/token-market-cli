@@ -14,6 +14,7 @@ sign_clients() {
 # A missing identity must stop an upgrade build rather than create a new one.
 # Initialize once explicitly; keep and back up that identity for future builds.
 sign_clients smoke
+sign_clients native-smoke
 cargo build --release --locked --manifest-path "$root/rust/tokenmarket-cli/Cargo.toml"
 cd "$root"
 if [[ -n "${TAURI_CLI_JS:-}" ]]; then

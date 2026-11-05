@@ -12,7 +12,7 @@
     document.getElementById('login').hidden = Boolean(identity) || currentPage === 'settings';
   }
   function show(page, title) {
-    const known = ['tools', 'account', 'help', 'detail', 'settings'];
+    const known = ['tools', 'usage', 'account', 'help', 'detail', 'settings'];
     if (!known.includes(page)) page = 'tools';
     if (page === 'settings' && currentPage === 'settings') return true;
     const previous = currentPage;
@@ -41,7 +41,7 @@
       node.classList.toggle('active', page === 'settings');
       if (page === 'settings') node.setAttribute('aria-current', 'page'); else node.removeAttribute('aria-current');
     });
-    document.getElementById('breadcrumb').textContent = `工作台 / ${page === 'detail' ? `工具管理 / ${title || '工具详情'}` : title || ({tools:'工具管理', account:'账号与空间', help:'使用帮助', settings:'应用设置'})[page]}`;
+    document.getElementById('breadcrumb').textContent = `工作台 / ${page === 'detail' ? `工具管理 / ${title || '工具详情'}` : title || ({tools:'工具管理', usage:'用量统计', account:'账号与空间', help:'使用帮助', settings:'应用设置'})[page]}`;
     if (page !== 'detail' && !(wasOpen && page === 'tools')) content.scrollTop = 0;
     window.dispatchEvent(new CustomEvent('tokenmarket-page-changed', {detail:{from:previous,to:page}}));
     return true;
