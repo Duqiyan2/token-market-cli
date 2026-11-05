@@ -23,7 +23,7 @@ struct Reply {
     #[serde(default)]
     naming_version: Option<u32>,
     #[serde(default)]
-    credential_matches: bool,
+    credential_matches: Option<bool>,
     status: String,
     key_id: Option<String>,
     request_id: Option<String>,
@@ -131,11 +131,31 @@ impl ConnectionManager {
         let reply: Reply = serde_json::from_value(payload.get("data").cloned().unwrap_or(payload))
             .context("连接服务响应不完整")?;
         if !matches!(reply.naming_version, Some(0 | 1))
+            || reply.status == "MIGRATION_REQUIRED" && reply.naming_version != Some(0)
             || reply.naming_version == Some(0)
                 && !matches!(
                     reply.status.as_str(),
                     "MIGRATION_REQUIRED" | "NOT_FOUND" | "DISABLED" | "EXPIRED"
                 )
+        {
+            bail!("当前服务尚不支持安全接入迁移，请联系管理员更新服务；原配置和凭据已保留")
+        }
+        // Reuse and explicit copy-loss states must carry an unambiguous proof.
+        // An interim service must not turn a retained credential into a fresh issuance
+        // or a loss-confirmation prompt merely by omitting/contradicting that proof.
+        if action == "inspect"
+            && reply.naming_version == Some(1)
+            && matches!(
+                reply.status.as_str(),
+                "VALID" | "PENDING" | "SAVED" | "APPLIED" | "LOCAL_COPY_REQUIRED"
+            )
+            && (reply.credential_matches.is_none()
+                || reply.status == "VALID" && reply.credential_matches != Some(true)
+                || reply.credential_matches == Some(true)
+                    && extra["fingerprint"].as_str().is_none()
+                || matches!(reply.status.as_str(), "SAVED" | "APPLIED")
+                    && extra["fingerprint"].as_str().is_some()
+                    && reply.credential_matches != Some(true))
         {
             bail!("当前服务尚不支持安全接入迁移，请联系管理员更新服务；原配置和凭据已保留")
         }
@@ -186,7 +206,7 @@ impl ConnectionManager {
         // its historical predecessor. Only proof for the returned current secret permits reuse.
         if reusable
             && inspect.naming_version == Some(1)
-            && inspect.credential_matches
+            && inspect.credential_matches == Some(true)
             && raw.is_some()
         {
             let key = self.key_from_reply(inspect, raw.unwrap())?;
@@ -304,6 +324,9 @@ impl ConnectionManager {
         })).await?;
         if !matches!(reply.status.as_str(), "SAVED" | "APPLIED")
             || applied && reply.status != "APPLIED"
+            || reply.key_id.as_deref() != Some(key.key_id.as_str())
+            || reply.request_id.as_deref() != Some(receipt.request_id.as_str())
+            || reply.generation != Some(receipt.generation)
         {
             bail!("连接确认未完成，已保存的信息和配置已保留，请重试")
         }
