@@ -6,11 +6,14 @@ use std::{
     },
     time::Duration,
 };
+#[cfg(target_os = "macos")]
+mod macos;
 mod reminders;
 #[cfg(windows)]
 pub mod windows;
 use reminders::Reminders;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
+use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 #[derive(Clone, Debug, Serialize)]
@@ -24,6 +27,8 @@ pub struct ClientUpdateStatus {
     pub automatic: bool,
     pub remind: bool,
     pub install_available: bool,
+    pub recovery_available: bool,
+    pub show_recovery_notice: bool,
 }
 
 /// Constructed only from a successfully verified native download. Never IPC data.
@@ -42,7 +47,7 @@ impl VerifiedClientUpdate {
 
 /// Platform boundary: prepare must obtain the full legacy lock set and retain it
 /// in the returned object (or its already-running guardian) before returning.
-/// No platform implementation is registered until its lifetime is validated.
+/// Each registered platform implementation validates its guarded lifetime.
 pub trait ClientUpdateInstaller: Send + Sync {
     fn prepare(&self, update: VerifiedClientUpdate)
         -> Result<Box<dyn ClientUpdateHandoff>, String>;
@@ -55,12 +60,25 @@ pub trait ClientUpdateInstaller: Send + Sync {
 /// launch failure, or known termination). An uncertain postcommit result stays
 /// a pending handoff in the durable journal; it must not enable another attempt.
 pub trait ClientUpdateHandoff: Send {
-    fn commit(self: Box<Self>) -> Result<(), String>;
+    fn commit(self: Box<Self>) -> Result<ClientUpdateCommit, String>;
+}
+
+/// A postcommit warning must never make the verified candidate retryable.
+pub enum ClientUpdateCommit {
+    Handoff,
+    HandoffWithWarning(String),
+}
+
+pub enum ClientUpdateStartup {
+    Clear,
+    Pending(String),
+    RetryableFailure(String),
 }
 
 struct UpdateConfig {
     endpoint: Option<String>,
     public_key: Option<String>,
+    recovery_url: Option<String>,
     target: Option<String>,
     #[cfg(any(test, all(debug_assertions, feature = "windows-update-fixtures")))]
     executable_path: Option<std::path::PathBuf>,
@@ -73,6 +91,7 @@ impl UpdateConfig {
         Self {
             endpoint: option_env!("TOKEN_MARKET_UPDATER_ENDPOINT").map(str::to_owned),
             public_key: option_env!("TOKEN_MARKET_UPDATER_PUBLIC_KEY").map(str::to_owned),
+            recovery_url: option_env!("TOKEN_MARKET_UPDATER_RECOVERY_URL").map(str::to_owned),
             target: match (std::env::consts::OS, std::env::consts::ARCH) {
                 ("macos", "aarch64") => Some("darwin-aarch64".into()),
                 ("windows", "x86_64") => Some("windows-x86_64-nsis".into()),
@@ -162,6 +181,8 @@ impl ClientUpdater {
                     automatic: false,
                     remind: false,
                     install_available: false,
+                    recovery_available: false,
+                    show_recovery_notice: false,
                 },
                 candidate: None,
                 verified_bytes: None,
@@ -171,7 +192,6 @@ impl ClientUpdater {
     }
 
     /// Native platform registration only; renderer cannot select an executor.
-    #[allow(dead_code)] // Real platform registration remains intentionally unavailable.
     pub fn with_installer(mut self, installer: Arc<dyn ClientUpdateInstaller>) -> Self {
         self.installer = Some(installer);
         self.state
@@ -214,7 +234,12 @@ impl ClientUpdater {
         let status = {
             let mut state = self.state.lock().expect("client update state");
             match result {
-                Ok(()) => state.status.status = "handoff".into(),
+                Ok(outcome) => {
+                    state.status.status = "handoff".into();
+                    if let ClientUpdateCommit::HandoffWithWarning(error) = outcome {
+                        state.status.error = Some(error);
+                    }
+                }
                 Err(error) => {
                     state.status.status = "ready".into();
                     state.status.error = Some(error);
@@ -226,12 +251,59 @@ impl ClientUpdater {
         Ok(status)
     }
 
+    /// Preserve unresolved native installation facts before any network/config check.
+    fn reconcile_startup_result(&self, recovery: Result<ClientUpdateStartup, String>) {
+        let outcome = recovery.unwrap_or_else(ClientUpdateStartup::Pending);
+        let (status, error, show_notice) = match outcome {
+            ClientUpdateStartup::Clear => return,
+            ClientUpdateStartup::Pending(error) => ("handoff", error, false),
+            ClientUpdateStartup::RetryableFailure(error) => {
+                // Preserve this known native outcome until a manual check. The
+                // automatic network/config check must not erase recovery help.
+                self.startup_started.store(true, Ordering::SeqCst);
+                ("install_failed", error, true)
+            }
+        };
+        let mut state = self.state.lock().expect("client update state");
+        state.status.status = status.into();
+        state.status.show_recovery_notice = show_notice;
+        state.status.error = Some(error);
+        state.status.automatic = false;
+        state.status.remind = false;
+    }
+
     pub fn status(&self) -> ClientUpdateStatus {
-        self.state
-            .lock()
-            .expect("client update state")
-            .status
-            .clone()
+        let mut state = self.state.lock().expect("client update state");
+        state.status.recovery_available = self.recovery_url().is_ok();
+        state.status.clone()
+    }
+
+    pub fn acknowledge_failure_notice(&self) -> ClientUpdateStatus {
+        let mut state = self.state.lock().expect("client update state");
+        state.status.show_recovery_notice = false;
+        state.status.clone()
+    }
+
+    pub fn open_recovery<R: Runtime>(&self, app: &AppHandle<R>) -> Result<(), String> {
+        let url = self.recovery_url()?;
+        app.opener()
+            .open_url(url.as_str(), None::<&str>)
+            .map_err(|_| "无法打开客户端恢复页面，请联系发布方获取官方安装包".into())
+    }
+
+    fn recovery_url(&self) -> Result<tauri::Url, String> {
+        self.config
+            .recovery_url
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .and_then(|value| value.parse::<tauri::Url>().ok())
+            .filter(|url| {
+                url.scheme() == "https"
+                    && url.host_str().is_some()
+                    && url.username().is_empty()
+                    && url.password().is_none()
+            })
+            .ok_or_else(|| "客户端恢复地址暂不可用，请联系发布方获取官方安装包和恢复说明".into())
     }
 
     pub fn later(&self) -> ClientUpdateStatus {
@@ -290,6 +362,7 @@ impl ClientUpdater {
             state.candidate = None;
             state.verified_bytes = None;
             state.status.status = "checking".into();
+            state.status.show_recovery_notice = false;
             state.status.available_version = None;
             state.status.release_notes = None;
             state.status.error = None;
@@ -451,7 +524,26 @@ impl ClientUpdater {
 }
 
 pub fn setup(app: &AppHandle) {
-    app.manage(ClientUpdater::new(app.package_info().version.to_string()));
+    let updater = ClientUpdater::new(app.package_info().version.to_string());
+    #[cfg(target_os = "macos")]
+    let updater = {
+        let updater = match macos::installer(app) {
+            Some(installer) => updater.with_installer(installer),
+            None => updater,
+        };
+        updater.reconcile_startup_result(macos::reconcile_startup());
+        updater
+    };
+    #[cfg(windows)]
+    let updater = {
+        let updater = match windows::installer(app) {
+            Some(installer) => updater.with_installer(installer),
+            None => updater,
+        };
+        updater.reconcile_startup_result(windows::reconcile_startup());
+        updater
+    };
+    app.manage(updater);
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
         let status = handle.state::<ClientUpdater>().startup_check(&handle).await;
@@ -503,4 +595,14 @@ pub async fn install_client_update(
     version: String,
 ) -> Result<ClientUpdateStatus, String> {
     app.state::<ClientUpdater>().install(&app, &version).await
+}
+
+#[tauri::command]
+pub fn open_client_update_recovery(app: AppHandle) -> Result<(), String> {
+    app.state::<ClientUpdater>().open_recovery(&app)
+}
+
+#[tauri::command]
+pub fn acknowledge_client_update_failure(app: AppHandle) -> ClientUpdateStatus {
+    app.state::<ClientUpdater>().acknowledge_failure_notice()
 }

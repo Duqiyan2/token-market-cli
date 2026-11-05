@@ -1,6 +1,7 @@
 //! Current-user NSIS only. This module never calls the updater's exiting install shortcut.
 use super::{
-    ClientUpdateHandoff, ClientUpdateInstaller, ClientUpdateStartup, VerifiedClientUpdate,
+    ClientUpdateCommit, ClientUpdateHandoff, ClientUpdateInstaller, ClientUpdateStartup,
+    VerifiedClientUpdate,
 };
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -477,7 +478,7 @@ struct WindowsHandoff<R: Runtime> {
     committed: bool,
 }
 impl<R: Runtime> ClientUpdateHandoff for WindowsHandoff<R> {
-    fn commit(mut self: Box<Self>) -> std::result::Result<(), String> {
+    fn commit(mut self: Box<Self>) -> std::result::Result<ClientUpdateCommit, String> {
         // Once any COMMIT bytes may have reached the guardian, an uncertain pipe
         // result is pending handoff, never retryable installation failure.
         self.committed = true;
@@ -488,7 +489,7 @@ impl<R: Runtime> ClientUpdateHandoff for WindowsHandoff<R> {
             let _ = self.reader.read_line(&mut line);
         }
         self.app.exit(0);
-        Ok(())
+        Ok(ClientUpdateCommit::Handoff)
     }
 }
 impl<R: Runtime> Drop for WindowsHandoff<R> {

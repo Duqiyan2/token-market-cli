@@ -299,6 +299,8 @@ pub fn run() {
             client_update::check_client_update,
             client_update::download_client_update,
             client_update::install_client_update,
+            client_update::open_client_update_recovery,
+            client_update::acknowledge_client_update_failure,
             client_update::defer_client_update,
             client_update::ignore_client_update_version,
         ])
