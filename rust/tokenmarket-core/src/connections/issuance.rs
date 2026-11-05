@@ -8,6 +8,9 @@ pub(super) struct IssuanceReceipt {
     generation: u64,
     #[serde(default)]
     applied: bool,
+    // Authoritative platform adoption; absent historical receipts remain legacy.
+    #[serde(default)]
+    naming_version: u32,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -17,6 +20,10 @@ struct PendingRequest {
 
 #[derive(Deserialize)]
 struct Reply {
+    #[serde(default)]
+    naming_version: Option<u32>,
+    #[serde(default)]
+    credential_matches: Option<bool>,
     status: String,
     key_id: Option<String>,
     request_id: Option<String>,
@@ -78,7 +85,7 @@ impl ConnectionManager {
         action: &str,
         extra: Value,
     ) -> Result<Reply> {
-        let mut body = json!({"workspace_id":context.workspace_id,"device_id":device,"tool":tool});
+        let mut body = json!({"workspace_id":context.workspace_id,"device_id":device,"tool":tool,"naming_version":1});
         body.as_object_mut()
             .unwrap()
             .extend(extra.as_object().unwrap().clone());
@@ -123,6 +130,35 @@ impl ConnectionManager {
         }
         let reply: Reply = serde_json::from_value(payload.get("data").cloned().unwrap_or(payload))
             .context("连接服务响应不完整")?;
+        if !matches!(reply.naming_version, Some(0 | 1))
+            || reply.status == "MIGRATION_REQUIRED" && reply.naming_version != Some(0)
+            || reply.naming_version == Some(0)
+                && !matches!(
+                    reply.status.as_str(),
+                    "MIGRATION_REQUIRED" | "NOT_FOUND" | "DISABLED" | "EXPIRED"
+                )
+        {
+            bail!("当前服务尚不支持安全接入迁移，请联系管理员更新服务；原配置和凭据已保留")
+        }
+        // Reuse and explicit copy-loss states must carry an unambiguous proof.
+        // An interim service must not turn a retained credential into a fresh issuance
+        // or a loss-confirmation prompt merely by omitting/contradicting that proof.
+        if action == "inspect"
+            && reply.naming_version == Some(1)
+            && matches!(
+                reply.status.as_str(),
+                "VALID" | "PENDING" | "SAVED" | "APPLIED" | "LOCAL_COPY_REQUIRED"
+            )
+            && (reply.credential_matches.is_none()
+                || reply.status == "VALID" && reply.credential_matches != Some(true)
+                || reply.credential_matches == Some(true)
+                    && extra["fingerprint"].as_str().is_none()
+                || matches!(reply.status.as_str(), "SAVED" | "APPLIED")
+                    && extra["fingerprint"].as_str().is_some()
+                    && reply.credential_matches != Some(true))
+        {
+            bail!("当前服务尚不支持安全接入迁移，请联系管理员更新服务；原配置和凭据已保留")
+        }
         if reply.owner.id != context.owner_id
             || reply.bound_workspace.id != context.workspace_id
             || reply
@@ -136,6 +172,7 @@ impl ConnectionManager {
             "DISABLED" => bail!("连接已被停用，请到平台启用后重新接入"),
             "EXPIRED" => bail!("连接已过期，请到平台调整有效期后重新接入"),
             "VALID"
+            | "MIGRATION_REQUIRED"
             | "NOT_FOUND"
             | "DELETED"
             | "SECRET_CHANGED"
@@ -165,7 +202,13 @@ impl ConnectionManager {
             inspect.status.as_str(),
             "VALID" | "SAVED" | "PENDING" | "APPLIED"
         );
-        if reusable && raw.is_some() {
+        // The server can return a new pending identity while local raw still belongs to
+        // its historical predecessor. Only proof for the returned current secret permits reuse.
+        if reusable
+            && inspect.naming_version == Some(1)
+            && inspect.credential_matches == Some(true)
+            && raw.is_some()
+        {
             let key = self.key_from_reply(inspect, raw.unwrap())?;
             self.remember_key(context, tool, device, &key)?;
             self.confirm_key(context, tool, device, &key, false).await?;
@@ -247,6 +290,7 @@ impl ConnectionManager {
             (Some(request_id), Some(generation)) => Some(IssuanceReceipt {
                 request_id,
                 generation,
+                naming_version: reply.naming_version.context("连接服务未返回命名规则")?,
                 applied: matches!(reply.status.as_str(), "VALID" | "APPLIED"),
             }),
             _ if matches!(reply.status.as_str(), "VALID" | "APPLIED") => None,
@@ -280,6 +324,9 @@ impl ConnectionManager {
         })).await?;
         if !matches!(reply.status.as_str(), "SAVED" | "APPLIED")
             || applied && reply.status != "APPLIED"
+            || reply.key_id.as_deref() != Some(key.key_id.as_str())
+            || reply.request_id.as_deref() != Some(receipt.request_id.as_str())
+            || reply.generation != Some(receipt.generation)
         {
             bail!("连接确认未完成，已保存的信息和配置已保留，请重试")
         }

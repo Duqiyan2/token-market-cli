@@ -16,6 +16,11 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[derive(Default)]
 struct State {
+    legacy: bool,
+    reply_override: Option<(&'static str, Value)>,
+    override_skip: usize,
+    unsupported_legacy_pending: bool,
+    historical: Vec<(u64, String, String)>,
     id: u64,
     secret: String,
     request: String,
@@ -28,12 +33,19 @@ struct State {
     predecessors: usize,
     lose_issue: bool,
     lose_confirm: bool,
+    lose_applied: bool,
     fail_catalogue: bool,
     fail_inspect: bool,
     inspect_business_failure: bool,
     inspect_tool_error: Option<&'static str>,
     block_cache: Option<PathBuf>,
+    block_connection_store: Option<PathBuf>,
+    require_naming_capability: bool,
     logout_on_catalogue: Option<Arc<support::Credentials>>,
+    pause_catalogue: Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>,
+    current_workspace: Option<String>,
+    switch_workspace_on_catalogue: Option<String>,
+    replace_login_on_catalogue: Option<(Arc<support::Credentials>, String)>,
 }
 struct Platform {
     url: String,
@@ -90,6 +102,15 @@ impl Platform {
                     .nth(1)
                     .unwrap();
                 let body: Value = serde_json::from_slice(&bytes[end + 4..]).unwrap_or(Value::Null);
+                let pause = if route == "/v1/models" {
+                    shared.lock().unwrap().pause_catalogue.take()
+                } else {
+                    None
+                };
+                if let Some((entered, resume)) = pause {
+                    entered.notify_one();
+                    resume.notified().await;
+                }
                 let response = {
                     let mut s = shared.lock().unwrap();
                     let mut failure = false;
@@ -98,11 +119,24 @@ impl Platform {
                         if let Some(credentials) = s.logout_on_catalogue.take() {
                             *credentials.0.lock().unwrap() = None;
                         }
+                        if let Some(workspace) = s.switch_workspace_on_catalogue.take() {
+                            s.current_workspace = Some(workspace);
+                        }
+                        if let Some((credentials, session)) = s.replace_login_on_catalogue.take() {
+                            *credentials.0.lock().unwrap() = Some(session);
+                        }
                         failure = s.fail_catalogue;
+                        if let Some(path) = s.block_connection_store.take() {
+                            std::fs::rename(&path, path.with_extension("locked")).unwrap();
+                            std::fs::create_dir(path).unwrap();
+                        }
                         json!({"data":[{"id":"glm-5.3","model_types":["TEXT_GENERATION"]},{"id":"glm-5.2","model_types":["TEXT_GENERATION"]}]})
                     } else {
                         assert!(route.starts_with("/api/client/keys/"));
                         assert!(header.contains("Bearer management-fixture"));
+                        if s.require_naming_capability && body["naming_version"] != 1 {
+                            s.fail_inspect = true;
+                        }
                         let action = route.rsplit('/').next().unwrap();
                         let fingerprint = body["fingerprint"].as_str();
                         let valid = fingerprint == Some(hash(&s.secret).as_str());
@@ -113,6 +147,12 @@ impl Platform {
                                     "NOT_FOUND".to_string()
                                 } else if s.status != "ACTIVE" {
                                     s.status.clone()
+                                } else if s.unsupported_legacy_pending {
+                                    "PENDING".into()
+                                } else if s.legacy {
+                                    "MIGRATION_REQUIRED".into()
+                                } else if s.stage == "PENDING" && !valid {
+                                    "PENDING".into()
                                 } else if fingerprint.is_none() {
                                     if s.stage == "APPLIED" {
                                         "LOCAL_COPY_REQUIRED".into()
@@ -128,15 +168,26 @@ impl Platform {
                                 }
                             }
                             "issue" => {
-                                if s.id > 0 && s.status == "ACTIVE" && s.stage == "PENDING" {
+                                if !s.legacy
+                                    && s.id > 0
+                                    && s.status == "ACTIVE"
+                                    && s.stage == "PENDING"
+                                {
                                     "PENDING".into()
-                                } else if s.id > 0
+                                } else if !s.legacy
+                                    && s.id > 0
                                     && s.status == "ACTIVE"
                                     && !body["replace_lost"].as_bool().unwrap_or(false)
                                     && (valid || fingerprint.is_none())
                                 {
                                     "LOCAL_COPY_REQUIRED".into()
                                 } else {
+                                    if s.legacy {
+                                        let old = (s.id, s.secret.clone(), s.status.clone());
+                                        s.historical.push(old);
+                                        s.predecessors = 0;
+                                        s.legacy = false;
+                                    }
                                     if body["replace_lost"] == true {
                                         assert_eq!(body["key_id"], s.id.to_string());
                                         s.predecessors += 1;
@@ -151,6 +202,10 @@ impl Platform {
                                     drop_response = s.lose_issue;
                                     s.lose_issue = false;
                                     if let Some(path) = s.block_cache.take() {
+                                        if path.exists() {
+                                            std::fs::rename(&path, path.with_extension("locked"))
+                                                .unwrap();
+                                        }
                                         std::fs::create_dir(path).unwrap();
                                     }
                                     "ISSUED".into()
@@ -170,6 +225,8 @@ impl Platform {
                                 assert_eq!(body["request_id"], s.request);
                                 if action == "applied" {
                                     s.stage = "APPLIED".into();
+                                    drop_response = s.lose_applied;
+                                    s.lose_applied = false;
                                     s.retired += s.predecessors;
                                     s.predecessors = 0;
                                 } else if s.stage != "APPLIED" {
@@ -184,11 +241,34 @@ impl Platform {
                         if failure {
                             status = "UNAVAILABLE".into();
                         }
-                        let mut reply = json!({"status":status,"key_id":if s.id==0 {None}else{Some(s.id.to_string())},"request_id":s.request,"generation":s.generation,"owner":{"id":"u1","name":"Fixture"},"bound_workspace":{"id":"42","name":"Scope"}});
+                        let mut reply = json!({"naming_version":if s.legacy || s.unsupported_legacy_pending {0}else{1},"credential_matches":valid,"status":status,"key_id":if s.id==0 {None}else{Some(s.id.to_string())},"request_id":s.request,"generation":s.generation,"owner":{"id":"u1","name":"Fixture"},"bound_workspace":{"id":"42","name":"Scope"}});
+                        if s.reply_override
+                            .as_ref()
+                            .is_some_and(|(target, _)| action == *target)
+                            && s.override_skip > 0
+                        {
+                            s.override_skip -= 1;
+                        } else if let Some((target, fields)) = &s.reply_override {
+                            if action == *target {
+                                for (field, value) in fields.as_object().unwrap() {
+                                    if value.is_null() {
+                                        reply.as_object_mut().unwrap().remove(field);
+                                    } else {
+                                        reply[field] = value.clone();
+                                    }
+                                }
+                            }
+                        }
                         if status == "ISSUED" {
                             reply["api_key"] = json!(s.secret);
                         }
-                        if action == "inspect" && s.inspect_tool_error.is_some() {
+                        if matches!(action, "inspect" | "issue" | "recover")
+                            && s.current_workspace
+                                .as_deref()
+                                .is_some_and(|current| body["workspace_id"] != current)
+                        {
+                            json!({"success":false,"message":"current workspace changed; refresh before connecting"})
+                        } else if action == "inspect" && s.inspect_tool_error.is_some() {
                             json!({"success":false,"message":s.inspect_tool_error})
                         } else if action == "inspect" && s.inspect_business_failure {
                             json!({"success":false,"message":"connection operation unavailable; retry without changing credentials"})
@@ -519,4 +599,949 @@ async fn logout_from_other_entry_during_catalogue_load_prevents_configuration_co
     assert_eq!(s.issues, 1);
     assert_eq!(s.stage, "SAVED");
     assert_eq!(s.retired, 0);
+}
+
+#[tokio::test]
+async fn fresh_scope_negotiates_naming_and_both_client_entries_reuse_safely_saved_key() {
+    let root = tempdir().unwrap();
+    let api = Platform::start().await;
+    api.state.lock().unwrap().require_naming_capability = true;
+    let path = root.path().join("settings.json");
+    let inv = inventory(root.path());
+    let first = api
+        .manager(root.path())
+        .connect(context(), ToolId::ClaudeCode, &inv, path.clone())
+        .await
+        .unwrap();
+    let next = api
+        .manager(root.path())
+        .reconnect(
+            context(),
+            ToolId::ClaudeCode,
+            &first.key_id,
+            &inv,
+            path.clone(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(first.key_id, next.connection.key_id);
+    let state = api.state.lock().unwrap();
+    assert_eq!(state.issues, 1);
+    assert_eq!(state.rotations, 0);
+    assert!(std::fs::read_to_string(path)
+        .unwrap()
+        .contains(&state.secret));
+    let saved: Value =
+        serde_json::from_slice(&support::read_private(&root.path().join("state/keys.json")))
+            .unwrap();
+    assert_eq!(saved[0]["key"]["issuance"]["naming_version"], 1);
+}
+
+#[tokio::test]
+async fn legacy_cached_key_migrates_once_and_both_entries_reuse_new_identity() {
+    let root = tempdir().unwrap();
+    let api = Platform::start().await;
+    let path = root.path().join("settings.json");
+    let inv = inventory(root.path());
+    let old = api
+        .manager(root.path())
+        .connect(context(), ToolId::ClaudeCode, &inv, path.clone())
+        .await
+        .unwrap();
+    let old_secret = api.state.lock().unwrap().secret.clone();
+    api.state.lock().unwrap().legacy = true;
+    let next = api
+        .manager(root.path())
+        .reconnect(
+            context(),
+            ToolId::ClaudeCode,
+            &old.key_id,
+            &inv,
+            path.clone(),
+        )
+        .await
+        .unwrap();
+    assert_ne!(old.key_id, next.connection.key_id);
+    api.manager(root.path())
+        .reconnect(
+            context(),
+            ToolId::ClaudeCode,
+            &next.connection.key_id,
+            &inv,
+            path.clone(),
+        )
+        .await
+        .unwrap();
+    let s = api.state.lock().unwrap();
+    assert_eq!(s.issues, 2);
+    assert_eq!(s.rotations, 0);
+    assert_eq!(s.retired, 0);
+    assert_eq!(s.historical, vec![(1, old_secret, "ACTIVE".into())]);
+    assert!(std::fs::read_to_string(path).unwrap().contains(&s.secret));
+}
+
+#[tokio::test]
+async fn imported_connection_and_config_only_legacy_copies_migrate_without_copy_loss() {
+    for config_only in [false, true] {
+        let root = tempdir().unwrap();
+        let api = Platform::start().await;
+        let inv = inventory(root.path());
+        let path = root.path().join("settings.json");
+        let old = api
+            .manager(root.path())
+            .connect(context(), ToolId::ClaudeCode, &inv, path.clone())
+            .await
+            .unwrap();
+        api.state.lock().unwrap().legacy = true;
+        std::fs::remove_file(root.path().join("state/keys.json")).unwrap();
+        let manager = api.manager(root.path());
+        let next = if config_only {
+            std::fs::remove_file(root.path().join("state/connections.json")).unwrap();
+            manager
+                .connect(context(), ToolId::ClaudeCode, &inv, path.clone())
+                .await
+                .unwrap()
+        } else {
+            manager
+                .reconnect(
+                    context(),
+                    ToolId::ClaudeCode,
+                    &old.key_id,
+                    &inv,
+                    path.clone(),
+                )
+                .await
+                .unwrap()
+                .connection
+        };
+        assert_ne!(old.key_id, next.key_id);
+        let s = api.state.lock().unwrap();
+        assert_eq!(s.issues, 2);
+        assert_eq!(s.retired, 0);
+        assert!(std::fs::read_to_string(path).unwrap().contains(&s.secret));
+    }
+}
+
+#[tokio::test]
+async fn lost_migration_response_recovers_same_pending_row_despite_stale_cached_or_config_only_raw()
+{
+    for config_only in [false, true] {
+        let root = tempdir().unwrap();
+        let api = Platform::start().await;
+        let inv = inventory(root.path());
+        let path = root.path().join("settings.json");
+        let old = api
+            .manager(root.path())
+            .connect(context(), ToolId::ClaudeCode, &inv, path.clone())
+            .await
+            .unwrap();
+        let before = std::fs::read(&path).unwrap();
+        let historical = api.state.lock().unwrap().secret.clone();
+        {
+            let mut s = api.state.lock().unwrap();
+            s.legacy = true;
+            s.lose_issue = true;
+        }
+        if config_only {
+            std::fs::remove_file(root.path().join("state/keys.json")).unwrap();
+            std::fs::remove_file(root.path().join("state/connections.json")).unwrap();
+            assert!(api
+                .manager(root.path())
+                .connect(context(), ToolId::ClaudeCode, &inv, path.clone())
+                .await
+                .is_err());
+        } else {
+            assert!(api
+                .manager(root.path())
+                .reconnect(
+                    context(),
+                    ToolId::ClaudeCode,
+                    &old.key_id,
+                    &inv,
+                    path.clone()
+                )
+                .await
+                .is_err());
+        }
+        assert_eq!(before, std::fs::read(&path).unwrap());
+        let pending_id = api.state.lock().unwrap().id;
+        let manager = api.manager(root.path());
+        let next = if config_only {
+            manager
+                .connect(context(), ToolId::ClaudeCode, &inv, path.clone())
+                .await
+                .unwrap()
+        } else {
+            manager
+                .reconnect(
+                    context(),
+                    ToolId::ClaudeCode,
+                    &old.key_id,
+                    &inv,
+                    path.clone(),
+                )
+                .await
+                .unwrap()
+                .connection
+        };
+        assert_eq!(next.key_id, pending_id.to_string());
+        let s = api.state.lock().unwrap();
+        assert_eq!(s.issues, 2);
+        assert_eq!(s.rotations, 1);
+        assert_eq!(s.retired, 0);
+        assert_eq!(s.historical, vec![(1, historical, "ACTIVE".into())]);
+        assert!(std::fs::read_to_string(path).unwrap().contains(&s.secret));
+    }
+}
+
+#[tokio::test]
+async fn old_pending_protocol_cannot_rotate_or_reuse_historical_raw() {
+    let root = tempdir().unwrap();
+    let api = Platform::start().await;
+    let inv = inventory(root.path());
+    let path = root.path().join("settings.json");
+    let old = api
+        .manager(root.path())
+        .connect(context(), ToolId::ClaudeCode, &inv, path.clone())
+        .await
+        .unwrap();
+    let before = std::fs::read(&path).unwrap();
+    api.state.lock().unwrap().unsupported_legacy_pending = true;
+    let error = api
+        .manager(root.path())
+        .reconnect(
+            context(),
+            ToolId::ClaudeCode,
+            &old.key_id,
+            &inv,
+            path.clone(),
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("更新服务"), "{error}");
+    let s = api.state.lock().unwrap();
+    assert_eq!(s.rotations, 0);
+    assert_eq!(s.issues, 1);
+    assert_eq!(before, std::fs::read(path).unwrap());
+}
+
+#[tokio::test]
+async fn ambiguous_valid_response_preserves_local_copies_without_issuing_or_reporting_loss() {
+    for (status, proof) in [
+        ("VALID", json!(false)),
+        ("VALID", Value::Null),
+        ("SAVED", json!(false)),
+        ("SAVED", Value::Null),
+        ("APPLIED", json!(false)),
+        ("APPLIED", Value::Null),
+        ("PENDING", Value::Null),
+        ("LOCAL_COPY_REQUIRED", Value::Null),
+    ] {
+        let root = tempdir().unwrap();
+        let api = Platform::start().await;
+        let inv = inventory(root.path());
+        let path = root.path().join("settings.json");
+        let old = api
+            .manager(root.path())
+            .connect(context(), ToolId::ClaudeCode, &inv, path.clone())
+            .await
+            .unwrap();
+        let config_before = std::fs::read(&path).unwrap();
+        let cache = root.path().join("state/keys.json");
+        let keys_before = support::read_private(&cache);
+        let secret_before = api.state.lock().unwrap().secret.clone();
+        api.state.lock().unwrap().reply_override = Some((
+            "inspect",
+            json!({"status":status, "credential_matches":proof}),
+        ));
+        let error = api
+            .manager(root.path())
+            .reconnect(
+                context(),
+                ToolId::ClaudeCode,
+                &old.key_id,
+                &inv,
+                path.clone(),
+            )
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("更新服务"), "{error}");
+        assert!(error.downcast_ref::<CredentialLoss>().is_none());
+        assert_eq!(std::fs::read(&path).unwrap(), config_before);
+        assert_eq!(support::read_private(&cache), keys_before);
+        let state = api.state.lock().unwrap();
+        assert_eq!(state.secret, secret_before);
+        assert_eq!(state.issues, 1);
+        assert_eq!(state.rotations, 0);
+        assert_eq!(state.retired, 0);
+    }
+}
+
+#[tokio::test]
+async fn confirmation_for_a_different_attempt_cannot_publish_migration_configuration() {
+    for fields in [
+        json!({"key_id":"999"}),
+        json!({"generation":999}),
+        json!({"request_id":"foreign_1234567890"}),
+    ] {
+        let root = tempdir().unwrap();
+        let api = Platform::start().await;
+        let inv = inventory(root.path());
+        let path = root.path().join("settings.json");
+        let old = api
+            .manager(root.path())
+            .connect(context(), ToolId::ClaudeCode, &inv, path.clone())
+            .await
+            .unwrap();
+        let before = std::fs::read(&path).unwrap();
+        let secret_before = api.state.lock().unwrap().secret.clone();
+        {
+            let mut state = api.state.lock().unwrap();
+            state.legacy = true;
+            state.reply_override = Some(("confirm", fields));
+        }
+        let error = api
+            .manager(root.path())
+            .reconnect(
+                context(),
+                ToolId::ClaudeCode,
+                &old.key_id,
+                &inv,
+                path.clone(),
+            )
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("连接确认未完成"), "{error}");
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        api.state.lock().unwrap().reply_override = None;
+        let next = api
+            .manager(root.path())
+            .reconnect(
+                context(),
+                ToolId::ClaudeCode,
+                &old.key_id,
+                &inv,
+                path.clone(),
+            )
+            .await
+            .unwrap();
+        let state = api.state.lock().unwrap();
+        assert_eq!(next.connection.key_id, "2");
+        assert_eq!(state.issues, 2);
+        assert_eq!(state.rotations, 0);
+        assert_eq!(state.retired, 0);
+        assert_eq!(state.historical, vec![(1, secret_before, "ACTIVE".into())]);
+        assert!(std::fs::read_to_string(&path)
+            .unwrap()
+            .contains(&state.secret));
+    }
+}
+
+#[tokio::test]
+async fn interrupted_migration_resumes_saved_or_pending_identity_and_preserves_user_settings() {
+    for fault in ["save", "confirm", "catalogue", "configuration", "applied"] {
+        let root = tempdir().unwrap();
+        let api = Platform::start().await;
+        let inv = inventory(root.path());
+        let path = root.path().join("settings.json");
+        std::fs::write(&path, r#"{"theme":"original"}"#).unwrap();
+        let old = api
+            .manager(root.path())
+            .connect(context(), ToolId::ClaudeCode, &inv, path.clone())
+            .await
+            .unwrap();
+        let before = std::fs::read(&path).unwrap();
+        let old_secret = api.state.lock().unwrap().secret.clone();
+        let cache = root.path().join("state/keys.json");
+        let records = root.path().join("state/connections.json");
+        {
+            let mut state = api.state.lock().unwrap();
+            state.legacy = true;
+            match fault {
+                "save" => state.block_cache = Some(cache.clone()),
+                "confirm" => state.lose_confirm = true,
+                "catalogue" => state.fail_catalogue = true,
+                "configuration" => state.block_connection_store = Some(records.clone()),
+                "applied" => state.lose_applied = true,
+                _ => unreachable!(),
+            }
+        }
+        assert!(
+            api.manager(root.path())
+                .reconnect(
+                    context(),
+                    ToolId::ClaudeCode,
+                    &old.key_id,
+                    &inv,
+                    path.clone()
+                )
+                .await
+                .is_err(),
+            "{fault}"
+        );
+        let new_id = api.state.lock().unwrap().id.to_string();
+        assert_eq!(new_id, "2");
+        let next_expected_id = if fault == "applied" {
+            &new_id
+        } else {
+            &old.key_id
+        };
+        if fault == "applied" {
+            assert!(std::fs::read_to_string(&path)
+                .unwrap()
+                .contains(&api.state.lock().unwrap().secret));
+        } else {
+            assert_eq!(std::fs::read(&path).unwrap(), before, "{fault}");
+        }
+        if fault == "save" || fault == "configuration" {
+            let blocked = if fault == "save" { &cache } else { &records };
+            std::fs::remove_dir(blocked).unwrap();
+            std::fs::rename(blocked.with_extension("locked"), blocked).unwrap();
+        }
+        if fault == "save" {
+            assert_eq!(api.state.lock().unwrap().stage, "PENDING");
+        }
+        api.state.lock().unwrap().fail_catalogue = false;
+        // An unrelated edit between attempts must survive the new manager's resumed operation.
+        let mut config: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        config["theme"] = json!("edited-while-offline");
+        std::fs::write(&path, serde_json::to_vec_pretty(&config).unwrap()).unwrap();
+        let next = api
+            .manager(root.path())
+            .reconnect(
+                context(),
+                ToolId::ClaudeCode,
+                next_expected_id,
+                &inv,
+                path.clone(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(next.connection.key_id, new_id, "{fault}");
+        api.manager(root.path())
+            .reconnect(context(), ToolId::ClaudeCode, &new_id, &inv, path.clone())
+            .await
+            .unwrap();
+        let config: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(config["theme"], "edited-while-offline", "{fault}");
+        let state = api.state.lock().unwrap();
+        assert_eq!(state.issues, 2, "{fault}");
+        assert_eq!(state.rotations, usize::from(fault == "save"), "{fault}");
+        assert_eq!(state.retired, 0, "{fault}");
+        assert_eq!(state.stage, "APPLIED", "{fault}");
+        assert_eq!(
+            state.historical,
+            vec![(1, old_secret, "ACTIVE".into())],
+            "{fault}"
+        );
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains(&state.secret),
+            "{fault}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn incompatible_naming_versions_at_each_stage_preserve_migration_for_safe_restart() {
+    for (action, skip) in [
+        ("inspect", 0),
+        ("issue", 0),
+        ("confirm", 0),
+        ("inspect", 1),
+        ("applied", 0),
+    ] {
+        for version in [Value::Null, json!(0), json!(2)] {
+            let root = tempdir().unwrap();
+            let api = Platform::start().await;
+            let inv = inventory(root.path());
+            let path = root.path().join("settings.json");
+            let old = api
+                .manager(root.path())
+                .connect(context(), ToolId::ClaudeCode, &inv, path.clone())
+                .await
+                .unwrap();
+            let before = std::fs::read(&path).unwrap();
+            let secret_before = api.state.lock().unwrap().secret.clone();
+            let starts_migration = action != "inspect" || skip == 1;
+            {
+                let mut state = api.state.lock().unwrap();
+                state.legacy = starts_migration;
+                state.override_skip = skip;
+                state.reply_override = Some((action, json!({"naming_version":version})));
+            }
+            let error = api
+                .manager(root.path())
+                .reconnect(
+                    context(),
+                    ToolId::ClaudeCode,
+                    &old.key_id,
+                    &inv,
+                    path.clone(),
+                )
+                .await
+                .unwrap_err();
+            assert!(
+                error.to_string().contains("更新服务"),
+                "{action}/{skip}/{version}: {error}"
+            );
+            assert!(error.downcast_ref::<CredentialLoss>().is_none());
+            let expected_id = if action == "applied" {
+                "2"
+            } else {
+                &old.key_id
+            };
+            if action != "applied" {
+                assert_eq!(std::fs::read(&path).unwrap(), before);
+            }
+            api.state.lock().unwrap().reply_override = None;
+            let next = api
+                .manager(root.path())
+                .reconnect(
+                    context(),
+                    ToolId::ClaudeCode,
+                    expected_id,
+                    &inv,
+                    path.clone(),
+                )
+                .await
+                .unwrap();
+            let state = api.state.lock().unwrap();
+            assert_eq!(state.issues, if starts_migration { 2 } else { 1 });
+            assert_eq!(state.rotations, usize::from(action == "issue"));
+            assert_eq!(state.retired, 0);
+            if starts_migration {
+                assert_eq!(state.historical, vec![(1, secret_before, "ACTIVE".into())]);
+            }
+            assert_eq!(next.connection.key_id, state.id.to_string());
+            assert!(std::fs::read_to_string(&path)
+                .unwrap()
+                .contains(&state.secret));
+        }
+    }
+}
+
+#[tokio::test]
+async fn locked_store_or_corrupt_cache_is_not_credential_loss_or_permission_to_migrate() {
+    struct LockedStore;
+    impl tokenmarket_core::desktop::DesktopCredentialStore for LockedStore {
+        fn read(&self) -> anyhow::Result<Option<String>> {
+            anyhow::bail!("fixture credential store locked")
+        }
+        fn write(&self, _: &str) -> anyhow::Result<()> {
+            anyhow::bail!("fixture credential store locked")
+        }
+        fn delete(&self) -> anyhow::Result<()> {
+            anyhow::bail!("fixture credential store locked")
+        }
+    }
+    for locked in [true, false] {
+        let root = tempdir().unwrap();
+        let api = Platform::start().await;
+        let inv = inventory(root.path());
+        let path = root.path().join("settings.json");
+        let old = api
+            .manager(root.path())
+            .connect(context(), ToolId::ClaudeCode, &inv, path.clone())
+            .await
+            .unwrap();
+        let before = std::fs::read(&path).unwrap();
+        let cache = root.path().join("state/keys.json");
+        let saved = std::fs::read(&cache).unwrap();
+        let old_secret = api.state.lock().unwrap().secret.clone();
+        api.state.lock().unwrap().legacy = true;
+        let manager = if locked {
+            ConnectionManager::with_credentials(
+                root.path().join("state"),
+                api.url.clone(),
+                api.url.clone(),
+                Arc::new(LockedStore),
+            )
+        } else {
+            std::fs::write(&cache, b"TOKENMARKET-PRIVATE-1\ncorrupt").unwrap();
+            api.manager(root.path())
+        };
+        let error = manager
+            .reconnect(
+                context(),
+                ToolId::ClaudeCode,
+                &old.key_id,
+                &inv,
+                path.clone(),
+            )
+            .await
+            .unwrap_err();
+        assert!(error.downcast_ref::<CredentialLoss>().is_none());
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        assert_eq!(api.state.lock().unwrap().issues, 1);
+        assert_eq!(api.state.lock().unwrap().secret, old_secret);
+        std::fs::write(&cache, saved).unwrap();
+        let next = api
+            .manager(root.path())
+            .reconnect(
+                context(),
+                ToolId::ClaudeCode,
+                &old.key_id,
+                &inv,
+                path.clone(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(next.connection.key_id, "2");
+        let state = api.state.lock().unwrap();
+        assert_eq!(state.issues, 2);
+        assert_eq!(state.rotations, 0);
+        assert_eq!(state.retired, 0);
+        assert_eq!(state.historical, vec![(1, old_secret, "ACTIVE".into())]);
+        assert!(std::fs::read_to_string(&path)
+            .unwrap()
+            .contains(&state.secret));
+    }
+}
+
+#[tokio::test]
+async fn adopted_binding_cannot_be_reported_as_requiring_another_naming_migration() {
+    let root = tempdir().unwrap();
+    let api = Platform::start().await;
+    let inv = inventory(root.path());
+    let path = root.path().join("settings.json");
+    let old = api
+        .manager(root.path())
+        .connect(context(), ToolId::ClaudeCode, &inv, path.clone())
+        .await
+        .unwrap();
+    let before = std::fs::read(&path).unwrap();
+    let cache = root.path().join("state/keys.json");
+    let keys_before = support::read_private(&cache);
+    api.state.lock().unwrap().reply_override = Some((
+        "inspect",
+        json!({"status":"MIGRATION_REQUIRED", "naming_version":1}),
+    ));
+    let error = api
+        .manager(root.path())
+        .reconnect(
+            context(),
+            ToolId::ClaudeCode,
+            &old.key_id,
+            &inv,
+            path.clone(),
+        )
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("更新服务"), "{error}");
+    assert!(error.downcast_ref::<CredentialLoss>().is_none());
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    assert_eq!(support::read_private(&cache), keys_before);
+    let state = api.state.lock().unwrap();
+    assert_eq!(state.issues, 1);
+    assert_eq!(state.rotations, 0);
+    assert_eq!(state.retired, 0);
+}
+
+#[tokio::test]
+async fn independent_cli_and_desktop_managers_cannot_publish_competing_migrations() {
+    let root = tempdir().unwrap();
+    let api = Platform::start().await;
+    let cli = api.manager(root.path());
+    let desktop = api.manager(root.path());
+    let inv = inventory(root.path());
+    // Separate detections still share the same connection store and device identity.
+    let desktop_inv = inventory(&root.path().join("desktop-detection"));
+    let path = root.path().join("settings.json");
+    let old = cli
+        .connect(context(), ToolId::ClaudeCode, &inv, path.clone())
+        .await
+        .unwrap();
+    let before = std::fs::read(&path).unwrap();
+    let historical_secret = api.state.lock().unwrap().secret.clone();
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let resume = Arc::new(tokio::sync::Notify::new());
+    {
+        let mut state = api.state.lock().unwrap();
+        state.legacy = true;
+        state.pause_catalogue = Some((entered.clone(), resume.clone()));
+    }
+    let migration = cli.reconnect(
+        context(),
+        ToolId::ClaudeCode,
+        &old.key_id,
+        &inv,
+        path.clone(),
+    );
+    let competing = async {
+        entered.notified().await;
+        let error = desktop
+            .reconnect(
+                context(),
+                ToolId::ClaudeCode,
+                &old.key_id,
+                &desktop_inv,
+                path.clone(),
+            )
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("工具操作正在进行"), "{error}");
+        assert_eq!(before, std::fs::read(&path).unwrap());
+        assert_eq!(desktop.list().unwrap()[0].key_id, old.key_id);
+        resume.notify_one();
+    };
+    let (next, ()) = tokio::join!(migration, competing);
+    let next = next.unwrap();
+    // A delayed UI request captured before migration cannot revert the committed binding.
+    assert!(desktop
+        .reconnect(
+            context(),
+            ToolId::ClaudeCode,
+            &old.key_id,
+            &desktop_inv,
+            path.clone()
+        )
+        .await
+        .is_err());
+    let reused = desktop
+        .reconnect(
+            context(),
+            ToolId::ClaudeCode,
+            &next.connection.key_id,
+            &desktop_inv,
+            path.clone(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(reused.connection.key_id, next.connection.key_id);
+    assert_ne!(reused.connection.key_id, old.key_id);
+    let state = api.state.lock().unwrap();
+    assert_eq!(
+        state.historical,
+        vec![(1, historical_secret, "ACTIVE".into())]
+    );
+    assert_eq!(state.id.to_string(), reused.connection.key_id);
+    assert_eq!(state.issues, 2);
+    assert_eq!(state.rotations, 0);
+    assert_eq!(state.retired, 0);
+    assert!(std::fs::read_to_string(&path)
+        .unwrap()
+        .contains(&state.secret));
+    assert_eq!(cli.list().unwrap()[0].key_id, reused.connection.key_id);
+}
+
+#[tokio::test]
+async fn workspace_change_during_migration_keeps_existing_configuration_and_resumes_same_key() {
+    let root = tempdir().unwrap();
+    let api = Platform::start().await;
+    let inv = inventory(root.path());
+    let path = root.path().join("settings.json");
+    let old = api
+        .manager(root.path())
+        .connect(context(), ToolId::ClaudeCode, &inv, path.clone())
+        .await
+        .unwrap();
+    let before = std::fs::read(&path).unwrap();
+    let history = api.state.lock().unwrap().secret.clone();
+    {
+        let mut state = api.state.lock().unwrap();
+        state.legacy = true;
+        state.switch_workspace_on_catalogue = Some("84".into());
+    }
+    assert!(api
+        .manager(root.path())
+        .reconnect(
+            context(),
+            ToolId::ClaudeCode,
+            &old.key_id,
+            &inv,
+            path.clone()
+        )
+        .await
+        .is_err());
+    assert_eq!(before, std::fs::read(&path).unwrap());
+    assert_eq!(
+        api.manager(root.path()).list().unwrap()[0].key_id,
+        old.key_id
+    );
+    let pending = api.state.lock().unwrap().id;
+    api.state.lock().unwrap().current_workspace = Some("42".into());
+    let next = api
+        .manager(root.path())
+        .reconnect(
+            context(),
+            ToolId::ClaudeCode,
+            &old.key_id,
+            &inv,
+            path.clone(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(next.connection.key_id, pending.to_string());
+    let state = api.state.lock().unwrap();
+    assert_eq!(state.historical, vec![(1, history, "ACTIVE".into())]);
+    assert_eq!(state.issues, 2);
+    assert_eq!(state.rotations, 0);
+    assert_eq!(state.retired, 0);
+    assert!(std::fs::read_to_string(path)
+        .unwrap()
+        .contains(&state.secret));
+}
+
+#[tokio::test]
+async fn account_change_during_migration_keeps_old_configuration_and_saved_new_identity() {
+    let root = tempdir().unwrap();
+    let api = Platform::start().await;
+    let inv = inventory(root.path());
+    let path = root.path().join("settings.json");
+    let old = api
+        .manager(root.path())
+        .connect(context(), ToolId::ClaudeCode, &inv, path.clone())
+        .await
+        .unwrap();
+    let before = std::fs::read(&path).unwrap();
+    let credentials = Arc::new(support::Credentials::default());
+    let session = json!({"session_token":"management-fixture","expires_at":"2999-01-01T00:00:00Z","user":{"id":"u1","name":"Fixture"},"default_workspace":{"id":"42","name":"Scope"}}).to_string();
+    *credentials.0.lock().unwrap() = Some(session.clone());
+    let login = tokenmarket_core::desktop::DesktopLogin::with_credentials(
+        root.path().join("login"),
+        tokenmarket_core::desktop::DesktopClient::new(api.url.clone()),
+        credentials.clone(),
+    );
+    let manager = api.manager(root.path()).with_shared_login(login);
+    {
+        let mut state = api.state.lock().unwrap();
+        state.legacy = true;
+        let other = json!({"session_token":"other-account","expires_at":"2999-01-01T00:00:00Z","user":{"id":"u2","name":"Other"},"default_workspace":{"id":"84","name":"Other"}}).to_string();
+        state.replace_login_on_catalogue = Some((credentials.clone(), other));
+    }
+    let error = manager
+        .reconnect(
+            context(),
+            ToolId::ClaudeCode,
+            &old.key_id,
+            &inv,
+            path.clone(),
+        )
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("共享登录已改变"), "{error}");
+    assert_eq!(before, std::fs::read(&path).unwrap());
+    assert_eq!(manager.list().unwrap()[0].key_id, old.key_id);
+    let saved = api.state.lock().unwrap().id;
+    *credentials.0.lock().unwrap() = Some(session);
+    let next = manager
+        .reconnect(
+            context(),
+            ToolId::ClaudeCode,
+            &old.key_id,
+            &inv,
+            path.clone(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(next.connection.key_id, saved.to_string());
+    let state = api.state.lock().unwrap();
+    assert_eq!(state.issues, 2);
+    assert_eq!(state.retired, 0);
+    assert!(std::fs::read_to_string(path)
+        .unwrap()
+        .contains(&state.secret));
+}
+
+#[tokio::test]
+async fn switching_service_addresses_keeps_each_migration_and_saved_identity_independent() {
+    let root = tempdir().unwrap();
+    let first = Platform::start().await;
+    let second = Platform::start().await;
+    let inv = inventory(root.path());
+    let path = root.path().join("settings.json");
+    let old = first
+        .manager(root.path())
+        .connect(context(), ToolId::ClaudeCode, &inv, path.clone())
+        .await
+        .unwrap();
+    first.state.lock().unwrap().legacy = true;
+    {
+        let mut state = second.state.lock().unwrap();
+        state.id = 100;
+        state.secret = "other-service-historical-secret".into();
+        state.status = "ACTIVE".into();
+        state.stage = "APPLIED".into();
+        state.legacy = true;
+    }
+    let migrated_first = first
+        .manager(root.path())
+        .reconnect(
+            context(),
+            ToolId::ClaudeCode,
+            &old.key_id,
+            &inv,
+            path.clone(),
+        )
+        .await
+        .unwrap();
+    let migrated_second = second
+        .manager(root.path())
+        .reconnect(
+            context(),
+            ToolId::ClaudeCode,
+            &migrated_first.connection.key_id,
+            &inv,
+            path.clone(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(migrated_first.connection.key_id, "2");
+    assert_eq!(migrated_second.connection.key_id, "101");
+    let returned = first
+        .manager(root.path())
+        .reconnect(
+            context(),
+            ToolId::ClaudeCode,
+            &migrated_second.connection.key_id,
+            &inv,
+            path.clone(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(returned.connection.key_id, migrated_first.connection.key_id);
+    assert!(returned.key_reused);
+    let returned = second
+        .manager(root.path())
+        .reconnect(
+            context(),
+            ToolId::ClaudeCode,
+            &returned.connection.key_id,
+            &inv,
+            path.clone(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        returned.connection.key_id,
+        migrated_second.connection.key_id
+    );
+    assert!(returned.key_reused);
+    let first_state = first.state.lock().unwrap();
+    let second_state = second.state.lock().unwrap();
+    assert_eq!(first_state.issues, 2);
+    assert_eq!(second_state.issues, 1);
+    assert_eq!(
+        first_state.historical,
+        vec![(1, "fixture-secret-1-1".into(), "ACTIVE".into())]
+    );
+    assert_eq!(
+        second_state.historical,
+        vec![(
+            100,
+            "other-service-historical-secret".into(),
+            "ACTIVE".into()
+        )]
+    );
+    assert_eq!((first_state.retired, second_state.retired), (0, 0));
+    let config = std::fs::read_to_string(path).unwrap();
+    assert!(config.contains(&second_state.secret));
+    assert!(config.contains(&second.url));
+    let saved: Value =
+        serde_json::from_slice(&support::read_private(&root.path().join("state/keys.json")))
+            .unwrap();
+    assert_eq!(saved.as_array().unwrap().len(), 2);
 }
