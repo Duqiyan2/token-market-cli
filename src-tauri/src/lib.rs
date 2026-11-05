@@ -1,3 +1,6 @@
+#[cfg(all(windows, debug_assertions, feature = "windows-update-fixtures"))]
+pub mod client_update;
+#[cfg(not(all(windows, debug_assertions, feature = "windows-update-fixtures")))]
 mod client_update;
 mod connections;
 mod installation;

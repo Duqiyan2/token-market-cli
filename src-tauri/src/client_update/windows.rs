@@ -20,7 +20,7 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-use tauri::AppHandle;
+use tauri::{AppHandle, Runtime};
 use tokenmarket_core::client_update::{
     run_guardian, ClientUpdateJournal, ClientUpdatePhase, GuardianEnvironment, GuardianPlan,
     NativeProcessIdentity,
@@ -200,58 +200,105 @@ fn private_stage(home: &Path) -> Result<PathBuf> {
     }
     Ok(stage)
 }
-/// NSIS bundle stamp and our installation hook establish provenance together.
-/// The registry is ownership evidence, never version-completion evidence.
-fn installed_application(app: &AppHandle) -> Result<PathBuf> {
-    use tauri::utils::config::{BundleType, NSISInstallerMode};
+#[derive(Clone)]
+struct RegistryScope {
+    machine_hive: bool,
+    system_owner: bool,
+    path: String,
+}
+#[derive(Clone)]
+struct InstallationSource {
+    application: PathBuf,
+    home: PathBuf,
+    origin: String,
+    product: String,
+    nsis_bundle: bool,
+    current_user_config: bool,
+    scopes: Vec<RegistryScope>,
+    user_scope: RegistryScope,
+}
+impl InstallationSource {
+    fn native<R: Runtime>(app: &AppHandle<R>) -> Result<Self> {
+        use tauri::utils::config::{BundleType, NSISInstallerMode};
+        let user = RegistryScope {
+            machine_hive: false,
+            system_owner: false,
+            path: UNINSTALL_ROOT.into(),
+        };
+        Ok(Self {
+            application: std::env::current_exe()?,
+            home: tokenmarket_core::config::home_dir(),
+            origin: tokenmarket_core::config::console_api_base_url(),
+            product: app
+                .config()
+                .product_name
+                .as_deref()
+                .unwrap_or("Token Market")
+                .into(),
+            nsis_bundle: tauri::utils::platform::bundle_type() == Some(BundleType::Nsis),
+            current_user_config: app.config().bundle.windows.nsis.as_ref().is_some_and(|n| {
+                n.install_mode == NSISInstallerMode::CurrentUser && n.template.is_none()
+            }),
+            scopes: vec![
+                user.clone(),
+                RegistryScope {
+                    machine_hive: true,
+                    system_owner: true,
+                    path: UNINSTALL_ROOT.into(),
+                },
+            ],
+            user_scope: user,
+        })
+    }
+}
+fn registry_root(scope: &RegistryScope) -> winreg::RegKey {
     use winreg::{
-        enums::{
-            HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_32KEY, KEY_WOW64_64KEY,
-        },
+        enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE},
         RegKey,
     };
-    if tauri::utils::platform::bundle_type() != Some(BundleType::Nsis)
-        || !app.config().bundle.windows.nsis.as_ref().is_some_and(|n| {
-            n.install_mode == NSISInstallerMode::CurrentUser && n.template.is_none()
-        })
-    {
+    RegKey::predef(if scope.machine_hive {
+        HKEY_LOCAL_MACHINE
+    } else {
+        HKEY_CURRENT_USER
+    })
+}
+/// NSIS bundle metadata + installed marker, never registry version as completion.
+fn installed_application(source: &InstallationSource) -> Result<PathBuf> {
+    use winreg::enums::{KEY_READ, KEY_WOW64_32KEY, KEY_WOW64_64KEY};
+    if !source.nsis_bundle || !source.current_user_config {
         bail!("当前安装方式不支持自动更新，请使用官方 NSIS 安装包手动更新；MSI 请使用 MSI 恢复");
     }
-    let application = std::env::current_exe()?;
-    reject_reparse_components(&application)?;
+    let application = &source.application;
+    reject_reparse_components(application)?;
     let directory = application.parent().context("无法定位客户端安装目录")?;
     nsis_tail(directory)?;
-    let product = app
-        .config()
-        .product_name
-        .as_deref()
-        .unwrap_or("Token Market");
-    for hive in [HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE] {
+    for scope in &source.scopes {
         for view in [KEY_WOW64_64KEY, KEY_WOW64_32KEY] {
-            let root = match RegKey::predef(hive)
-                .open_subkey_with_flags(UNINSTALL_ROOT, KEY_READ | view)
-            {
-                Ok(root) => root,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(e) => return Err(e.into()),
-            };
+            let root =
+                match registry_root(scope).open_subkey_with_flags(&scope.path, KEY_READ | view) {
+                    Ok(root) => root,
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                    Err(e) => return Err(e.into()),
+                };
             for name in root.enum_keys() {
                 let key = root.open_subkey_with_flags(name?, KEY_READ | view)?;
-                if key.get_value::<String, _>("DisplayName").ok().as_deref() == Some(product) {
+                if key.get_value::<String, _>("DisplayName").ok().as_deref()
+                    == Some(&source.product)
+                {
                     let is_msi = key.get_value::<u32, _>("WindowsInstaller").unwrap_or(0) == 1;
                     let uninstall = key
                         .get_value::<String, _>("UninstallString")
                         .unwrap_or_default()
                         .to_ascii_lowercase();
-                    if hive == HKEY_LOCAL_MACHINE || is_msi || uninstall.contains("msiexec") {
+                    if scope.system_owner || is_msi || uninstall.contains("msiexec") {
                         bail!("检测到 MSI 或系统级安装，无法自动切换安装归属；请使用对应官方安装包更新");
                     }
                 }
             }
         }
     }
-    let key = RegKey::predef(HKEY_CURRENT_USER)
-        .open_subkey(format!(r"{}\{}", UNINSTALL_ROOT, product))?;
+    let key = registry_root(&source.user_scope)
+        .open_subkey(format!(r"{}\{}", source.user_scope.path, source.product))?;
     let policy: String = key.get_value("TokenMarketUpdatePolicy")?;
     let location: String = key.get_value("TokenMarketUpdateDirectory")?;
     let registered: String = key.get_value("InstallLocation")?;
@@ -264,31 +311,28 @@ fn installed_application(app: &AppHandle) -> Result<PathBuf> {
     {
         bail!("无法确认当前用户 NSIS 安装来源，请先使用官方安装包手动更新");
     }
-    Ok(application)
+    Ok(application.clone())
 }
 
-pub struct WindowsInstaller {
-    app: AppHandle,
-    application: PathBuf,
+pub struct WindowsInstaller<R: Runtime> {
+    app: AppHandle<R>,
+    source: InstallationSource,
 }
-/// Register only after Windows lifecycle CI has validated this revision. Physical
-/// installed-client acceptance remains separate. Unsupported provenance is closed.
+/// Unsupported/unproven installations remain unavailable even in fixture builds.
 pub fn installer(app: &AppHandle) -> Option<Arc<dyn ClientUpdateInstaller>> {
-    // Deliberately closed until the actual Windows subprocess suite passes.
-    // The parent integration replaces this gate after recorded CI evidence.
     const WINDOWS_LIFETIME_VALIDATED: bool = false;
     if !WINDOWS_LIFETIME_VALIDATED {
         return None;
     }
-    installed_application(app).ok().map(|application| {
-        Arc::new(WindowsInstaller {
-            app: app.clone(),
-            application,
-        }) as Arc<dyn ClientUpdateInstaller>
-    })
+    let source = InstallationSource::native(app).ok()?;
+    installed_application(&source).ok()?;
+    Some(Arc::new(WindowsInstaller {
+        app: app.clone(),
+        source,
+    }))
 }
 
-impl ClientUpdateInstaller for WindowsInstaller {
+impl<R: Runtime> ClientUpdateInstaller for WindowsInstaller<R> {
     fn prepare(
         &self,
         verified: VerifiedClientUpdate,
@@ -296,20 +340,20 @@ impl ClientUpdateInstaller for WindowsInstaller {
         self.prepare_native(verified).map_err(|e| e.to_string())
     }
 }
-impl WindowsInstaller {
+impl<R: Runtime> WindowsInstaller<R> {
     fn prepare_native(
         &self,
         verified: VerifiedClientUpdate,
     ) -> Result<Box<dyn ClientUpdateHandoff>> {
         // Recheck ownership on each explicit attempt, not only at startup.
-        if installed_application(&self.app)? != self.application {
+        if installed_application(&self.source)? != self.source.application {
             bail!("客户端安装路径已改变，请重启后重试");
         }
         let (update, bytes) = verified.into_parts();
         if update.target != "windows-x86_64-nsis" {
             bail!("更新包安装方式不匹配，请使用官方 NSIS 安装包");
         }
-        let home = tokenmarket_core::config::home_dir();
+        let home = self.source.home.clone();
         let stage = private_stage(&home)?;
         let package = stage.join("verified-update.exe");
         let helper = stage.join("tokenmarket-update-guardian.exe");
@@ -328,7 +372,7 @@ impl WindowsInstaller {
             .create_new(true)
             .write(true)
             .open(&helper)?;
-        std::io::copy(&mut File::open(&self.application)?, &mut copy)?;
+        std::io::copy(&mut File::open(&self.source.application)?, &mut copy)?;
         copy.sync_all()?;
         drop(copy);
         let parent = current_identity()?;
@@ -348,10 +392,10 @@ impl WindowsInstaller {
             parent,
             plan: GuardianPlan {
                 home,
-                origin: tokenmarket_core::config::console_api_base_url(),
+                origin: self.source.origin.clone(),
                 from_version: update.current_version,
                 target_version: update.version,
-                application: self.application.clone(),
+                application: self.source.application.clone(),
                 package,
                 package_sha256: pinned.digest.clone(),
                 guardian: NativeProcessIdentity {
@@ -424,15 +468,15 @@ impl WindowsInstaller {
     }
 }
 
-struct WindowsHandoff {
-    app: AppHandle,
+struct WindowsHandoff<R: Runtime> {
+    app: AppHandle<R>,
     input: Option<ChildStdin>,
     reader: BufReader<ChildStdout>,
     child: Child,
     nonce: String,
     committed: bool,
 }
-impl ClientUpdateHandoff for WindowsHandoff {
+impl<R: Runtime> ClientUpdateHandoff for WindowsHandoff<R> {
     fn commit(mut self: Box<Self>) -> std::result::Result<(), String> {
         // Once any COMMIT bytes may have reached the guardian, an uncertain pipe
         // result is pending handoff, never retryable installation failure.
@@ -447,7 +491,7 @@ impl ClientUpdateHandoff for WindowsHandoff {
         Ok(())
     }
 }
-impl Drop for WindowsHandoff {
+impl<R: Runtime> Drop for WindowsHandoff<R> {
     fn drop(&mut self) {
         self.input.take();
         if !self.committed {
@@ -583,4 +627,108 @@ pub fn reconcile_startup() -> std::result::Result<ClientUpdateStartup, String> {
         }
     })();
     result.map_err(|e| e.to_string())
+}
+
+/// Test-only native boundary. Production constructors always derive installation
+/// metadata and registry roots from the running app/OS and retain all gates.
+#[cfg(all(debug_assertions, feature = "windows-update-fixtures"))]
+pub mod fixtures {
+    use super::*;
+    use crate::client_update::ClientUpdater;
+
+    pub struct NativeFixture<R: Runtime> {
+        updater: ClientUpdater,
+        installer: WindowsInstaller<R>,
+        app: AppHandle<R>,
+        home: PathBuf,
+    }
+    impl<R: Runtime> NativeFixture<R> {
+        /// Registry paths are fresh HKCU fixture subtrees, never real uninstall
+        /// keys. `machine_registry` models ownership using a second HKCU subtree.
+        pub fn new(
+            app: &AppHandle<R>,
+            home: PathBuf,
+            application: PathBuf,
+            user_registry: String,
+            machine_registry: String,
+            family: &str,
+            endpoint: String,
+            public_key: String,
+        ) -> Self {
+            let user = RegistryScope {
+                machine_hive: false,
+                system_owner: false,
+                path: user_registry,
+            };
+            let source = InstallationSource {
+                application: application.clone(),
+                home: home.clone(),
+                origin: "https://fixture.invalid".into(),
+                product: "Token Market".into(),
+                nsis_bundle: family.starts_with("nsis"),
+                current_user_config: family == "nsis-currentUser",
+                scopes: vec![
+                    user.clone(),
+                    RegistryScope {
+                        machine_hive: false,
+                        system_owner: true,
+                        path: machine_registry,
+                    },
+                ],
+                user_scope: user,
+            };
+            let mut updater = ClientUpdater::with_preferences("1.0.0".into(), None);
+            updater.config.endpoint = Some(endpoint);
+            updater.config.public_key = Some(public_key);
+            updater.config.target = Some("windows-x86_64-nsis".into());
+            updater.config.executable_path = Some(application);
+            updater.config.allow_loopback_http = true;
+            Self {
+                updater,
+                installer: WindowsInstaller {
+                    app: app.clone(),
+                    source,
+                },
+                app: app.clone(),
+                home,
+            }
+        }
+        /// Exercise actual high-level download followed by the production native
+        /// preparation seam. A fault simulates bytes corrupted after verification.
+        pub async fn prepare(
+            &self,
+            corrupt_download: bool,
+        ) -> std::result::Result<Box<dyn ClientUpdateHandoff>, String> {
+            let checked = self.updater.check(&self.app).await;
+            if checked.status != "available" {
+                return Err(format!("check: {:?}", checked.error));
+            }
+            let status = self.updater.download(&self.app, "1.1.0").await?;
+            if status.status != "ready" {
+                return Err(format!("download: {:?}", status.error));
+            }
+            let verified = {
+                let state = self.updater.state.lock().unwrap();
+                let mut bytes = state
+                    .verified_bytes
+                    .clone()
+                    .ok_or("missing verified fixture")?;
+                if corrupt_download {
+                    bytes[0] ^= 1;
+                }
+                VerifiedClientUpdate {
+                    update: state.candidate.clone().ok_or("missing candidate")?,
+                    bytes,
+                }
+            };
+            self.installer.prepare(verified)
+        }
+        pub fn staged_packages(&self) -> Vec<PathBuf> {
+            fs::read_dir(self.home.join(".tokenmarket/client-update-stage"))
+                .into_iter()
+                .flatten()
+                .filter_map(|e| e.ok().map(|e| e.path().join("verified-update.exe")))
+                .collect()
+        }
+    }
 }

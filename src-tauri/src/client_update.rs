@@ -62,9 +62,9 @@ struct UpdateConfig {
     endpoint: Option<String>,
     public_key: Option<String>,
     target: Option<String>,
-    #[cfg(test)]
+    #[cfg(any(test, all(debug_assertions, feature = "windows-update-fixtures")))]
     executable_path: Option<std::path::PathBuf>,
-    #[cfg(test)]
+    #[cfg(any(test, all(debug_assertions, feature = "windows-update-fixtures")))]
     allow_loopback_http: bool,
 }
 
@@ -78,9 +78,9 @@ impl UpdateConfig {
                 ("windows", "x86_64") => Some("windows-x86_64-nsis".into()),
                 _ => None,
             },
-            #[cfg(test)]
+            #[cfg(any(test, all(debug_assertions, feature = "windows-update-fixtures")))]
             executable_path: None,
-            #[cfg(test)]
+            #[cfg(any(test, all(debug_assertions, feature = "windows-update-fixtures")))]
             allow_loopback_http: false,
         }
     }
@@ -89,7 +89,7 @@ impl UpdateConfig {
         if url.scheme() == "https" {
             return Ok(());
         }
-        #[cfg(test)]
+        #[cfg(any(test, all(debug_assertions, feature = "windows-update-fixtures")))]
         if self.allow_loopback_http
             && url.scheme() == "http"
             && url
@@ -103,11 +103,11 @@ impl UpdateConfig {
     }
 
     fn fixture_http_enabled(&self) -> bool {
-        #[cfg(test)]
+        #[cfg(any(test, all(debug_assertions, feature = "windows-update-fixtures")))]
         {
             self.allow_loopback_http
         }
-        #[cfg(not(test))]
+        #[cfg(not(any(test, all(debug_assertions, feature = "windows-update-fixtures"))))]
         {
             false
         }
@@ -419,7 +419,7 @@ impl ClientUpdater {
             })
             .configure_client(move |client| client.https_only(!fixture_http))
             .timeout(Duration::from_secs(15));
-        #[cfg(test)]
+        #[cfg(any(test, all(debug_assertions, feature = "windows-update-fixtures")))]
         let builder = match &self.config.executable_path {
             Some(path) => builder.executable_path(path).no_proxy(),
             None => builder,
