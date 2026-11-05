@@ -12,6 +12,7 @@
         window.TokenMarketWorkspace.refresh(),
         window.TokenMarketTools.sync(),
       ]);
+      await window.TokenMarketUsage?.refresh();
     } finally {
       running = false;
       if (requested) { requested = false; request(); }

@@ -1,6 +1,6 @@
 # Lightweight desktop UI
 
-The desktop frontend in `src/tauri-ui` now uses the approved lightweight desktop design. It contains tool cards, account/workspace management, connection details, browser-login states and help. `shell.js` handles navigation, `app.js` retains desktop-login orchestration, and the existing workspace/tool/test modules invoke the native commands. Inventory uses redacted native summaries; model names come from the saved native catalogue.
+The desktop frontend in `src/tauri-ui` now uses the approved lightweight desktop design. It contains tool cards, [device tool usage](desktop-usage.md), account/workspace management, connection details, browser-login states and help. `shell.js` handles navigation, `app.js` retains desktop-login orchestration, and the existing workspace/tool/test modules invoke the native commands. Inventory uses redacted native summaries; model names come from the saved native catalogue.
 
 Agent details show configured models, connection ownership, test results and usage guidance. Configuration contents and the former protocol-only access-information block are omitted. Credentials and restoration receipts remain on the native side.
 
@@ -11,7 +11,7 @@ New connections and disconnections require explicit confirmation. Paid tests ret
 With Node and Playwright available:
 
 ```sh
-node --test tests/desktop-ui.test.cjs
+node --test tests/desktop-ui.test.cjs tests/desktop-usage.test.cjs
 ```
 
 Set `TOKEN_MARKET_TEST_BROWSER_CHANNEL=chrome` to use an installed Google Chrome. If Playwright is provided by an external dependency runtime, point `NODE_PATH` at its node_modules directory. Tests use a fresh browser context and an isolated native-IPC fixture. They do not access real credentials, edit Agent configuration, launch tools or send model requests.

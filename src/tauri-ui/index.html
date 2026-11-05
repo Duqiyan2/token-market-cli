@@ -9,6 +9,7 @@
 <link rel="stylesheet" href="workspace.css">
 <link rel="stylesheet" href="tools.css">
 <link rel="stylesheet" href="settings.css">
+<link rel="stylesheet" href="usage.css">
 </head>
 <body>
 <section id="login" class="login-page" aria-labelledby="title">
@@ -36,6 +37,7 @@
     <span class="nav-caption">工作台</span>
     <nav class="primary-nav" aria-label="主导航">
       <button data-page="tools" class="active"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>工具管理</button>
+      <button data-page="usage"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3v17h17M8 15V9m5 6V5m5 10v-4"/></svg>用量统计</button>
       <button data-page="account"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7V5a2 2 0 0 1 2-2h13v4M4 7h15a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z"/><path d="M16 11h5v6h-5a2 2 0 0 1 0-6Z"/></svg>账号与空间</button>
       <button data-page="help"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9 9a3 3 0 0 1 6 0c0 2-3 2-3 4m0 3v1"/></svg>使用帮助</button>
     </nav>
@@ -51,6 +53,35 @@
       <div id="workspace-region"></div>
       <section id="tools-region" aria-label="本机 Agent 工具" hidden></section>
       <footer class="page-note">切换当前空间不会改变已有连接的计费空间。<button class="quiet" data-page="help">了解接入流程</button></footer>
+    </section>
+    <section id="usage-page" data-view="usage" aria-labelledby="usage-title" hidden>
+      <header class="page-heading"><div><h1 id="usage-title">用量统计</h1><p id="usage-scope">当前空间 · 本设备工具的历史用量</p></div><button id="usage-refresh">刷新</button></header>
+      <form id="usage-filters" class="usage-filters" aria-label="用量筛选">
+        <label>时间<select id="usage-range"><option value="1">今天</option><option value="7">近 7 天</option><option value="30" selected>近 30 天</option></select></label>
+        <label>工具<select id="usage-tool"><option value="">全部工具</option></select></label>
+        <label>模型<input id="usage-model" type="search" placeholder="搜索模型" maxlength="128"></label>
+        <label>状态<select id="usage-status"><option value="ALL">全部状态</option><option value="SUCCESS">成功</option><option value="FAILED">失败</option><option value="CANCELLED">已取消</option></select></label>
+        <button type="submit">查询</button>
+      </form>
+      <div id="usage-feedback" class="notice error" role="status" hidden></div>
+      <section class="usage-overview" aria-label="用量汇总与趋势">
+        <div class="usage-cards">
+          <button type="button" class="usage-card" data-usage-metric="costMicro" aria-pressed="false"><span>总费用</span><strong id="usage-cost">—</strong></button>
+          <button type="button" class="usage-card" data-usage-metric="requestCount" aria-pressed="false"><span>总请求数</span><strong id="usage-requests">—</strong></button>
+          <button type="button" class="usage-card active" data-usage-metric="totalTokens" aria-pressed="true"><span>消耗 Tokens</span><strong id="usage-tokens">—</strong></button>
+          <button type="button" class="usage-card" data-usage-metric="cacheRate" aria-pressed="false"><span>缓存命中率</span><strong id="usage-cache">—</strong></button>
+        </div>
+        <div class="usage-chart-heading"><h2 id="usage-chart-title">Tokens · 按天</h2><span id="usage-updated" class="caption"></span></div>
+        <div id="usage-chart" class="usage-chart" role="img" aria-labelledby="usage-chart-title"></div>
+      </section>
+      <section class="usage-log-panel" aria-label="请求日志">
+        <header class="usage-log-heading"><h2>请求日志</h2><span id="usage-key-count" class="caption"></span></header>
+        <div class="usage-table-scroll" tabindex="0" role="region" aria-label="请求日志表格，可横向滚动">
+          <table class="usage-table"><thead><tr><th scope="col">时间</th><th scope="col">工具</th><th scope="col">模型</th><th scope="col">API Key</th><th scope="col">费用</th><th scope="col">输入</th><th scope="col">输出</th><th scope="col">缓存命中</th><th scope="col">状态</th><th scope="col">耗时</th><th scope="col">首字</th></tr></thead><tbody id="usage-rows"><tr><td colspan="11">打开页面后加载用量。</td></tr></tbody></table>
+        </div>
+        <footer class="usage-pagination"><label>每页<select id="usage-page-size"><option value="20">20 条</option><option value="50">50 条</option><option value="100">100 条</option></select></label><span id="usage-page-label">第 1 页</span><button id="usage-prev" disabled>上一页</button><button id="usage-next" disabled>下一页</button></footer>
+      </section>
+      <p class="usage-footnote">包含本设备在当前空间创建的全部历史工具 Key，费用单位与平台流水一致。已断开工具和更换 Key 前的流水仍会保留。时间按北京时间显示。</p>
     </section>
     <section id="account-page" data-view="account" hidden>
       <header class="page-heading"><div><h1>账号与空间</h1><p>管理当前身份、空间和可用余额。</p></div></header>
@@ -120,6 +151,7 @@
 <script src="workspace.js"></script>
 <script src="tools.js"></script>
 <script src="connection-test.js"></script>
+<script src="usage.js"></script>
 <script src="window-lifecycle.js"></script>
 <script src="app.js"></script>
 <script src="sync.js"></script>

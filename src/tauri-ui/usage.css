@@ -1,0 +1,48 @@
+.usage-filters{display:flex;align-items:end;gap:12px;flex-wrap:wrap;margin-bottom:20px}
+.usage-filters label{display:grid;gap:5px;color:var(--muted);font-size:12px}
+.usage-filters select{min-width:130px}
+.usage-filters input{width:190px}
+.usage-overview,.usage-log-panel{border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden;margin-bottom:22px}
+.usage-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-bottom:1px solid var(--line)}
+.usage-card{display:grid;gap:8px;text-align:left;min-width:0;padding:20px 18px;border:0;border-radius:0;border-bottom:3px solid transparent;background:transparent;font-weight:400}
+.usage-card+.usage-card{border-left:1px solid var(--line)}
+.usage-card span{color:var(--muted);font-size:13px}
+.usage-card strong{font-size:25px;font-weight:600;letter-spacing:-.6px;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.usage-card.active{border-bottom-color:var(--primary);background:var(--primary-soft)}
+.usage-chart-heading,.usage-log-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:20px 20px 0}
+.usage-chart-heading h2,.usage-log-heading h2{font-size:14px;margin:0}
+.usage-chart{min-height:210px;padding:8px 12px 15px}
+.usage-chart svg{display:block;width:100%;height:auto;max-height:255px;overflow:visible}
+.usage-chart text{fill:var(--muted);font-size:11px}
+.usage-chart .usage-gridline{stroke:var(--line);stroke-width:1}
+.usage-chart rect{fill:var(--primary)}
+.usage-chart>p{padding:55px 16px;margin:0;text-align:center}
+.usage-log-heading{padding:18px 20px}
+.usage-table-scroll{overflow:auto;overscroll-behavior-x:contain}
+.usage-table{width:100%;border-collapse:collapse;text-align:left;white-space:nowrap;font-size:12px;font-variant-numeric:tabular-nums}
+.usage-table th{padding:12px 14px;color:var(--muted);font-weight:500;background:var(--subtle);border-block:1px solid var(--line)}
+.usage-table td{padding:14px;border-bottom:1px solid var(--line)}
+.usage-table td:nth-child(n+5){text-align:right}
+.usage-table th:nth-child(n+5){text-align:right}
+.usage-table td:nth-child(9),.usage-table th:nth-child(9){text-align:left}
+.usage-table td.usage-empty{text-align:center!important;padding:38px 16px;color:var(--muted)}
+.usage-key,.usage-model-cell{max-width:190px;overflow:hidden;text-overflow:ellipsis;font-family:ui-monospace,SFMono-Regular,monospace}
+.usage-status{display:inline-block;padding:2px 7px;border-radius:5px;background:var(--subtle);color:var(--muted)}
+.usage-status.success{color:var(--success);background:var(--success-soft)}
+.usage-status.failed{color:var(--error);background:var(--error-soft)}
+.usage-pagination{display:flex;align-items:center;justify-content:flex-end;gap:10px;padding:12px 16px;flex-wrap:wrap;font-size:12px}
+.usage-pagination label{display:flex;align-items:center;gap:8px;margin-right:auto;color:var(--muted)}
+.usage-pagination select,.usage-pagination button{min-height:36px;padding:5px 10px}
+.usage-pagination>span{color:var(--muted)}
+.usage-footnote{font-size:12px;line-height:1.8}
+.usage-table tbody tr:hover{background:var(--subtle)}
+@media(max-width:1000px){.usage-card{padding:16px 12px}
+.usage-card strong{font-size:21px}
+.usage-filters{gap:9px}
+.usage-filters input{width:155px}
+}
+@media(max-width:700px){.usage-cards{grid-template-columns:repeat(2,minmax(0,1fr))}
+.usage-card:nth-child(3){border-left:0;border-top:1px solid var(--line)}
+.usage-card:nth-child(4){border-top:1px solid var(--line)}
+.usage-chart-heading{align-items:start;flex-direction:column}
+}

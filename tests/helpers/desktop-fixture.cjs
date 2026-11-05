@@ -48,12 +48,27 @@ module.exports = async function openFixture(browser, options = {}) {
     const workspace = () => ({user,current_workspace:fixture.current,switchable_workspaces:[personal,team],balance:options.noBalance?null:{currency:'CNY',amount:fixture.balanceAmount},balance_error:options.noBalance?'读取余额失败':null,can_recharge:!options.restricted,menus:options.restricted?[]:[{path:'/console/tokens'},{path:'/console/billing'},{path:'/console/spaces'}]});
     fixture.emit = (name,payload) => (fixture.events[name]||[]).forEach(fn=>fn({payload}));
     fixture.loginStatus = loginStatus;
+    fixture.usageRows = options.usageEmpty ? [] : Array.from({length:21},(_,i)=>({requestId:'usage-'+i,keyId:i%2?'101':'100',keyName:i%2?'Codex 新 Key':'Codex 历史 Key',tool:'codex',model:options.usageModel || 'fixture-model',status:'SUCCESS',statusCode:200,inputTokens:100,outputTokens:20,totalTokens:120,cacheReadTokens:80,cacheWriteTokens:0,costMicro:'100000',durationMs:2200,ttftMs:i===0?null:200,startedAt:Date.now()-i*1000,workspaceId:'personal'}));
+    fixture.usageRows.push({requestId:'team-only',keyId:'200',keyName:'团队 Key',tool:'claude-code',model:'team-model',status:'FAILED',statusCode:429,inputTokens:0,outputTokens:0,totalTokens:0,cacheReadTokens:0,cacheWriteTokens:0,costMicro:'0',durationMs:50,ttftMs:null,startedAt:Date.now(),workspaceId:'team'});
+    fixture.usageDeferred = [];
+    function usageResponse(command, request) {
+      if(command==='desktop_usage_buckets'&&options.usageSummaryError)throw Error('汇总服务暂不可用');
+      if(command==='desktop_usage_logs'&&options.usageLogError)throw Error('日志服务暂不可用');
+      const items=fixture.usageRows.filter(row=>row.workspaceId===request.workspaceId&&row.startedAt>=request.startTime&&row.startedAt<=request.endTime&&(!request.tool||row.tool===request.tool)&&(!request.model||row.model.includes(request.model))&&(request.status==='ALL'||!request.status||row.status===request.status));
+      const tools=request.workspaceId==='personal'?[{id:'codex',name:'Codex',keyCount:2}]:[{id:'claude-code',name:'Claude Code',keyCount:1}];
+      const start=Number(request.cursor || 0),page=items.slice(start,start+request.pageSize),buckets=[];
+      const groups=new Map();for(const row of items){const date=new Date(row.startedAt+8*3600000).toISOString().slice(0,10);let b=groups.get(date);if(!b){b={date,requestCount:0,costMicro:'0',inputTokens:0,outputTokens:0,totalTokens:0,cacheReadTokens:0,cacheWriteTokens:0,inputTokenCount:0};groups.set(date,b);}b.requestCount++;b.costMicro=String(BigInt(b.costMicro)+BigInt(row.costMicro));for(const field of ['inputTokens','outputTokens','totalTokens','cacheReadTokens','cacheWriteTokens'])b[field]+=row[field];b.inputTokenCount+=row.totalTokens-row.outputTokens;}
+      return {tools,buckets:command==='desktop_usage_buckets'?[...groups.values()]:[],items:command==='desktop_usage_logs'?clone(page):[],nextCursor:command==='desktop_usage_logs'&&start+request.pageSize<items.length?String(start+request.pageSize):null,page:request.page,pageSize:request.pageSize,asOf:Date.now()};
+    }
+
+
     window.__TAURI__ = {window:{getCurrentWindow:()=>({setTheme:async value=>{fixture.nativeTheme=value;}})},event:{listen:async (name,fn) => { (fixture.events[name] ||= []).push(fn); return () => {}; }},core:{invoke:async (command,args = {}) => {
       fixture.calls.push({command,args:clone(args)});
       const entry = fixture.entries.find(t=>t.id===args.tool);
       if (options.credentialLost && ['connect_tool','reconnect_tool'].includes(command) && !args.recovery) throw {message:'本机保存的连接信息已丢失',recovery:{keyId:'missing-fixture',ownerId:user.id,workspaceId:fixture.current.id,ownerName:user.name,workspaceName:fixture.current.name}};
       if (args.recovery && (args.recovery.ownerId!==user.id || args.recovery.workspaceId!==fixture.current.id)) throw Error('账号或空间已改变');
       switch(command) {
+        case 'desktop_usage_logs': case 'desktop_usage_buckets': if(fixture.deferUsage || options.deferUsage)return new Promise(resolve=>fixture.usageDeferred.push(()=>resolve(usageResponse(command,args.request))));return usageResponse(command,args.request);
         case 'desktop_window_preferences': if(fixture.deferPreferences)return new Promise(resolve=>{fixture.resolvePreferences=()=>resolve(clone(fixture.windowPreferences));});return clone(fixture.windowPreferences);
         case 'save_desktop_window_preferences': if(options.preferenceSaveError)throw Error('无法保存应用设置');fixture.windowPreferences.run_in_background=args.runInBackground;return clone(fixture.windowPreferences);
         case 'acknowledge_desktop_close': if(options.preferenceSaveError)throw Error('无法保存应用设置');fixture.windowPreferences.close_notice_pending=false;fixture.hidden=true;return null;

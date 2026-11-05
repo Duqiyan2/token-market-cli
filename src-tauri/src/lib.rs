@@ -2,6 +2,7 @@ mod connections;
 mod installation;
 mod window_lifecycle;
 mod workspace;
+mod usage;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
@@ -262,6 +263,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            usage::desktop_usage_logs,
+            usage::desktop_usage_buckets,
             workspace::desktop_workspace_context,
             workspace::switch_desktop_workspace,
             workspace::open_desktop_account_page,

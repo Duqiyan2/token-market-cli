@@ -15,6 +15,7 @@ pub mod desktop;
 pub mod desktop_workspace;
 pub mod installation;
 pub mod inventory;
+pub mod usage;
 
 pub mod connections;
 mod dumate;
