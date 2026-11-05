@@ -96,7 +96,7 @@
   }
   function controls() {
     const actions = text('div', '', 'inline-actions');
-    const retry = button('刷新余额', () => { notice = ''; void refresh(); }); retry.dataset.workspaceRefresh = ''; retry.disabled = loading || switching;
+    const retry = button('刷新余额', () => { message(''); void refresh(true); }); retry.dataset.workspaceRefresh = ''; retry.disabled = loading || switching;
     if (snapshot.can_recharge) { const recharge = button('充值', () => open('recharge')); recharge.className = 'primary'; recharge.disabled = switching; actions.append(recharge); }
     actions.append(retry); return actions;
   }
@@ -128,9 +128,10 @@
     const list = text('div', '', 'workspace-choices'); workspaceOptions(list); menuDialog.append(list);
     menuDialog.append(button('关闭', () => menuDialog.close())); menuDialog.showModal();
   }
-  function showProfile() {
-    if (profileMenu.open) { closeProfile(true); return; }
-    if (menuDialog.open) menuDialog.close();
+  function showProfile(updateOnly = false) {
+    const updating = updateOnly === true;
+    if (profileMenu.open && !updating) { closeProfile(true); return; }
+    if (!updating && menuDialog.open) menuDialog.close();
     const user = snapshot?.user || sessionUser || {};
     const name = user.display_name || user.user_name || user.name || '账号';
     const header = text('div', '', 'profile-menu-header');
@@ -138,10 +139,11 @@
     copy.append(text('strong', name), text('span', snapshot ? roleLabel(snapshot.current_workspace, user) : '账号信息暂不可用'));
     const close = button('', () => closeProfile(true)); close.className = 'profile-menu-close'; close.setAttribute('aria-label', '关闭账号菜单'); close.append(glyph('close'));
     header.append(avatar(user), copy, close);
-    profileMenu.replaceChildren(header);
+    const menuContent = document.createDocumentFragment(); menuContent.append(header);
     const actions = text('div', '', 'profile-menu-actions');
     function item(label, icon, action, danger = false) {
       const node = button('', () => { closeProfile(); action(); });
+      node.dataset.liveKey = label;
       node.className = `profile-menu-item${danger ? ' danger' : ''}`;
       node.append(glyph(icon), text('span', label)); actions.append(node); return node;
     }
@@ -151,18 +153,27 @@
       item('切换账号', 'switch', () => document.getElementById('change-account').click());
     } else item('重新读取账号', 'switch', () => void refresh());
     item('退出登录', 'logout', () => document.getElementById('logout').click(), true);
-    profileMenu.append(actions);
-    profileMenu.style.left = '8px'; profileMenu.style.top = '8px';
-    profileMenu.show(); positionProfile();
+    menuContent.append(actions); window.TokenMarketLiveUI.children(profileMenu, menuContent);
+    if (!updating) { profileMenu.style.left = '8px'; profileMenu.style.top = '8px'; profileMenu.show(); }
+    positionProfile();
     profileRoot.querySelector('button')?.setAttribute('aria-expanded', 'true');
-    profileMenu.focus({preventScroll:true});
+    if (!updating) profileMenu.focus({preventScroll:true});
   }
   function render() {
-    closeProfile();
-    root.replaceChildren(); accountRoot.replaceChildren(); profileRoot.replaceChildren();
+    const workspaceContent = document.createDocumentFragment(), accountContent = document.createDocumentFragment(), profileContent = document.createDocumentFragment();
+    const commit = () => {
+      window.TokenMarketLiveUI.children(root, workspaceContent);
+      window.TokenMarketLiveUI.children(accountRoot, accountContent);
+      window.TokenMarketLiveUI.children(profileRoot, profileContent);
+      if (profileMenu.open) showProfile(true);
+      if (menuDialog.open) {
+        const choices = document.createDocumentFragment(); workspaceOptions(choices);
+        window.TokenMarketLiveUI.children(menuDialog.querySelector('.workspace-choices'), choices);
+      }
+    };
     if (!snapshot) {
-      root.append(text('p', '正在读取账号与空间…', 'workspace-status'));
-      accountRoot.append(text('p', '正在读取账号与空间…', 'workspace-status')); const profile = button(sessionUser?.name || '账号', showProfile); profile.className = 'workspace-profile-button'; profile.setAttribute('aria-label', '账号菜单'); profileRoot.append(profile); return;
+      workspaceContent.append(text('p', '正在读取账号与空间…', 'workspace-status'));
+      accountContent.append(text('p', '正在读取账号与空间…', 'workspace-status')); const profile = button(sessionUser?.name || '账号', showProfile); profile.className = 'workspace-profile-button'; profile.setAttribute('aria-label', '账号菜单'); profileContent.append(profile); commit(); return;
     }
     const current = snapshot.current_workspace, user = snapshot.user;
     const name = user.display_name || user.user_name || user.name || '账号';
@@ -178,13 +189,13 @@
     identityArea.append(text('span', '当前空间 · 用于下一次接入', 'workspace-caption'), switcher);
     const balance = text('div', '', 'workspace-actions');
     const money = text('div', '', 'workspace-money'); money.append(text('span', '可用余额', 'workspace-caption'), text('strong', amount, 'workspace-balance'));
-    balance.append(money, controls()); header.append(identityArea, balance); root.append(header);
-    const status = text('p', notice || snapshot.balance_error || '', 'workspace-status'); status.dataset.feedback = ''; status.setAttribute('role', 'status'); root.append(status);
+    balance.append(money, controls()); header.append(identityArea, balance); workspaceContent.append(header);
+    const status = text('p', notice || snapshot.balance_error || '', 'workspace-status'); status.dataset.feedback = ''; status.setAttribute('role', 'status'); workspaceContent.append(status);
     const profile = button('', showProfile); profile.className = 'workspace-profile-button'; profile.setAttribute('aria-label', '账号菜单');
     const copy = text('span', '', 'workspace-profile-copy'); copy.append(text('strong', name), text('small', roleLabel(current, user)));
     const profileChevron = chevron.cloneNode(true); profileChevron.setAttribute('class', 'workspace-chevron');
-    profile.setAttribute('aria-haspopup', 'dialog'); profile.setAttribute('aria-controls', profileMenu.id); profile.setAttribute('aria-expanded', 'false');
-    profile.append(avatar(user), copy, profileChevron); profileRoot.append(profile);
+    profile.setAttribute('aria-haspopup', 'dialog'); profile.setAttribute('aria-controls', profileMenu.id); profile.setAttribute('aria-expanded', String(profileMenu.open));
+    profile.append(avatar(user), copy, profileChevron); profileContent.append(profile);
     const account = text('header', '', 'account-profile');
     const userCopy = text('div', '', 'account-profile-copy');
     userCopy.append(text('h2', name));
@@ -193,7 +204,7 @@
     if (user.email) meta.append(text('span', user.email));
     userCopy.append(meta);
     const profileAction = button('个人设置', () => open('profile')); profileAction.className = 'quiet account-edit'; profileAction.append(glyph('external'));
-    account.append(avatar(user), userCopy, profileAction); accountRoot.append(account);
+    account.append(avatar(user), userCopy, profileAction); accountContent.append(account);
 
     const overview = text('section', '', 'account-overview');
     const workspace = text('div', '', 'account-current'); workspace.append(text('h2', '当前空间'));
@@ -205,29 +216,32 @@
     workspace.append(text('p', '新接入的工具使用这个空间，已有连接保持各自的计费归属。'), switchAction);
     const wallet = text('div', '', 'account-wallet'); wallet.append(text('h2', '可用余额'), text('div', amount, 'account-balance'), controls());
     const walletStatus = text('p', notice || snapshot.balance_error || '余额与充值以当前空间为准。', 'workspace-status'); walletStatus.dataset.feedback = ''; walletStatus.setAttribute('role', 'status'); wallet.append(walletStatus);
-    overview.append(workspace, wallet); accountRoot.append(overview);
+    overview.append(workspace, wallet); accountContent.append(overview);
 
     const spaces = text('section', '', 'account-section'); spaces.append(text('h2', '可切换空间'));
-    const list = text('div', '', 'workspace-choices account-spaces'); workspaceOptions(list); spaces.append(list); accountRoot.append(spaces);
+    const list = text('div', '', 'workspace-choices account-spaces'); workspaceOptions(list); spaces.append(list); accountContent.append(spaces);
 
     const management = text('section', '', 'account-section account-management');
     const managementHeading = text('div', '', 'account-section-heading'); managementHeading.append(text('h2', '平台管理'), text('span', '在浏览器中打开', 'caption')); management.append(managementHeading);
     const platformActions = text('div', '', 'account-management-list');
     [['tokens','Token 管理','管理平台访问凭据','token'], ['billing','钱包与账单','查看消费明细与充值记录','wallet'], ['workspaces','空间管理','管理空间与成员权限','workspace']].forEach(([action, label, description, icon]) => {
       if (!menuAllows(snapshot.menus ?? [], action)) return;
-      const entry = button('', () => open(action)); entry.className = 'account-management-item'; entry.setAttribute('aria-label', label);
+      const entry = button('', () => open(action)); entry.dataset.liveKey = action; entry.className = 'account-management-item'; entry.setAttribute('aria-label', label);
       const copy = text('span', '', 'account-management-copy'); copy.append(text('strong', label), text('span', description));
       entry.append(glyph(icon), copy, glyph('external')); platformActions.append(entry);
     });
-    if (platformActions.childElementCount) { management.append(platformActions); accountRoot.append(management); }
+    if (platformActions.childElementCount) { management.append(platformActions); accountContent.append(management); }
     const session = text('footer', '', 'account-session'); const sessionCopy = text('div'); sessionCopy.append(text('strong', '当前会话'), text('p', '退出桌面账号不会取消已有工具的连接。'));
     const sessionActions = text('div', '', 'inline-actions'); sessionActions.append(button('切换账号', () => document.getElementById('change-account').click()));
-    const logout = button('退出登录', () => document.getElementById('logout').click()); logout.className = 'quiet danger'; sessionActions.append(logout); session.append(sessionCopy, sessionActions); accountRoot.append(session);
+    const logout = button('退出登录', () => document.getElementById('logout').click()); logout.className = 'quiet danger'; sessionActions.append(logout); session.append(sessionCopy, sessionActions); accountContent.append(session);
 
+    for (const node of accountContent.children) node.dataset.liveKey = node.classList.contains('account-management') ? 'account-management' : node.classList[0] || node.tagName;
+    commit();
   }
-  async function refresh() {
+  async function refresh(explicit = false) {
     if (!identity || switching || loading) return;
-    loading = true; const generation = epoch; document.querySelectorAll('[data-workspace-refresh]').forEach(button => { button.disabled = true; });
+    loading = true; const generation = epoch;
+    if (explicit === true) document.querySelectorAll('[data-workspace-refresh]').forEach(button => { button.disabled = true; });
     try { const next = await invoke('desktop_workspace_context'); if (generation === epoch && next && JSON.stringify(snapshot) !== JSON.stringify(next)) { const changed = snapshot && snapshot.current_workspace.id !== next.current_workspace.id; snapshot = next; render(); if (changed) window.dispatchEvent(new CustomEvent('current-workspace-changed', {detail:next.current_workspace})); } }
     catch (error) { if (generation === epoch) { if (!snapshot) { root.replaceChildren(text('p', '无法读取空间。', 'workspace-status'), button('重试', refresh)); accountRoot.replaceChildren(text('p', '无法读取账号与空间。'), button('重试', refresh)); } message(String(error)); } }
     finally { if (generation === epoch) { loading = false; document.querySelectorAll('[data-workspace-refresh]').forEach(button => { button.disabled = switching; }); } }
@@ -246,5 +260,4 @@
     identity = next; sessionUser = context?.user || null; ++epoch; snapshot = null; switching = false; loading = false; notice = ''; root.replaceChildren(); accountRoot.replaceChildren(); profileRoot.replaceChildren(); if (menuDialog.open) menuDialog.close();
     if (identity) { render(); void refresh(); }
   } };
-  window.addEventListener('focus', () => void refresh());
 })();

@@ -188,6 +188,7 @@ fn accept_desktop_callback(app: AppHandle, callback: String) {
             *generation += 1;
             *generation
         };
+        let _ = app.emit("desktop-login-status", desktop_value(&app));
         let result = state.login.complete(&callback).await;
         {
             let current = state.generation.lock().expect("desktop generation lock");
@@ -293,6 +294,9 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app, _event| {
+            if matches!(_event, tauri::RunEvent::Resumed) {
+                let _ = _app.emit_to("main", "desktop-activated", ());
+            }
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = _event {
                 window_lifecycle::show_main_window(_app);

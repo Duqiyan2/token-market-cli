@@ -12,13 +12,13 @@
   let pendingRecovery = null;
   let generation = 0;
   let installing = false, batching = false, batchStop = false;
-  let checking = false, updatePending = null, checkRequested = false;
+  let checking = false, updatePending = null, checkRequested = false, checkExplicitRequested = false;
   let updates = new Map();
   let entries = [];
   const expandedInstallations = new Set();
   let selectedTool = null, filter = 'all', search = '';
   const detailRoot = document.getElementById('tool-detail-region');
-  root.innerHTML = '<div class="tools-controls"><div class="tools-filters" role="group" aria-label="按连接状态筛选"><button data-tool-filter="all" class="selected">全部</button><button data-tool-filter="connected">已接入</button><button data-tool-filter="available">待接入</button></div><input type="search" class="tools-search" placeholder="搜索工具或模型" aria-label="搜索工具或模型"></div><div class="tools-feedback" role="status" aria-live="polite"></div><div class="tools-table-heading" aria-hidden="true"><span>工具名称</span><span class="install-column">版本与安装</span><span>接入状态</span><span class="billing-column">计费空间</span><span>操作</span></div><div class="tools-list"></div><p class="tools-count"></p>';
+  root.innerHTML = '<div class="tools-controls"><div class="tools-filters" role="group" aria-label="按工具状态筛选"><button data-tool-filter="all" class="selected">全部</button><button data-tool-filter="connected">已接入</button><button data-tool-filter="available">待接入</button><button data-tool-filter="uninstalled">未安装</button></div><input type="search" class="tools-search" placeholder="搜索工具或模型" aria-label="搜索工具或模型"></div><div class="tools-feedback" role="status" aria-live="polite"></div><div class="tools-table-heading" aria-hidden="true"><span>工具名称</span><span class="install-column">版本与安装</span><span>接入状态</span><span class="billing-column">计费空间</span><span>操作</span></div><div class="tools-list"></div><p class="tools-count"></p>';
   const searchInput = root.querySelector('.tools-search');
   searchInput.oninput = () => { search = searchInput.value.toLowerCase().trim(); render(); };
   root.querySelectorAll('[data-tool-filter]').forEach(button => { button.onclick = () => { filter = button.dataset.toolFilter; render(); }; });
@@ -74,6 +74,10 @@
     button.prepend(svg); return button;
   }
   const locations = entry => Array.isArray(entry.installations) ? entry.installations : [];
+  const matchesFilter = (entry, kind) => kind === 'all'
+    || kind === 'connected' && currentConnection(entry)
+    || kind === 'available' && entry.installed && !currentConnection(entry)
+    || kind === 'uninstalled' && !entry.installed && locations(entry).length === 0;
   const selectedLocation = entry => locations(entry).find(location => location.selected) || locations(entry)[0];
   function installationSummary(entry) {
     const source = selectedLocation(entry);
@@ -236,10 +240,10 @@
         const test = actionButton('测试连接', 'tool-test', () => window.dispatchEvent(new CustomEvent('tokenmarket-test-request', {detail:{id:entry.id,name:entry.name,connection:entry.connection}})), locked || testBlocked(entry));
         if (testBlocked(entry)) test.title = '请先检查配置或重新接入';
         group.append(test);
-        const menu = text('details', '', 'tool-menu'); menu.append(text('summary', '管理连接'));
+        const menu = text('details', '', 'tool-menu'); menu.dataset.liveKey = 'connection-menu'; menu.append(text('summary', '管理连接'));
         const options = text('div', '', 'tool-menu-options');
-        options.append(actionButton('重新接入', 'tool-connect', () => { menu.open = false; void connect(entry); }, !entry.canConnect || locked));
-        options.append(actionButton('取消接入', 'tool-disconnect', () => { menu.open = false; confirmDisconnectStart(entry); }, locked));
+        options.append(actionButton('重新接入', 'tool-connect', event => { event.currentTarget.closest('details').open = false; void connect(entry); }, !entry.canConnect || locked));
+        options.append(actionButton('取消接入', 'tool-disconnect', event => { event.currentTarget.closest('details').open = false; confirmDisconnectStart(entry); }, locked));
         menu.append(options); group.append(menu);
       }
     } else if (!entry.connection && entry.installed) {
@@ -266,26 +270,27 @@
     if (section) { section.tabIndex = -1; section.focus({preventScroll:true}); section.scrollIntoView({block:'center'}); }
   }
   function renderDetail(entry) {
-    detailRoot.replaceChildren();
+    const nextDetail = document.createDocumentFragment();
+    if (detailRoot.dataset.detailTool !== entry.id) { detailRoot.replaceChildren(); detailRoot.dataset.detailTool = entry.id; }
     const connection = entry.connection;
-    detailRoot.append(actionButton('返回工具列表', 'quiet tool-detail-close', () => window.TokenMarketShell.show('tools')));
+    nextDetail.append(actionButton('返回工具列表', 'quiet tool-detail-close', () => window.TokenMarketShell.show('tools')));
     const header = text('header', '', 'page-heading tool-detail-heading');
     const title = text('div', '', 'tool-detail-title'); const names = text('div'); names.append(text('h1', entry.name), text('p', entry.installed ? '已检测到本机安装' : '尚未安装')); title.append(toolIcon(entry), names);
-    header.append(title); detailRoot.append(header); const operation = text('div', message.classList.contains('error') ? message.textContent : '', `tools-feedback tool-operation-status${message.classList.contains('error') ? ' error' : ''}`); operation.setAttribute('role', 'status'); detailRoot.append(operation);
+    header.append(title); nextDetail.append(header); const operation = text('div', message.classList.contains('error') ? message.textContent : '', `tools-feedback tool-operation-status${message.classList.contains('error') ? ' error' : ''}`); operation.setAttribute('role', 'status'); nextDetail.append(operation);
     if (connection) {
       const notice = text('div', '', `notice ${testBlocked(entry) ? 'warning' : connection.state === 'test_failed' ? 'error' : connection.state === 'test_passed' ? 'success' : ''}`);
       notice.append(text('h3', connectionLabel(entry)));
       const note = connection.state === 'environment_mismatch' ? '当前工具使用其他环境的连接，尚未接入当前环境，测试已停用。请通过“管理连接 → 重新接入”切换到当前环境。' : connection.state === 'configuration_changed' ? '当前配置与接入记录不一致，测试已停用。请检查配置或重新接入。' : connection.state === 'test_passed' ? window.TokenMarketConnectionTests.scope : connection.state === 'test_failed' ? `未通过接口文本测试。请检查权限、余额与模型可用性后重试。${window.TokenMarketConnectionTests.scope}` : '配置已保存，尚未发起模型测试。可以先打开工具；需要时再确认费用并测试。';
-      notice.append(text('p', note)); detailRoot.append(notice);
-    } else detailRoot.append(text('p', entry.id === 'dumate-enterprise' ? '企业管理员需开放自定义模型与模型选择权限。先在 DuMate 登录企业版并完全退出，再接入；将使用当前企业登录态查询权限。导入后在此选择一个模型并确认费用测试，通过后重新打开 DuMate 并在会话中选择。' : entry.id === 'dumate' ? 'DuMate 个人版一次配置一个模型。请先在 DuMate 登录个人版，再完全退出应用后接入；重新打开后生效。' : entry.installed ? '工具已安装，接入后即可使用 Token Market 模型。' : '先安装工具，再返回检查更新和接入。', 'notice'));
-    detailRoot.append(actions(entry, true));
-    detailRoot.append(installationDetails(entry));
+      notice.append(text('p', note)); nextDetail.append(notice);
+    } else nextDetail.append(text('p', entry.id === 'dumate-enterprise' ? '企业管理员需开放自定义模型与模型选择权限。先在 DuMate 登录企业版并完全退出，再接入；将使用当前企业登录态查询权限。导入后在此选择一个模型并确认费用测试，通过后重新打开 DuMate 并在会话中选择。' : entry.id === 'dumate' ? 'DuMate 个人版一次配置一个模型。请先在 DuMate 登录个人版，再完全退出应用后接入；重新打开后生效。' : entry.installed ? '工具已安装，接入后即可使用 Token Market 模型。' : '先安装工具，再返回检查更新和接入。', 'notice'));
+    nextDetail.append(actions(entry, true));
+    nextDetail.append(installationDetails(entry));
     const update = updates.get(entry.id);
     if (entry.installed && update) {
       const version = text('section', '', `sheet tool-version-sheet${update.manualUpgrade ? ' tool-manual-update' : ''}`);
       version.append(text('h2', update.manualUpgrade ? '手动更新' : '版本与更新'), detailRow('当前版本', versionDisplay(update.currentVersion)), detailRow('官方最新版本', update.latestVersion || '检查未完成'), text('p', update.manualUpgrade ? ` ${update.note}。目标版本 ${versionDisplay(update.latestVersion || update.targetVersion)}，完成后返回点击“检查更新”。`.trim() : update.note));
       if (['check_failed','unknown','manual_update','unsupported_update'].includes(update.state) || !update.canUpgrade && update.currentVersion !== update.targetVersion) version.append(actionButton(update.manualUpgrade ? '打开官方更新指引' : '官方更新说明', 'quiet tool-download', async () => { try { await invoke('download_tool', {tool:entry.id}); } catch (error) { showResult('无法打开说明', String(error)); } }));
-      detailRoot.append(version);
+      nextDetail.append(version);
     }
     const grid = text('div', '', 'tool-detail-grid'), left = text('div');
     const models = text('section', '', 'sheet'); models.append(text('h2', '已配置模型'));
@@ -308,30 +313,33 @@
       context.append(text('h2', '工具信息'), detailRow('安装状态', entry.installed ? '已安装' : '未安装'), detailRow('接入空间', window.TokenMarketWorkspace.current?.current_workspace?.name || '当前空间'));
       context.append(text('p', '接入会配置模型和凭据，不会自动发起模型测试。'));
     }
-    grid.append(context, left); detailRoot.append(grid);
+    grid.append(context, left); nextDetail.append(grid);
+    for (const node of nextDetail.children) node.dataset.liveKey = [...node.classList].find(name => name.startsWith('tool-')) || node.classList[0] || node.tagName;
+    window.TokenMarketLiveUI.children(detailRoot, nextDetail);
   }
   function render() {
-    if (checkRequested && authenticated && !checking && !loading && !installing && !batching && !connecting && !disconnecting && !window.TokenMarketConnectionTests?.busy) queueMicrotask(() => void checkUpdates());
+    if (checkRequested && authenticated && !checking && !loading && !installing && !batching && !connecting && !disconnecting && !window.TokenMarketConnectionTests?.busy) queueMicrotask(() => void checkUpdates(checkExplicitRequested, !checkExplicitRequested));
     refreshButton.disabled = checking || installing || batching || connecting || disconnecting || Boolean(window.TokenMarketConnectionTests?.busy);
     refreshButton.textContent = checking ? '检查中…' : '检查更新';
     const upgradeCount = upgradeCandidates().length;
     upgradeAllButton.querySelector('span').textContent = `全部升级（${upgradeCount}）`;
     upgradeAllButton.disabled = !upgradeCount || refreshButton.disabled || loading;
-    list.replaceChildren();
-    const visible = entries.filter(entry => (filter === 'all' || filter === 'connected' && currentConnection(entry) || filter === 'available' && entry.installed && !currentConnection(entry)) && `${entry.name} ${(entry.connection?.models || []).join(' ')}`.toLowerCase().includes(search));
+    const nextList = document.createDocumentFragment();
+    const visible = entries.filter(entry => matchesFilter(entry, filter) && `${entry.name} ${(entry.connection?.models || []).join(' ')}`.toLowerCase().includes(search));
     root.querySelectorAll('[data-tool-filter]').forEach(button => {
       const kind = button.dataset.toolFilter;
-      const count = entries.filter(entry => kind === 'all' || kind === 'connected' && currentConnection(entry) || kind === 'available' && entry.installed && !currentConnection(entry)).length;
-      button.textContent = `${({all:'全部',connected:'已接入',available:'待接入'})[kind]} ${count}`;
+      const count = entries.filter(entry => matchesFilter(entry, kind)).length;
+      const label = `${({all:'全部',connected:'已接入',available:'待接入',uninstalled:'未安装'})[kind]} ${count}`;
+      if (button.textContent !== label) button.textContent = label;
       button.classList.toggle('selected', filter === kind); button.setAttribute('aria-pressed', String(filter === kind));
     });
     if (!entries.length) {
       const empty = text('div', '', 'tools-empty');
       empty.append(text('h2', loading ? '正在检测本机工具…' : message.classList.contains('error') ? '暂时无法检测本机工具' : '没有检测到工具'), text('p', loading ? '请稍候，安装状态即将更新。' : message.classList.contains('error') ? message.textContent : '安装工具后，点击检查更新。'));
       if (!loading) empty.append(actionButton('检查更新', '', () => refreshButton.click()));
-      list.append(empty);
+      nextList.append(empty);
     } else if (!visible.length) {
-      const empty = text('div', '', 'tools-empty'); empty.append(text('h2', '没有匹配的工具'), text('p', '试试其他名称，或查看全部工具。'), actionButton('查看全部工具', '', () => { search = ''; filter = 'all'; searchInput.value = ''; render(); })); list.append(empty);
+      const empty = text('div', '', 'tools-empty'); empty.append(text('h2', '没有匹配的工具'), text('p', '试试其他名称，或查看全部工具。'), actionButton('查看全部工具', '', () => { search = ''; filter = 'all'; searchInput.value = ''; render(); })); nextList.append(empty);
     }
     const ordered = [...visible.filter(entry => entry.installed), ...visible.filter(entry => !entry.installed)];
     ordered.forEach(entry => {
@@ -350,9 +358,11 @@
       billing.title = entry.connection?.boundWorkspace?.name || '接入时使用当前空间';
       row.append(nameCell, install, state, billing, actions(entry));
       if (expandedInstallations.has(entry.id) && locations(entry).length>1) row.append(installationPanel(entry));
-      list.append(row);
+      nextList.append(row);
     });
-    root.querySelector('.tools-count').textContent = entries.length ? `显示 ${visible.length} 个工具，共 ${entries.length} 个` : '';
+    window.TokenMarketLiveUI.children(list, nextList);
+    const countLabel = entries.length ? `显示 ${visible.length} 个工具，共 ${entries.length} 个` : '';
+    if (root.querySelector('.tools-count').textContent !== countLabel) root.querySelector('.tools-count').textContent = countLabel;
     const selected = entries.find(entry => entry.id === selectedTool);
     if (selected) renderDetail(selected);
   }
@@ -361,16 +371,25 @@
     if (loading) { if (waitForCurrent === true) { await inventoryPending; return refresh(true); } return; }
     let finishInventory;
     inventoryPending = new Promise(resolve => { finishInventory = resolve; });
+    const firstLoad = entries.length === 0;
+    let changed = false;
     loading = true; const current = generation;
-    render();
+    // Retain the current DOM during background detection: loading placeholders
+    // and rebuilding unchanged rows collapse menus and move the page content.
+    if (firstLoad) render();
     let success = false;
     try {
       const next = await invoke('desktop_tool_inventory');
-      if (authenticated && current === generation) { entries = next; success = true; if (message.classList.contains('error')) feedback(''); }
-    } catch (error) { if (authenticated && current === generation) { entries = []; feedback(String(error), true); } }
+      if (authenticated && current === generation) {
+        changed = JSON.stringify(entries) !== JSON.stringify(next);
+        if (changed) entries = next;
+        success = true;
+        if (message.classList.contains('error')) feedback('');
+      }
+    } catch (error) { if (authenticated && current === generation) { feedback(String(error), true); } }
     finally {
       loading = false; finishInventory();
-      if (authenticated && current === generation) render();
+      if (authenticated && current === generation) { if (firstLoad || changed) render(); }
       else if (authenticated) refresh();
     }
     return success;
@@ -618,16 +637,17 @@
     }
   }
   withIcon(upgradeAllButton); upgradeAllButton.onclick = confirmUpgradeAll;
-  function checkUpdates(explicit = false) {
+  function checkUpdates(explicit = false, silent = false) {
     if (!authenticated) return Promise.resolve();
     if (updatePending) return updatePending;
     if (installing || batching || connecting || disconnecting || window.TokenMarketConnectionTests?.busy) {
-      checkRequested = true;
+      checkRequested = true; checkExplicitRequested ||= explicit;
       if (explicit) updateStatus.textContent = '当前操作完成后将检查更新';
       return Promise.resolve();
     }
-    checkRequested = false;
-    const current = generation; checking = true; render(); updateStatus.textContent = '正在检测本机工具与官方版本…';
+    checkRequested = false; checkExplicitRequested = false;
+    const current = generation; checking = !silent;
+    if (!silent) { render(); updateStatus.textContent = '正在检测本机工具与官方版本…'; }
     const pending = (async () => {
       try {
         const success = await refresh(true);
@@ -643,7 +663,7 @@
         const failed = installed.filter(update => ['check_failed','unknown','busy'].includes(update.state)).length;
         updateStatus.textContent = `已检查 ${installed.length} 个已安装工具 · ${available} 个可升级${manual ? ` · ${manual} 个需手动更新` : ''}${restricted ? ` · ${restricted} 个接入适配需更新` : ''}${failed ? ` · ${failed} 个检查未完成，可重试` : ''} · ${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`;
       } catch (error) {
-        if (authenticated && current === generation) { updates.clear(); updateStatus.textContent = `检查未完成：${String(error)}`; }
+        if (!silent && authenticated && current === generation) { updates.clear(); updateStatus.textContent = `检查未完成：${String(error)}`; }
       } finally {
         if (current === generation) { checking = false; render(); }
         if (updatePending === pending) updatePending = null;
@@ -653,11 +673,10 @@
   }
   refreshButton.onclick = () => void checkUpdates(true);
   window.__TAURI__.event.listen('desktop-check-tool-updates', () => void checkUpdates()).catch(error => console.error(error));
-  window.addEventListener('focus', refresh);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
-  setInterval(() => { if (!document.hidden) refresh(); }, 15000);
+
   window.TokenMarketTools = {
     refresh,
+    sync: () => checkUpdates(false, true),
     setAuthenticated(value) {
       value = Boolean(value);
       root.hidden = !value;

@@ -533,6 +533,162 @@ test('installation failure preserves the error and offers a retry', async () => 
   } finally { await f.close(); }
 });
 
+test('idle dashboard never polls installation, workspace, versions or login renewal', async () => {
+  const f=await openFixture();try {
+    const p=f.page;await p.clock.install();await p.reload();
+    await p.locator('.tools-updates-status').filter({hasText:'已检查'}).waitFor();
+    const commands=['desktop_tool_inventory','desktop_workspace_context','check_tool_updates','refresh_desktop_session'];
+    const before=await Promise.all(commands.map(command=>calls(p,command).then(value=>value.length)));
+    await p.clock.fastForward(10*60*1000);
+    assert.deepEqual(await Promise.all(commands.map(command=>calls(p,command).then(value=>value.length))),before);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('activation events coalesce and patch changed tool values without replacing rows or open controls', async () => {
+  const f=await openFixture();try {
+    const p=f.page;await p.locator('.tools-updates-status').filter({hasText:'已检查'}).waitFor();
+    await detail(p,'codex');await p.waitForTimeout(150);
+    await p.locator('#tool-detail-region .tool-menu summary').click();
+    const commands=['desktop_tool_inventory','desktop_workspace_context','check_tool_updates','refresh_desktop_session'];
+    const before=await Promise.all(commands.map(command=>calls(p,command).then(value=>value.length)));
+    await p.evaluate(()=>{
+      window.__stableNodes=[document.querySelector('[data-tool="codex"]'),document.querySelector('[data-tool="claude-code"]'),document.querySelector('[data-tool="codex"] .tool-version'),document.querySelector('[data-tool="codex"] .tool-launch')];
+      window.__fixture.updateVersions.codex='0.170.0';
+      window.__fixture.entries.find(e=>e.id==='codex').connection.state='test_passed';
+      window.dispatchEvent(new Event('focus'));document.dispatchEvent(new Event('visibilitychange'));window.__fixture.emit('desktop-activated');
+    });
+    await p.locator('[data-tool="codex"] .tool-version').filter({hasText:'0.170.0'}).waitFor({state:'attached'});
+    assert.deepEqual(await Promise.all(commands.map(command=>calls(p,command).then(value=>value.length))),before.map(value=>value+1));
+    assert.equal(await p.evaluate(()=>window.__stableNodes.every(node=>node.isConnected)),true);
+    assert.equal(await p.locator('#tool-detail-region .tool-menu').getAttribute('open'),'');
+    assert.match(await p.locator('[data-tool="codex"] > .tool-state').innerText(),/测试通过/);
+    await p.locator('#tool-detail-region .tool-connect').click();
+    await p.locator('.reconnect-dialog[open]').waitFor();
+    assert.equal(await p.locator('#tool-detail-region .tool-menu').getAttribute('open'),null);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('account and balance updates retain their nodes, menu and keyboard focus', async () => {
+  const f=await openFixture();try {
+    const p=f.page;await p.locator('.workspace-balance').waitFor();await p.locator('.workspace-profile-button').click();
+    await p.keyboard.press('ArrowDown');
+    await p.evaluate(()=>{
+      window.__balanceNode=document.querySelector('.workspace-balance');window.__accountNode=document.querySelector('.account-balance');window.__profileNode=document.querySelector('.workspace-profile-button');window.__menuFocus=document.activeElement;
+      window.__fixture.balanceAmount='42.123';window.__fixture.user.display_name='更新后的账号';window.__fixture.emit('desktop-activated');
+    });
+    await p.locator('.workspace-balance').filter({hasText:'42.12'}).waitFor();
+    assert.equal(await p.evaluate(()=>window.__balanceNode===document.querySelector('.workspace-balance')&&window.__accountNode===document.querySelector('.account-balance')&&window.__profileNode===document.querySelector('.workspace-profile-button')),true);
+    assert.equal(await p.locator('#account-menu').isVisible(),true);
+    assert.equal(await p.evaluate(()=>document.activeElement===window.__menuFocus),true);
+    assert.match(await p.locator('#account-menu .profile-menu-identity').innerText(),/更新后的账号/);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('page and workspace changes synchronize information without an idle timer', async () => {
+  const f=await openFixture();try {
+    const p=f.page;await p.locator('.tools-updates-status').filter({hasText:'已检查'}).waitFor();
+    const before=(await calls(p,'check_tool_updates')).length;
+    await p.locator('.primary-nav [data-page="account"]').click();
+    await p.waitForFunction(before=>window.__fixture.calls.filter(c=>c.command==='check_tool_updates').length===before+1,before);
+    await p.locator('.account-switch-action').click();
+    await p.locator('dialog[open] [data-workspace-id="team"]').click();
+    await p.waitForFunction(before=>window.__fixture.calls.filter(c=>c.command==='check_tool_updates').length===before+2,before);
+    assert.match(await p.locator('.account-current-copy').innerText(),/团队空间/);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('an open tool detail patches versions and models and its retained test button uses new data', async () => {
+  const f=await openFixture();try {
+    const p=f.page;await p.locator('.tools-updates-status').filter({hasText:'已检查'}).waitFor();
+    await detail(p,'codex');
+    await p.evaluate(()=>{
+      window.__detailNodes=[document.querySelector('.tool-detail-heading'),document.querySelector('.tool-files-sheet'),document.querySelector('.tool-version-sheet'),document.querySelector('#tool-detail-region .tool-test')];
+      window.__fixture.updateVersions.codex='0.171.0';window.__fixture.entries.find(e=>e.id==='codex').connection.models=['updated-model'];window.__fixture.emit('desktop-activated');
+    });
+    await p.locator('.tool-version-sheet').filter({hasText:'0.171.0'}).waitFor();
+    assert.equal(await p.evaluate(()=>window.__detailNodes.every(node=>node.isConnected)),true);
+    assert.equal(await p.locator('#tool-detail-region .tool-model-entry code').innerText(),'updated-model');
+    await p.locator('#tool-detail-region .tool-test').click();
+    await p.locator('.connection-test-dialog[open]').waitFor();
+    assert.equal(await p.locator('.connection-test-dialog select option').last().getAttribute('value'),'updated-model');
+    assert.equal((await calls(p,'test_tool_connection')).length,0);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('activation during an in-flight sync is followed by one sync with the latest installation state', async () => {
+  const f=await openFixture();try {
+    const p=f.page;await p.locator('.tools-updates-status').filter({hasText:'已检查'}).waitFor();
+    const before=(await calls(p,'check_tool_updates')).length;
+    await p.evaluate(()=>{window.__fixture.deferUpdates=true;window.__fixture.emit('desktop-activated');});
+    await p.waitForFunction(()=>Boolean(window.__fixture.resolveUpdates));
+    await p.evaluate(()=>{window.__fixture.entries.find(e=>e.id==='openclaw').installed=true;window.__fixture.emit('desktop-activated');window.dispatchEvent(new Event('focus'));});
+    // Allow the debounced activation to arrive while the first request is pending.
+    await p.waitForTimeout(150);
+    assert.equal((await calls(p,'check_tool_updates')).length,before+1);
+    await p.evaluate(()=>{window.__fixture.deferUpdates=false;window.__fixture.resolveUpdates();});
+    await p.waitForFunction(before=>window.__fixture.calls.filter(c=>c.command==='check_tool_updates').length===before+2,before);
+    await p.locator('[data-tool-filter="uninstalled"]').filter({hasText:'未安装 10'}).waitFor();
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('login status uses native notifications and expiry deadlines instead of idle polling', async () => {
+  const f=await openFixture();try {
+    const p=f.page;await p.clock.install();await p.reload();
+    await p.locator('.tools-updates-status').filter({hasText:'已检查'}).waitFor();
+    const before=(await calls(p,'desktop_login_status')).length;
+    await p.clock.fastForward(30000);
+    assert.equal((await calls(p,'desktop_login_status')).length,before);
+    await p.evaluate(()=>{window.__fixture.signedIn=false;window.__fixture.emit('desktop-login-status',window.__fixture.loginStatus());});
+    assert.equal(await p.locator('#login').isVisible(),true);
+    await p.evaluate(()=>{
+      window.__fixture.pending={session_id:'expiry-fixture',authorize_url:'https://example.invalid',expires_at:new Date(Date.now()+5000).toISOString()};
+      window.__fixture.emit('desktop-login-status',window.__fixture.loginStatus());
+      window.__fixture.pending=null;
+    });
+    assert.equal(await p.locator('#waiting').isVisible(),true);
+    await p.clock.fastForward(5100);
+    assert.equal((await calls(p,'desktop_login_status')).length,before+1);
+    assert.equal(await p.locator('#waiting').isVisible(),false);
+    await p.evaluate(()=>{window.__fixture.signedIn=true;window.__fixture.emit('desktop-login-status',window.__fixture.loginStatus());});
+    assert.equal(await p.locator('#signed-in').isVisible(),true);
+    const after=(await calls(p,'desktop_login_status')).length;
+    await p.clock.fastForward(30000);
+    assert.equal((await calls(p,'desktop_login_status')).length,after);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('inventory refresh retains content while waiting and after failure, then displays real changes', async () => {
+  const f=await openFixture();try {
+    const p=f.page;await p.locator('.tools-updates-status').filter({hasText:'已检查'}).waitFor();
+    await detail(p,'codex');
+    await p.evaluate(()=>{
+      window.__inventoryRow=document.querySelector('[data-tool="codex"]');
+      window.__inventoryDetail=document.querySelector('#tool-detail-region').firstElementChild;
+      window.__fixture.deferInventory=true;
+      window.__inventoryRefresh=window.TokenMarketTools.refresh();
+    });
+    await p.waitForFunction(()=>Boolean(window.__fixture.resolveInventory));
+    assert.equal(await p.locator('.tool-row').count(),14);
+    assert.equal(await p.evaluate(()=>window.__inventoryRow===document.querySelector('[data-tool="codex"]')),true);
+    assert.equal(await p.evaluate(()=>window.__inventoryDetail===document.querySelector('#tool-detail-region').firstElementChild),true);
+    await p.evaluate(async()=>{window.__fixture.deferInventory=false;window.__fixture.resolveInventory();await window.__inventoryRefresh;});
+    assert.equal(await p.evaluate(()=>window.__inventoryRow===document.querySelector('[data-tool="codex"]')),true);
+    await p.evaluate(async()=>{window.__fixture.inventoryError=true;await window.TokenMarketTools.refresh();});
+    assert.equal(await p.locator('.tool-row').count(),14);
+    assert.equal(await p.evaluate(()=>window.__inventoryRow===document.querySelector('[data-tool="codex"]')),true);
+    await p.evaluate(async()=>{window.__fixture.inventoryError=false;window.__fixture.entries.find(e=>e.id==='openclaw').installed=true;await window.TokenMarketTools.refresh();});
+    assert.equal(await p.locator('[data-tool-filter="uninstalled"]').innerText(),'未安装 10');
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
 test('real UI renders safe native summaries, searches, navigates and fits desktop/mobile', async () => {
   const f = await openFixture();try {
     const p=f.page;assert.equal(await p.locator('.tool-row').count(),14);
@@ -920,5 +1076,16 @@ test('installation paths render as selectable text and cannot inject page markup
     const row=f.page.locator('[data-tool="codex"]');assert.equal(await row.locator('.tool-location-path').textContent(),path);
     assert.equal(await row.locator('img').count(),1);await detail(f.page,'codex');
     assert.equal(await f.page.locator('.tool-files-sheet .tool-path-row').filter({hasText:'当前入口'}).locator('code').textContent(),path);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('uninstalled filter counts missing tools and combines with search', async () => {
+  const f=await openFixture();try {
+    const p=f.page;await p.locator('[data-tool-filter="uninstalled"]').click();
+    assert.equal(await p.locator('[data-tool-filter="uninstalled"]').innerText(),'未安装 11');
+    assert.equal(await p.locator('.tool-row').count(),11);
+    await p.locator('.tools-search').fill('OpenClaw');assert.equal(await p.locator('[data-tool="openclaw"]').count(),1);
+    await p.locator('.tools-search').fill('Codex');assert.equal(await p.locator('.tool-row').count(),0);
+    assert.deepEqual(f.errors,[]);
   }finally{await f.close();}
 });

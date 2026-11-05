@@ -44,7 +44,8 @@ module.exports = async function openFixture(browser, options = {}) {
     if (options.legacy) fixture.entries[3].connection = {state:'legacy',owner:null,boundWorkspace:null,keyId:null,protocol:null,models:['legacy-model']};
     const clone = value => structuredClone(value);
     const loginStatus = () => ({context:fixture.signedIn?{user:{id:user.id,name:user.name},default_workspace:fixture.current}:null,pending:fixture.pending});
-    const workspace = () => ({user,current_workspace:fixture.current,switchable_workspaces:[personal,team],balance:options.noBalance?null:{currency:'CNY',amount:'128.60'},balance_error:options.noBalance?'读取余额失败':null,can_recharge:!options.restricted,menus:options.restricted?[]:[{path:'/console/tokens'},{path:'/console/billing'},{path:'/console/spaces'}]});
+    fixture.balanceAmount='128.60';
+    const workspace = () => ({user,current_workspace:fixture.current,switchable_workspaces:[personal,team],balance:options.noBalance?null:{currency:'CNY',amount:fixture.balanceAmount},balance_error:options.noBalance?'读取余额失败':null,can_recharge:!options.restricted,menus:options.restricted?[]:[{path:'/console/tokens'},{path:'/console/billing'},{path:'/console/spaces'}]});
     fixture.emit = (name,payload) => (fixture.events[name]||[]).forEach(fn=>fn({payload}));
     fixture.loginStatus = loginStatus;
     window.__TAURI__ = {window:{getCurrentWindow:()=>({setTheme:async value=>{fixture.nativeTheme=value;}})},event:{listen:async (name,fn) => { (fixture.events[name] ||= []).push(fn); return () => {}; }},core:{invoke:async (command,args = {}) => {
