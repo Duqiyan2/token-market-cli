@@ -16,6 +16,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[derive(Default)]
 struct State {
+    legacy: bool,
+    unsupported_legacy_pending: bool,
+    historical: Vec<(u64, String, String)>,
     id: u64,
     secret: String,
     request: String,
@@ -117,6 +120,12 @@ impl Platform {
                                     "NOT_FOUND".to_string()
                                 } else if s.status != "ACTIVE" {
                                     s.status.clone()
+                                } else if s.unsupported_legacy_pending {
+                                    "PENDING".into()
+                                } else if s.legacy {
+                                    "MIGRATION_REQUIRED".into()
+                                } else if s.stage == "PENDING" && !valid {
+                                    "PENDING".into()
                                 } else if fingerprint.is_none() {
                                     if s.stage == "APPLIED" {
                                         "LOCAL_COPY_REQUIRED".into()
@@ -132,15 +141,26 @@ impl Platform {
                                 }
                             }
                             "issue" => {
-                                if s.id > 0 && s.status == "ACTIVE" && s.stage == "PENDING" {
+                                if !s.legacy
+                                    && s.id > 0
+                                    && s.status == "ACTIVE"
+                                    && s.stage == "PENDING"
+                                {
                                     "PENDING".into()
-                                } else if s.id > 0
+                                } else if !s.legacy
+                                    && s.id > 0
                                     && s.status == "ACTIVE"
                                     && !body["replace_lost"].as_bool().unwrap_or(false)
                                     && (valid || fingerprint.is_none())
                                 {
                                     "LOCAL_COPY_REQUIRED".into()
                                 } else {
+                                    if s.legacy {
+                                        let old = (s.id, s.secret.clone(), s.status.clone());
+                                        s.historical.push(old);
+                                        s.predecessors = 0;
+                                        s.legacy = false;
+                                    }
                                     if body["replace_lost"] == true {
                                         assert_eq!(body["key_id"], s.id.to_string());
                                         s.predecessors += 1;
@@ -188,7 +208,7 @@ impl Platform {
                         if failure {
                             status = "UNAVAILABLE".into();
                         }
-                        let mut reply = json!({"naming_version":1,"status":status,"key_id":if s.id==0 {None}else{Some(s.id.to_string())},"request_id":s.request,"generation":s.generation,"owner":{"id":"u1","name":"Fixture"},"bound_workspace":{"id":"42","name":"Scope"}});
+                        let mut reply = json!({"naming_version":if s.legacy || s.unsupported_legacy_pending {0}else{1},"credential_matches":valid,"status":status,"key_id":if s.id==0 {None}else{Some(s.id.to_string())},"request_id":s.request,"generation":s.generation,"owner":{"id":"u1","name":"Fixture"},"bound_workspace":{"id":"42","name":"Scope"}});
                         if status == "ISSUED" {
                             reply["api_key"] = json!(s.secret);
                         }
@@ -559,4 +579,193 @@ async fn fresh_scope_negotiates_naming_and_both_client_entries_reuse_safely_save
         serde_json::from_slice(&support::read_private(&root.path().join("state/keys.json")))
             .unwrap();
     assert_eq!(saved[0]["key"]["issuance"]["naming_version"], 1);
+}
+
+#[tokio::test]
+async fn legacy_cached_key_migrates_once_and_both_entries_reuse_new_identity() {
+    let root = tempdir().unwrap();
+    let api = Platform::start().await;
+    let path = root.path().join("settings.json");
+    let inv = inventory(root.path());
+    let old = api
+        .manager(root.path())
+        .connect(context(), ToolId::ClaudeCode, &inv, path.clone())
+        .await
+        .unwrap();
+    let old_secret = api.state.lock().unwrap().secret.clone();
+    api.state.lock().unwrap().legacy = true;
+    let next = api
+        .manager(root.path())
+        .reconnect(
+            context(),
+            ToolId::ClaudeCode,
+            &old.key_id,
+            &inv,
+            path.clone(),
+        )
+        .await
+        .unwrap();
+    assert_ne!(old.key_id, next.connection.key_id);
+    api.manager(root.path())
+        .reconnect(
+            context(),
+            ToolId::ClaudeCode,
+            &next.connection.key_id,
+            &inv,
+            path.clone(),
+        )
+        .await
+        .unwrap();
+    let s = api.state.lock().unwrap();
+    assert_eq!(s.issues, 2);
+    assert_eq!(s.rotations, 0);
+    assert_eq!(s.retired, 0);
+    assert_eq!(s.historical, vec![(1, old_secret, "ACTIVE".into())]);
+    assert!(std::fs::read_to_string(path).unwrap().contains(&s.secret));
+}
+
+#[tokio::test]
+async fn imported_connection_and_config_only_legacy_copies_migrate_without_copy_loss() {
+    for config_only in [false, true] {
+        let root = tempdir().unwrap();
+        let api = Platform::start().await;
+        let inv = inventory(root.path());
+        let path = root.path().join("settings.json");
+        let old = api
+            .manager(root.path())
+            .connect(context(), ToolId::ClaudeCode, &inv, path.clone())
+            .await
+            .unwrap();
+        api.state.lock().unwrap().legacy = true;
+        std::fs::remove_file(root.path().join("state/keys.json")).unwrap();
+        let manager = api.manager(root.path());
+        let next = if config_only {
+            std::fs::remove_file(root.path().join("state/connections.json")).unwrap();
+            manager
+                .connect(context(), ToolId::ClaudeCode, &inv, path.clone())
+                .await
+                .unwrap()
+        } else {
+            manager
+                .reconnect(
+                    context(),
+                    ToolId::ClaudeCode,
+                    &old.key_id,
+                    &inv,
+                    path.clone(),
+                )
+                .await
+                .unwrap()
+                .connection
+        };
+        assert_ne!(old.key_id, next.key_id);
+        let s = api.state.lock().unwrap();
+        assert_eq!(s.issues, 2);
+        assert_eq!(s.retired, 0);
+        assert!(std::fs::read_to_string(path).unwrap().contains(&s.secret));
+    }
+}
+
+#[tokio::test]
+async fn lost_migration_response_recovers_same_pending_row_despite_stale_cached_or_config_only_raw()
+{
+    for config_only in [false, true] {
+        let root = tempdir().unwrap();
+        let api = Platform::start().await;
+        let inv = inventory(root.path());
+        let path = root.path().join("settings.json");
+        let old = api
+            .manager(root.path())
+            .connect(context(), ToolId::ClaudeCode, &inv, path.clone())
+            .await
+            .unwrap();
+        let before = std::fs::read(&path).unwrap();
+        let historical = api.state.lock().unwrap().secret.clone();
+        {
+            let mut s = api.state.lock().unwrap();
+            s.legacy = true;
+            s.lose_issue = true;
+        }
+        if config_only {
+            std::fs::remove_file(root.path().join("state/keys.json")).unwrap();
+            std::fs::remove_file(root.path().join("state/connections.json")).unwrap();
+            assert!(api
+                .manager(root.path())
+                .connect(context(), ToolId::ClaudeCode, &inv, path.clone())
+                .await
+                .is_err());
+        } else {
+            assert!(api
+                .manager(root.path())
+                .reconnect(
+                    context(),
+                    ToolId::ClaudeCode,
+                    &old.key_id,
+                    &inv,
+                    path.clone()
+                )
+                .await
+                .is_err());
+        }
+        assert_eq!(before, std::fs::read(&path).unwrap());
+        let pending_id = api.state.lock().unwrap().id;
+        let manager = api.manager(root.path());
+        let next = if config_only {
+            manager
+                .connect(context(), ToolId::ClaudeCode, &inv, path.clone())
+                .await
+                .unwrap()
+        } else {
+            manager
+                .reconnect(
+                    context(),
+                    ToolId::ClaudeCode,
+                    &old.key_id,
+                    &inv,
+                    path.clone(),
+                )
+                .await
+                .unwrap()
+                .connection
+        };
+        assert_eq!(next.key_id, pending_id.to_string());
+        let s = api.state.lock().unwrap();
+        assert_eq!(s.issues, 2);
+        assert_eq!(s.rotations, 1);
+        assert_eq!(s.retired, 0);
+        assert_eq!(s.historical, vec![(1, historical, "ACTIVE".into())]);
+        assert!(std::fs::read_to_string(path).unwrap().contains(&s.secret));
+    }
+}
+
+#[tokio::test]
+async fn old_pending_protocol_cannot_rotate_or_reuse_historical_raw() {
+    let root = tempdir().unwrap();
+    let api = Platform::start().await;
+    let inv = inventory(root.path());
+    let path = root.path().join("settings.json");
+    let old = api
+        .manager(root.path())
+        .connect(context(), ToolId::ClaudeCode, &inv, path.clone())
+        .await
+        .unwrap();
+    let before = std::fs::read(&path).unwrap();
+    api.state.lock().unwrap().unsupported_legacy_pending = true;
+    let error = api
+        .manager(root.path())
+        .reconnect(
+            context(),
+            ToolId::ClaudeCode,
+            &old.key_id,
+            &inv,
+            path.clone(),
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("更新服务"), "{error}");
+    let s = api.state.lock().unwrap();
+    assert_eq!(s.rotations, 0);
+    assert_eq!(s.issues, 1);
+    assert_eq!(before, std::fs::read(path).unwrap());
 }
