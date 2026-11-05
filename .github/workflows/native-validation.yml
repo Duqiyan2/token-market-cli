@@ -111,6 +111,10 @@ jobs:
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib --locked
 
 
+      - name: Test Windows guarded installer handoff
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test windows_guardian --locked -- --nocapture
+
       - name: Diagnose Windows desktop loader
         if: ${{ !cancelled() && runner.os == 'Windows' && steps.desktop-tests.outcome == 'failure' }}
         shell: pwsh
