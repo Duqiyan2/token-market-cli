@@ -109,7 +109,7 @@ jobs:
 
       - name: Test Windows guarded installer handoff
         if: ${{ !cancelled() && runner.os == 'Windows' }}
-        run: cargo test --manifest-path src-tauri/Cargo.toml --test windows_guardian --locked -- --nocapture
+        run: cargo test --manifest-path src-tauri/Cargo.toml --features windows-update-fixtures --test windows_guardian --locked -- --nocapture
 
   desktop-ui:
     name: Desktop DOM/IPC fixtures
