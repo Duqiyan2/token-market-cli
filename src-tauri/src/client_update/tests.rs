@@ -594,3 +594,123 @@ async fn downloading_a_startup_release_clears_automatic_reminder_metadata() {
     assert_eq!(checked.status, "ready");
     assert!(!checked.automatic && !checked.remind);
 }
+
+struct FixtureInstaller {
+    home: std::path::PathBuf,
+    fail_launch: AtomicBool,
+    launched: Arc<std::sync::atomic::AtomicUsize>,
+}
+struct FixtureHandoff {
+    _guard: tokenmarket_core::client_update::ClientUpdateGuard,
+    fail_launch: bool,
+    launched: Arc<std::sync::atomic::AtomicUsize>,
+}
+impl ClientUpdateHandoff for FixtureHandoff {
+    fn commit(self: Box<Self>) -> Result<(), String> {
+        if self.fail_launch {
+            return Err("安装器启动失败，请重试".into());
+        }
+        self.launched.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+}
+impl ClientUpdateInstaller for FixtureInstaller {
+    fn prepare(
+        &self,
+        update: VerifiedClientUpdate,
+    ) -> Result<Box<dyn ClientUpdateHandoff>, String> {
+        let guard = tokenmarket_core::client_update::ClientUpdateGuard::acquire(
+            &self.home,
+            "https://fixture.invalid",
+        )
+        .map_err(|error| error.to_string())?;
+        assert_eq!(update.update.version, "1.1.0");
+        assert_eq!(
+            update.bytes,
+            include_bytes!("../../tests/fixtures/client-update/package.txt")
+        );
+        let lock = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(
+                self.home
+                    .join(".tokenmarket/desktop-connections/operation.lock"),
+            )
+            .unwrap();
+        assert!(
+            lock.try_lock().is_err(),
+            "handoff must still exclude mutations"
+        );
+        Ok(Box::new(FixtureHandoff {
+            _guard: guard,
+            fail_launch: self.fail_launch.load(Ordering::SeqCst),
+            launched: self.launched.clone(),
+        }))
+    }
+}
+
+#[tokio::test]
+async fn guarded_install_refuses_busy_work_retains_verified_retry_and_reports_handoff_not_completion(
+) {
+    let app = app();
+    let (_server, _executable, mut updater) = download_fixture();
+    let home = tempfile::tempdir().unwrap();
+    let installer = Arc::new(FixtureInstaller {
+        home: home.path().into(),
+        fail_launch: AtomicBool::new(true),
+        launched: Default::default(),
+    });
+    assert!(!updater.status().install_available);
+    assert!(updater
+        .install(app.handle(), "1.1.0")
+        .await
+        .unwrap_err()
+        .contains("暂不可用"));
+    updater = updater.with_installer(installer.clone());
+    assert!(
+        updater.install(app.handle(), "1.1.0").await.is_err(),
+        "unverified bytes are never handed off"
+    );
+    updater.check(app.handle()).await;
+    assert_eq!(
+        updater
+            .download(app.handle(), "1.1.0")
+            .await
+            .unwrap()
+            .status,
+        "ready"
+    );
+    let directory = home.path().join(".tokenmarket/desktop-connections");
+    std::fs::create_dir_all(&directory).unwrap();
+    let active = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(directory.join("operation.lock"))
+        .unwrap();
+    active.try_lock().unwrap();
+    let busy = updater.install(app.handle(), "1.1.0").await.unwrap();
+    assert_eq!(busy.status, "ready");
+    assert!(busy.error.unwrap().contains("连接"));
+    assert_eq!(installer.launched.load(Ordering::SeqCst), 0);
+    drop(active);
+    let failed = updater.install(app.handle(), "1.1.0").await.unwrap();
+    assert_eq!(failed.status, "ready");
+    assert!(failed.error.unwrap().contains("启动失败"));
+    installer.fail_launch.store(false, Ordering::SeqCst);
+    let result = updater.install(app.handle(), "1.1.0").await.unwrap();
+    assert_eq!(result.status, "handoff");
+    assert_eq!(installer.launched.load(Ordering::SeqCst), 1);
+    assert!(result.error.is_none());
+    assert_eq!(updater.check(app.handle()).await.status, "handoff");
+    assert_eq!(
+        updater
+            .download(app.handle(), "1.1.0")
+            .await
+            .unwrap()
+            .status,
+        "handoff",
+        "repeated download cannot erase a committed handoff"
+    );
+}

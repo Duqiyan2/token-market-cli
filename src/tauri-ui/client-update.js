@@ -33,16 +33,43 @@
     catch (error) { publish({...latest,status:'failed',currentVersion,error:String(error)}); }
     finally { downloading = false; }
   };
+  const install = el('install-client-update');
+  let installing = false;
+  const installConfirm = document.createElement('dialog');
+  installConfirm.setAttribute('aria-label', '确认安装并重启');
+  installConfirm.innerHTML = '<h3>确认安装并重启</h3><p class="client-install-version"></p><p>安装前将检查桌面和 CLI 的活动操作。请先保存工作；安装交接后应用将关闭并重启。</p><div class="tool-actions"><button class="cancel-install">取消安装</button><button class="primary confirm-install">确认安装并重启</button></div>';
+  document.body.append(installConfirm);
+  let installVersion;
+  installConfirm.querySelector('.cancel-install').onclick = () => installConfirm.close();
+  install.onclick = () => {
+    if (installing || latest?.status !== 'ready' || !latest.installAvailable) return;
+    installVersion = latest.availableVersion;
+    installConfirm.querySelector('.client-install-version').textContent = `Token Market ${installVersion}`;
+    installConfirm.showModal();
+  };
+  installConfirm.querySelector('.confirm-install').onclick = async () => {
+    if (installing) return;
+    installConfirm.close();
+    installing = true;
+    document.dispatchEvent(new Event('client-update-manual-check'));
+    publish({...latest,status:'installing',error:null});
+    try { publish(await invoke('install_client_update', {version:installVersion})); }
+    catch (error) { publish({...latest,status:'ready',error:String(error)}); }
+    finally { installing = false; render(latest); }
+  };
   function render(value) {
-    if (value.automatic && !['available','downloading','verifying','ready'].includes(value.status)) {
+    if (value.automatic && !['available','downloading','verifying','ready','installing','handoff'].includes(value.status)) {
       value = {...value,status:'idle',error:null};
     }
-    if (latest?.status === 'ready' && value.status !== 'ready') return;
+    if (latest?.status === 'handoff' && value.status !== 'handoff') return;
+    if (['ready','installing'].includes(latest?.status) && !['ready','installing','handoff'].includes(value.status)) return;
     latest = value;
     currentVersion = value.currentVersion;
     el('client-current-version').textContent = `当前版本 ${value.currentVersion}`;
     el('client-update-status').textContent = value.status === 'available'
-      ? `发现新版本 ${value.availableVersion}` : value.status === 'current'
+      ? `发现新版本 ${value.availableVersion}` : value.status === 'installing'
+        ? '正在检查活动操作并准备受保护的安装交接…' : value.status === 'handoff'
+          ? '安装交接已启动，等待安装及新版本启动确认' : value.status === 'current'
         ? '没有更新的受支持稳定版本' : value.status === 'downloading'
           ? '正在下载客户端更新…' : value.status === 'verifying'
             ? '下载完成，正在验证更新包签名…' : value.status === 'ready'
@@ -50,13 +77,16 @@
                 ? `${value.availableVersion ? '下载或验证失败' : '检查失败'}：${value.error || '请重试'}` : '';
     el('client-update-status').className = value.status === 'failed' ? 'error' : '';
     check.textContent = value.status === 'failed' && !value.availableVersion ? '重试检查客户端更新' : '检查客户端更新';
-    const busy = ['downloading','verifying','ready'].includes(value.status);
+    const busy = ['downloading','verifying','ready','installing','handoff'].includes(value.status);
     check.disabled = checking || busy;
-    download.hidden = !value.availableVersion || value.status === 'ready';
+    download.hidden = !value.availableVersion || ['ready','installing','handoff'].includes(value.status);
     download.disabled = busy;
     download.textContent = value.status === 'failed' ? '重试下载客户端更新' : '下载客户端更新';
-    el('install-client-update').hidden = value.status !== 'ready';
-    el('client-install-unavailable').hidden = value.status !== 'ready';
+    install.hidden = !['ready','installing'].includes(value.status);
+    install.disabled = installing || value.status !== 'ready' || !value.installAvailable;
+    el('client-install-unavailable').hidden = value.status !== 'ready' || Boolean(value.installAvailable);
+    el('client-install-error').textContent = value.status === 'ready' ? value.error || '' : '';
+    el('client-install-error').hidden = !el('client-install-error').textContent;
     el('client-update-notes').textContent = value.releaseNotes || '';
     el('client-update-notes').hidden = !value.releaseNotes;
   }
