@@ -25,7 +25,7 @@ def external(value, field):
 
 def load(args, api):
     path = external(args.config, 'config')
-    config = json.loads(path.read_text())
+    config = json.loads(path.read_text(encoding='utf-8'))
     fields = ('schema_version', 'source_root', 'version', 'public_base_url', 'manifest_key', 'recovery_key',
               'candidate_key', 'public_key_file', 'private_key_file', 'private_key_password_file',
               'output_dir', 'tools', 'oss', 'native')
@@ -77,7 +77,7 @@ def load(args, api):
     api.require(Path(config['public_key_file']).is_file(), 'Missing public_key_file')
     if args.command not in ('local-build', 'local-inventory', 'local-validate'):
         api.require(Path(config['oss']['config_file']).is_file(), 'Missing oss.config_file')
-    config['public_key'] = Path(config['public_key_file']).read_text().strip()
+    config['public_key'] = Path(config['public_key_file']).read_text(encoding='utf-8').strip()
     api.nonempty(config['public_key'], 'public_key_file')
     args.verifier = config['tools']['verifier']
     args.ossutil = config['oss']['ossutil']
@@ -140,7 +140,7 @@ def inventory_plan(args, config, api):
     inventory = external(args.inventory, 'inventory')
     plan = api.inventory_plan(args, production_route=config['manifest_key'] if args.command != 'local-candidate' else None)
     api.require(plan['version'] == config['version'] and plan['public_key'] == config['public_key'], 'Local inventory version/public key mismatch')
-    release = json.loads(inventory.read_text())
+    release = json.loads(inventory.read_text(encoding='utf-8'))
     for target, record in release['targets'].items():
         label = 'Local ' + target
         paths = {}
@@ -148,12 +148,12 @@ def inventory_plan(args, config, api):
             relative = api.nonempty(record.get(name), label + ' ' + name)
             paths[name] = external(str(inventory.parent / relative), label + ' ' + name)
             api.require(paths[name].is_file(), label + ' missing ' + name)
-        value = json.loads(paths['build_provenance'].read_text())
+        value = json.loads(paths['build_provenance'].read_text(encoding='utf-8'))
         validate_provenance(value, config, args.fixture, api, label)
         api.require(value['source_commit'] == plan['source_commit'] and value['version'] == plan['version'] and
             value['target'] == target and value['prepared_sha256'] == api.digest(paths['prepared_receipt']), label + ' source/prepared record mismatch')
         api.same_artifacts(value['artifacts'], api.artifact_bindings(plan, target), label)
-        prepared = json.loads(paths['prepared_receipt'].read_text())
+        prepared = json.loads(paths['prepared_receipt'].read_text(encoding='utf-8'))
         api.require(prepared.get('version') == plan['version'] and prepared.get('target') == target and
             prepared.get('artifact') == Path(record['artifact']).name and prepared.get('signature') == record['signature'] and
             prepared.get('platform_signing') == record['platform_signing'], label + ' prepared receipt mismatch')
@@ -256,11 +256,11 @@ def checked_source(config, api):
     api.require(re.fullmatch(r'[a-f0-9]{40}', sha), 'source_root requires a full source commit')
     api.require(not api.child(['git', '-C', source, 'status', '--porcelain'], label='Clean source inspection').strip(),
         'Native local build requires a clean source_root including untracked files')
-    actual = json.loads((source / 'src-tauri/tauri.conf.json').read_text())
+    actual = json.loads((source / 'src-tauri/tauri.conf.json').read_text(encoding='utf-8'))
     api.require(actual.get('version') == config['version'], 'version must match source_root desktop configuration')
     # Python3.9 lacks tomllib. This repository uses a literal package version;
     # accept that narrow static format and fail closed on inherited/dynamic TOML.
-    manifest = (source / 'src-tauri/Cargo.toml').read_text()
+    manifest = (source / 'src-tauri/Cargo.toml').read_text(encoding='utf-8')
     section = re.search(r'(?ms)^\[package\][ \t]*\n(.*?)(?=^\[|\Z)', manifest)
     version = re.search(r'(?m)^version[ \t]*=[ \t]*"([0-9]+[.][0-9]+[.][0-9]+)"[ \t]*(?:#.*)?$', section.group(1)) if section else None
     api.require(version and version.group(1) == config['version'], 'src-tauri/Cargo.toml package.version must match version and tauri.conf.json')
@@ -335,8 +335,8 @@ def native_build(args, config, api):
             verifier=config['tools']['verifier'], fixture=args.fixture)
         # Private key exists only in the signer process environment; no key path,
         # private config, native child output or secrets are written into records.
-        os.environ['TAURI_SIGNING_PRIVATE_KEY'] = Path(config['private_key_file']).read_text().strip()
-        os.environ['TAURI_SIGNING_PRIVATE_KEY_PASSWORD'] = Path(config['private_key_password_file']).read_text().rstrip('\r\n') if config['private_key_password_file'] else ''
+        os.environ['TAURI_SIGNING_PRIVATE_KEY'] = Path(config['private_key_file']).read_text(encoding='utf-8').strip()
+        os.environ['TAURI_SIGNING_PRIVATE_KEY_PASSWORD'] = Path(config['private_key_password_file']).read_text(encoding='utf-8').rstrip('\r\n') if config['private_key_password_file'] else ''
         try:
             with redirect_stdout(io.StringIO()):
                 api.prepare(preparing)
@@ -344,13 +344,13 @@ def native_build(args, config, api):
             os.environ.pop('TAURI_SIGNING_PRIVATE_KEY', None)
             os.environ.pop('TAURI_SIGNING_PRIVATE_KEY_PASSWORD', None)
         receipt = stage / 'prepared/prepared.json'
-        prepared = json.loads(receipt.read_text())
+        prepared = json.loads(receipt.read_text(encoding='utf-8'))
         if args.fixture:
             # Synthetic classification never impersonates actual native verification.
             prepared['platform_signing']['identity'] = 'synthetic-native-adapter'
             for item in prepared['installers']:
                 item['platform_signing']['identity'] = 'synthetic-native-adapter'
-            receipt.write_text(json.dumps(prepared, indent=2) + '\n')
+            receipt.write_text(json.dumps(prepared, indent=2) + '\n', encoding='utf-8')
         objects = []
         def artifact(name, role, artifact_target):
             path = receipt.parent / name
@@ -367,7 +367,7 @@ def native_build(args, config, api):
             native_host=socket.gethostname(), recipe='fixture-adapter' if args.fixture else Path(command[1] if target.startswith('darwin') else command[4]).name,
             started_at=started, completed_at=completed)
         validate_provenance(record, config, args.fixture, api, target)
-        (receipt.parent / 'build.json').write_text(json.dumps(record, indent=2) + '\n')
+        (receipt.parent / 'build.json').write_text(json.dumps(record, indent=2) + '\n', encoding='utf-8')
         api.require(checked_source(config, api)[1] == sha, 'Source changed during native preparation')
         # The large intermediate Cargo/native outputs are disposable; only prepared
         # exact updater/manual bytes and their two records survive atomically.
@@ -379,21 +379,21 @@ def collect_inventory(args, config, api):
     api.require(len(args.prepared) == len(api.TARGETS), 'Both required prepared target outputs are required')
     notes = external(args.notes_file, 'notes_file')
     api.require(notes.is_file(), 'Missing notes_file')
-    api.nonempty(notes.read_text(), 'Release notes')
+    api.nonempty(notes.read_text(encoding='utf-8'), 'Release notes')
     output = external(str(Path(config['output_dir']) / config['version'] / 'inventory'), 'inventory output')
     api.require(not output.exists(), 'Inventory output already exists; preserve finalized inventory')
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.inventory-', dir=output.parent) as temporary:
         stage = Path(temporary)
         release = dict(version=config['version'], source_commit=None, public_key=config['public_key'],
-            notes=notes.read_text().strip(), targets={}, installers=[])
+            notes=notes.read_text(encoding='utf-8').strip(), targets={}, installers=[])
         for value in args.prepared:
             path = external(value, 'prepared')
             api.require(path.name == 'prepared.json' and path.is_file(), 'prepared requires a finalized prepared.json')
-            prepared = json.loads(path.read_text())
+            prepared = json.loads(path.read_text(encoding='utf-8'))
             record_path = path.parent / 'build.json'
             api.require(record_path.is_file(), 'Prepared target missing local build.json')
-            record = json.loads(record_path.read_text())
+            record = json.loads(record_path.read_text(encoding='utf-8'))
             validate_provenance(record, config, args.fixture, api, 'Prepared target')
             target = record['target']
             api.require(target in api.TARGETS and target not in release['targets'], 'Duplicate or unsupported prepared target')
@@ -412,12 +412,12 @@ def collect_inventory(args, config, api):
                 platform_signing=prepared['platform_signing'], build_provenance=target + '/build.json', prepared_receipt=target + '/prepared.json')
             release['installers'] += [dict(item, path=target + '/' + item['path']) for item in prepared['installers']]
         inventory = stage / 'release.json'
-        inventory.write_text(json.dumps(release, indent=2) + '\n')
+        inventory.write_text(json.dumps(release, indent=2) + '\n', encoding='utf-8')
         probe = argparse.Namespace(**vars(args))
         probe.inventory = str(inventory)
         plan = inventory_plan(probe, config, api)
         api.verify(plan, args.verifier)
-        draft = json.loads((Path(api.__file__).resolve().parents[1] / 'docs/client-update-acceptance.template.json').read_text())
+        draft = json.loads((Path(api.__file__).resolve().parents[1] / 'docs/client-update-acceptance.template.json').read_text(encoding='utf-8'))
         draft['fixture'] = args.fixture
         draft['release'] = dict(source_commit=plan['source_commit'], version=plan['version'],
             artifacts=api.artifact_bindings(plan),
@@ -431,10 +431,10 @@ def collect_inventory(args, config, api):
             device.update(fixture=args.fixture, actual_device=False,
                 build_provenance_sha256=api.digest(stage / record['build_provenance']),
                 prepared_sha256=api.digest(stage / record['prepared_receipt']),
-                signing_identity=json.loads((stage / record['build_provenance']).read_text())['signing_identity'],
+                signing_identity=json.loads((stage / record['build_provenance']).read_text(encoding='utf-8'))['signing_identity'],
                 compiled=compiled(config))
             device['startup'].update(version=plan['version'], artifact_sha256=next(obj['sha256'] for obj in plan['objects'] if obj['role'] == 'updater' and obj['platform'] == target))
-        (stage / 'acceptance-draft.json').write_text(json.dumps(draft, indent=2) + '\n')
+        (stage / 'acceptance-draft.json').write_text(json.dumps(draft, indent=2) + '\n', encoding='utf-8')
         os.rename(stage, output)
     print(json.dumps(dict(collected=True, fixture=args.fixture, inventory=str(output / 'release.json'), acceptance_template=str(output / 'acceptance-draft.json'))))
 

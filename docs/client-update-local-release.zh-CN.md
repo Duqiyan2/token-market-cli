@@ -69,6 +69,7 @@ Gatekeeper 公共发行验收。保留真实状态；需要正式 Developer ID/�
 ```
 
 复制仓库中的 [空 JSON 示例](client-update-local.example.json) 到上面目录后再填值。
+私有 JSON、发行说明和文本密钥/密码文件均使用 UTF-8 编码，不依赖系统代码页。
 不使用 shell `source`/`eval`。所有私有路径使用绝对路径；链接解析后进入任何 Git
 checkout 的路径同样会被拒绝。macOS 身份目录下的证书、密码、keychain 和身份元数据
 也逐一检查；可变的 `build.lock` 不允许是符号链接。两原生主机可使用不同本地路径，

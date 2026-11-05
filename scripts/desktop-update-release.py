@@ -62,7 +62,7 @@ def public_base(value, fixture):
 
 def inventory_plan(args, *, production_route=None):
     inventory = Path(args.inventory).resolve()
-    release = json.loads(inventory.read_text())
+    release = json.loads(inventory.read_text(encoding='utf-8'))
     version = release.get('version', '')
     require(re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', version), 'A stable semantic version is required')
     require(re.fullmatch(r'[a-f0-9]{40}', release.get('source_commit', '')), 'source_commit must be a full commit SHA')
@@ -133,12 +133,14 @@ def release_plan(args):
     return inventory_plan(args)
 
 
-def child(command, *, stdin=None, label='Release tool', env=None, timeout=300):
+def child(command, *, stdin=None, label='Release tool', env=None, timeout=300, errors='replace'):
     try:
         if env is None:
             env = {key: value for key, value in os.environ.items() if not key.startswith('TAURI_SIGNING_')}
+        # Tool diagnostics are suppressed; localized or malformed log bytes must
+        # not turn a successful native tool into a failed release operation.
         result = subprocess.run([str(part) for part in command], input=stdin, text=True,
-                                capture_output=True, env=env, timeout=timeout)
+                                encoding='utf-8', errors=errors, capture_output=True, env=env, timeout=timeout)
     except (OSError, UnicodeError, subprocess.TimeoutExpired):
         raise ValueError(label + ' failed; child output suppressed') from None
     require(result.returncode == 0, label + ' failed; child output suppressed')
@@ -148,7 +150,8 @@ def child(command, *, stdin=None, label='Release tool', env=None, timeout=300):
 def verify(plan, executable):
     require(executable and Path(executable).is_file(), 'Build and supply --verifier (official updater 2.14.1 artifact verifier)')
     clean = {key: value for key, value in os.environ.items() if not key.startswith(('TAURI_SIGNING_', 'OSS_', 'OSSUTIL_'))}
-    output = child([Path(executable).resolve()], stdin=json.dumps(plan), label='Updater signature/version verifier', env=clean)
+    # Verifier output is a strict UTF-8 JSON protocol, not tool diagnostics.
+    output = child([Path(executable).resolve()], stdin=json.dumps(plan), label='Updater signature/version verifier', env=clean, errors='strict')
     verified = json.loads(output)
     require(verified.get('verified') is True and verified.get('verifier') == 'tauri-plugin-updater/2.14.1', 'Updater verification did not succeed')
 
@@ -234,7 +237,8 @@ def publish_verified(args, plan):
         objects = plan['objects'] + [recovery_obj]
         recovery_alias = dict(recovery_obj, key=plan['recovery_key'], cache_control=DISCOVERY) if 'recovery_key' in plan else None
         manifest = stage / 'stable.json'
-        manifest.write_text(json.dumps(plan['manifest'], indent=2) + '\n')
+        # Preserve the accepted UTF-8/LF bytes, including on Windows.
+        manifest.write_bytes((json.dumps(plan['manifest'], indent=2) + '\n').encode('utf-8'))
         manifest_obj = dict(path=str(manifest), key=plan['manifest_key'], sha256=digest(manifest),
                             size=manifest.stat().st_size, content_type='application/json', cache_control=DISCOVERY)
         store = Path(local).resolve() if local else None
@@ -291,7 +295,7 @@ def platform_signing(args, app, artifact, temporary):
     if args.fixture:
         return {'fixture': True}
     require(args.platform_evidence, 'Final platform signing evidence is required')
-    expected = json.loads(Path(args.platform_evidence).read_text())
+    expected = json.loads(Path(args.platform_evidence).read_text(encoding='utf-8'))
     if args.target == 'darwin-aarch64':
         require(sys.platform == 'darwin', 'macOS preparation must run on macOS')
         require(expected.get('profile') == 'production' and
@@ -312,7 +316,7 @@ def platform_signing(args, app, artifact, temporary):
         return dict(verified=True, kind='codesign', certificate_sha1=actual, notarized=expected.get('notarized') is True)
     require(sys.platform == 'win32', 'Windows preparation must run on Windows')
     if args.target == 'windows-x86_64-nsis':
-        config = json.loads(Path(args.tauri_config).read_text())
+        config = json.loads(Path(args.tauri_config).read_text(encoding='utf-8'))
         require(config.get('bundle', {}).get('windows', {}).get('nsis', {}).get('installMode') == 'currentUser', 'Automatic Windows packages require explicit currentUser NSIS build configuration')
     thumbprint = expected.get('certificateSha1', '')
     require(re.fullmatch(r'[A-Fa-f0-9]{40}', thumbprint), 'Windows signing certificateSha1 is required')
@@ -323,7 +327,7 @@ $ErrorActionPreference = 'Stop'
 $s = Get-AuthenticodeSignature -LiteralPath $Binary
 if ($s.Status -ne 'Valid' -or $s.SignerCertificate.Thumbprint -ne $Expected) { exit 1 }
 if ($Version -and [System.Diagnostics.FileVersionInfo]::GetVersionInfo($Binary).ProductVersion -ne $Version) { exit 2 }
-""")
+""", encoding='utf-8')
     for path, version in ((app, args.version), (artifact, '')):
         child(['powershell.exe', '-NoProfile', '-NonInteractive', '-File', script,
                '-Binary', path, '-Expected', thumbprint, '-Version', version], label='Final Windows Authenticode verification')
@@ -344,7 +348,7 @@ def prepare(args):
     output = Path(args.output).resolve()
     require(not output.exists(), 'Prepare output must not exist; existing artifacts were preserved')
     app = Path(args.app).resolve()
-    key = Path(args.public_key).read_text().strip()
+    key = Path(args.public_key).read_text(encoding='utf-8').strip()
     require(key, 'Updater public key is required')
     require(args.target != 'darwin-aarch64' or (app.is_dir() and app.name.endswith('.app')), 'Final macOS .app is required')
     require(args.target == 'darwin-aarch64' or (app.is_file() and args.installer), 'Final Windows app and installer are required')
@@ -378,7 +382,7 @@ def prepare(args):
             if args.target == 'darwin-aarch64':
                 require(source.suffix.lower() == '.dmg', 'macOS manual installer must be a DMG')
                 if not args.fixture:
-                    prior = json.loads(Path(args.platform_evidence).read_text())
+                    prior = json.loads(Path(args.platform_evidence).read_text(encoding='utf-8'))
                     require(prior.get('artifacts', {}).get(source.name) == digest(destination), 'DMG does not match final macOS signing manifest')
                     child(['/usr/bin/hdiutil', 'verify', destination], label='Final manual DMG verification')
                 manual_evidence = dict(evidence, artifact_sha256=digest(destination))
@@ -392,13 +396,13 @@ def prepare(args):
         signer_env.setdefault('TAURI_SIGNING_PRIVATE_KEY_PASSWORD', '')
         child([args.signer, 'signer', 'sign', '--app-version', args.version, artifact],
               label='Updater signing', env=signer_env)
-        signature = artifact.with_name(artifact.name + '.sig').read_text().strip()
+        signature = artifact.with_name(artifact.name + '.sig').read_text(encoding='utf-8').strip()
         record = dict(artifact=artifact.name, signature=signature, platform_signing=evidence)
         probe = dict(version=args.version, public_key=key, required_targets=1,
                      objects=[dict(path=str(artifact), platform=args.target, signature=signature, role='updater')])
         verify(probe, args.verifier)
         # The receipt contains public metadata only. Never persist signer env/output.
-        (stage / 'prepared.json').write_text(json.dumps(dict(version=args.version, target=args.target, installers=manual_records, **record), indent=2) + '\n')
+        (stage / 'prepared.json').write_text(json.dumps(dict(version=args.version, target=args.target, installers=manual_records, **record), indent=2) + '\n', encoding='utf-8')
         for extra in list(stage.iterdir()):
             if extra not in (artifact, artifact.with_name(artifact.name + '.sig'), stage / 'prepared.json') and extra.name not in [item['path'] for item in manual_records]:
                 if extra.is_dir():
@@ -490,7 +494,7 @@ def promotion_plan(args):
         # Existing low-level fixture driver uses the same explicit local schema.
         local = dict(version=plan['version'], public_key=plan['public_key'], public_base_url=plan['public_base_url'],
             manifest_key=route, recovery_key=recovery_key)
-    accepted = json.loads(Path(args.acceptance).read_text())
+    accepted = json.loads(Path(args.acceptance).read_text(encoding='utf-8'))
     object_fields(accepted, ('schema_version', 'fixture', 'release', 'routes', 'devices', 'evidence', 'provenance_kind'), 'Acceptance')
     require(type(accepted['schema_version']) is int and accepted['schema_version'] == 2, 'Unsupported acceptance schema_version')
     if local:
@@ -518,7 +522,7 @@ def promotion_plan(args):
     object_fields(accepted['evidence'], ('automated', 'native_signing', 'deployment_readback'), 'Acceptance evidence')
     for name, evidence in accepted['evidence'].items():
         evidence_passed(evidence, name, args.fixture, local=bool(local))
-    release = json.loads(Path(args.inventory).read_text())
+    release = json.loads(Path(args.inventory).read_text(encoding='utf-8'))
     for target in TARGETS:
         label = 'Acceptance ' + target
         record = release['targets'][target]
@@ -553,7 +557,7 @@ def promotion_plan(args):
         prepared_path = path / nonempty(record.get('prepared_receipt'), label + ' prepared_receipt path')
         require(provenance_path.is_file() and prepared_path.is_file(), label + ' missing build provenance/prepared receipt')
         require(digest(provenance_path) == device['build_provenance_sha256'] and digest(prepared_path) == device['prepared_sha256'], label + ' build provenance/prepared receipt digest mismatch')
-        provenance = json.loads(provenance_path.read_text())
+        provenance = json.loads(provenance_path.read_text(encoding='utf-8'))
         import desktop_update_local
         desktop_update_local.validate_provenance(provenance, local, args.fixture, sys.modules[__name__], label)
         require(provenance['source_commit'] == plan['source_commit'] and provenance['version'] == plan['version'] and
@@ -568,7 +572,7 @@ def promotion_plan(args):
             require(re.fullmatch(r'[a-f0-9]{40}', identity), label + ' native identity must be a certificate SHA-1')
             if target == 'darwin-aarch64':
                 require(type(record['platform_signing'].get('notarized')) is bool, 'Record macOS notarization honestly as true or false')
-        prepared = json.loads(prepared_path.read_text())
+        prepared = json.loads(prepared_path.read_text(encoding='utf-8'))
         require(prepared.get('version') == plan['version'] and prepared.get('target') == target and
                 prepared.get('artifact') == Path(record['artifact']).name and prepared.get('signature') == record['signature'] and
                 prepared.get('platform_signing') == record['platform_signing'], label + ' prepared receipt does not match finalized inventory')
