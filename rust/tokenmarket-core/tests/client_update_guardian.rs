@@ -260,13 +260,24 @@ fn launch_failure_and_nonzero_installer_are_honest_failures_and_retry_is_explici
         line_until(&mut reader, "committed");
         let output = finish(guardian, reader);
         assert!(output.contains("GUARDIAN_ERROR"), "{output}");
-        assert!(!root.path().join("relaunched").exists());
+        assert!(
+            root.path().join("relaunched").exists(),
+            "known failure must reopen the existing client for recovery"
+        );
         assert_eq!(
             ClientUpdateJournal::read(root.path())
                 .unwrap()
                 .unwrap()
                 .phase(),
             ClientUpdatePhase::Failed
+        );
+        let journal = ClientUpdateJournal::read(root.path()).unwrap().unwrap();
+        let failure_message = journal
+            .failure_reason()
+            .expect("known failure must retain recovery explanation");
+        assert!(
+            failure_message.contains(if failure == "nonzero" { "2" } else { "启动" }),
+            "{failure_message}"
         );
         probe(root.path(), false);
         fs::remove_file(root.path().join(failure)).unwrap();

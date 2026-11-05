@@ -1,5 +1,7 @@
 //! Current-user NSIS only. This module never calls the updater's exiting install shortcut.
-use super::{ClientUpdateHandoff, ClientUpdateInstaller, VerifiedClientUpdate};
+use super::{
+    ClientUpdateHandoff, ClientUpdateInstaller, ClientUpdateStartup, VerifiedClientUpdate,
+};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -394,6 +396,21 @@ impl WindowsInstaller {
                     .unwrap_or("更新守护进程未就绪，尚未安装")
             );
         };
+        if response
+            .get("guardian")
+            .and_then(|v| v.get("pid"))
+            .and_then(|v| v.as_u64())
+            != Some(child.id() as u64)
+            || response
+                .get("guardian")
+                .and_then(|v| v.get("created"))
+                .and_then(|v| v.as_u64())
+                != Some(creation_time(child.as_raw_handle())?)
+        {
+            drop(input);
+            let _ = child.wait();
+            bail!("更新守护进程身份无法确认，未启动安装");
+        }
         // Helper now owns its deny-write/delete package handle AND every legacy lock.
         drop(pinned);
         Ok(Box::new(WindowsHandoff {
@@ -539,25 +556,31 @@ pub fn try_run_guardian() -> Option<i32> {
     }
 }
 
-pub fn reconcile_startup() -> std::result::Result<Option<String>, String> {
-    let result = (|| -> Result<Option<String>> {
+pub fn reconcile_startup() -> std::result::Result<ClientUpdateStartup, String> {
+    let result = (|| -> Result<ClientUpdateStartup> {
         let home = tokenmarket_core::config::home_dir();
-        if let Some(mut journal) = ClientUpdateJournal::read(&home)? {
-            if matches!(
-                journal.phase(),
-                ClientUpdatePhase::Failed | ClientUpdatePhase::Succeeded
-            ) {
-                return Ok(None);
+        let Some(mut journal) = ClientUpdateJournal::read(&home)? else {
+            return Ok(ClientUpdateStartup::Clear);
+        };
+        match journal.phase() {
+            ClientUpdatePhase::Succeeded => Ok(ClientUpdateStartup::Clear),
+            ClientUpdatePhase::Failed => Ok(journal
+                .failure_reason()
+                .map(|message| ClientUpdateStartup::RetryableFailure(message.to_owned()))
+                .unwrap_or(ClientUpdateStartup::Clear)),
+            ClientUpdatePhase::AwaitingStartup => {
+                match journal
+                    .acknowledge_startup(env!("CARGO_PKG_VERSION"), &std::env::current_exe()?)
+                {
+                    Ok(()) => Ok(ClientUpdateStartup::Clear),
+                    Err(error) => Ok(ClientUpdateStartup::Pending(error.to_string())),
+                }
             }
-            // This exact compiled process is the only authority on completion.
-            if journal.phase() == ClientUpdatePhase::AwaitingStartup {
-                journal
-                    .acknowledge_startup(env!("CARGO_PKG_VERSION"), &std::env::current_exe()?)?;
-            } else {
-                return Ok(Some("上次客户端更新交接尚未确认结束，请检查安装进程或使用官方安装包恢复；不会自动重试".into()));
-            }
+            _ => Ok(ClientUpdateStartup::Pending(
+                "上次客户端更新交接尚未确认结束，请检查安装进程或使用官方安装包恢复；不会自动重试"
+                    .into(),
+            )),
         }
-        Ok(None)
     })();
     result.map_err(|e| e.to_string())
 }

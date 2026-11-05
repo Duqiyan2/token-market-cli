@@ -5,15 +5,20 @@ use sha2::{Digest, Sha256};
 use std::{
     fs::{self, OpenOptions},
     io::{BufRead, BufReader, Read, Write},
-    os::windows::fs::OpenOptionsExt,
+    os::windows::{
+        fs::OpenOptionsExt,
+        io::{AsRawHandle, FromRawHandle, OwnedHandle},
+    },
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     time::{Duration, Instant},
 };
 use tokenmarket_core::client_update::{ClientUpdateJournal, ClientUpdatePhase};
 use windows_sys::Win32::{
-    Foundation::FILETIME,
-    System::Threading::{GetCurrentProcess, GetProcessTimes},
+    Foundation::{FILETIME, WAIT_OBJECT_0},
+    System::Threading::{
+        GetCurrentProcess, GetProcessTimes, OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE,
+    },
 };
 
 fn creation_time() -> u64 {
@@ -147,10 +152,13 @@ impl Fixture {
 
         // A native controllable installer keeps its own process alive until the
         // driver releases it. Only these fresh synthetic files are accessed.
-        let source = r#"use std::{env,fs,thread,time::Duration}; fn main() {
+        let source = r#"use std::{env,fs,thread,time::Duration};
+            #[link(name = "kernel32")] unsafe extern "system" { fn GetCommandLineW() -> *const u16; }
+            fn raw_command_line() -> String { unsafe { let ptr = GetCommandLineW(); let mut len = 0; while *ptr.add(len) != 0 {len += 1;} String::from_utf16_lossy(std::slice::from_raw_parts(ptr, len)) } }
+            fn main() {
             let root = std::path::PathBuf::from(env::var_os("WINDOWS_INSTALLER_FIXTURE").unwrap());
             if env::args().len() == 1 { fs::write(root.join("relaunched"), b"old version").unwrap(); return; }
-            fs::write(root.join("arguments"), env::args().skip(1).collect::<Vec<_>>().join("\n")).unwrap();
+            fs::write(root.join("arguments"), raw_command_line()).unwrap();
             fs::write(root.join("installer-started"), b"started").unwrap();
             while !root.join("finish-installer").exists() { thread::sleep(Duration::from_millis(10)); }
             if root.join("nonzero").exists() { std::process::exit(2); }
@@ -170,7 +178,14 @@ impl Fixture {
         .unwrap();
         Self { root }
     }
-    fn parent(&self) -> (Child, BufReader<std::process::ChildStdout>, String) {
+    fn parent(
+        &self,
+    ) -> (
+        Child,
+        BufReader<std::process::ChildStdout>,
+        String,
+        OwnedHandle,
+    ) {
         let mut parent = Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "fixture_parent", "--nocapture"])
             .env("WINDOWS_GUARDIAN_PARENT", self.root.path())
@@ -180,7 +195,23 @@ impl Fixture {
             .unwrap();
         let mut reader = BufReader::new(parent.stdout.take().unwrap());
         let ready: serde_json::Value = serde_json::from_str(&until(&mut reader, "ready")).unwrap();
-        (parent, reader, ready["nonce"].as_str().unwrap().into())
+        {
+            let handle = unsafe {
+                OpenProcess(
+                    PROCESS_SYNCHRONIZE,
+                    0,
+                    ready["guardian"]["pid"].as_u64().unwrap() as u32,
+                )
+            };
+            assert!(!handle.is_null());
+            let handle = unsafe { OwnedHandle::from_raw_handle(handle) };
+            (
+                parent,
+                reader,
+                ready["nonce"].as_str().unwrap().into(),
+                handle,
+            )
+        }
     }
 }
 #[test]
@@ -188,7 +219,7 @@ fn exact_parent_exit_keeps_legacy_exclusion_and_staged_bytes_pinned_through_nati
 {
     let fixture = Fixture::new();
     let root = fixture.root.path();
-    let (mut parent, mut reader, nonce) = fixture.parent();
+    let (mut parent, mut reader, nonce, guardian) = fixture.parent();
     probe(root, true);
     assert!(OpenOptions::new()
         .write(true)
@@ -207,10 +238,18 @@ fn exact_parent_exit_keeps_legacy_exclusion_and_staged_bytes_pinned_through_nati
         .open(root.join("stage/installer.exe"))
         .is_err());
     let arguments = fs::read_to_string(root.join("arguments")).unwrap();
-    assert!(arguments.starts_with("/P\n/UPDATE\n/D="), "{arguments}");
+    assert!(arguments.contains(" /P /UPDATE /D="), "{arguments}");
+    assert_eq!(
+        arguments.split("/D=").last().unwrap(),
+        root.join("应用 Token Market").display().to_string()
+    );
     assert!(arguments.contains("应用 Token Market"));
     assert!(!arguments.contains("/R"));
     fs::write(root.join("finish-installer"), b"finish").unwrap();
+    assert_eq!(
+        unsafe { WaitForSingleObject(guardian.as_raw_handle(), 20_000) },
+        WAIT_OBJECT_0
+    );
     let deadline = Instant::now() + Duration::from_secs(20);
     while ClientUpdateJournal::read(root).unwrap().unwrap().phase()
         == ClientUpdatePhase::InstallerRunning
@@ -229,14 +268,14 @@ fn exact_parent_exit_keeps_legacy_exclusion_and_staged_bytes_pinned_through_nati
 fn cancellation_before_commit_does_not_launch_and_permits_explicit_retry() {
     let fixture = Fixture::new();
     let root = fixture.root.path();
-    let (mut parent, mut reader, _) = fixture.parent();
+    let (mut parent, mut reader, _, _guardian) = fixture.parent();
     writeln!(parent.stdin.take().unwrap(), "cancel").unwrap();
     let mut rest = String::new();
     reader.read_to_string(&mut rest).unwrap();
     assert!(parent.wait().unwrap().success(), "{rest}");
     assert!(!root.join("installer-started").exists());
     probe(root, false);
-    let (mut parent, mut reader, _) = fixture.parent();
+    let (mut parent, mut reader, _, _guardian) = fixture.parent();
     writeln!(parent.stdin.take().unwrap(), "cancel").unwrap();
     let mut rest = String::new();
     reader.read_to_string(&mut rest).unwrap();
