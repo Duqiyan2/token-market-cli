@@ -1,10 +1,7 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "fixture": false,
-  "repository": "",
-  "workflow": "",
-  "run_url": "",
-  "run_attempt": 0,
+  "provenance_kind": "local-native-build",
   "source_commit": "",
   "version": "",
   "target": "",
@@ -15,5 +12,10 @@
     "endpoint": "",
     "recovery_url": "",
     "public_key_sha256": ""
-  }
+  },
+  "native_host": "",
+  "recipe": "",
+  "configuration_sha256": "",
+  "started_at": "",
+  "completed_at": ""
 }

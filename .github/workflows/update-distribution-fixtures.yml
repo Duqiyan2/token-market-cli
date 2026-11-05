@@ -3,9 +3,9 @@ name: Update distribution fixtures
 on:
   workflow_dispatch:
 
-# All future candidate and production writers MUST use this exact group.
+# Fixture jobs never publish OSS; real writers use the designated local host.
 concurrency:
-  group: token-market-client-update-distribution
+  group: token-market-client-update-fixtures
   cancel-in-progress: false
 
 permissions:

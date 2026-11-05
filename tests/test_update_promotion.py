@@ -49,7 +49,7 @@ class PromotionCommand(unittest.TestCase):
                 return super().guess_type(path)
             def end_headers(self):
                 self.send_header('Cache-Control', 'no-cache, no-store, max-age=0, must-revalidate'
-                    if self.path in ('/production/stable.json', '/recovery/index.html')
+                    if self.path.endswith('/stable.json') or self.path == '/recovery/index.html'
                     else 'public, max-age=31536000, immutable')
                 super().end_headers()
             def do_GET(self):
@@ -110,9 +110,12 @@ class PromotionCommand(unittest.TestCase):
                     if r['platform'] == ('windows-x86_64' if target.startswith('windows') else target)])))
             compiled = dict(endpoint=routes['production_manifest_url'], recovery_url=routes['recovery_url'],
                 public_key_sha256=routes['public_key_sha256'])
-            provenance = dict(schema_version=1, fixture=True, repository='fixture/project',
-                workflow='.github/workflows/native-fixture.yml', run_url='https://github.com/fixture/project/actions/runs/123',
-                run_attempt=1, source_commit='a' * 40, version='1.1.0', target=target,
+            policy = dict(version='1.1.0', **compiled)
+            provenance = dict(schema_version=2, fixture=True, provenance_kind='local-native-build',
+                native_host='disposable-native-adapter', recipe='fixture-adapter',
+                configuration_sha256=hashlib.sha256(json.dumps(policy, sort_keys=True, separators=(',', ':')).encode()).hexdigest(),
+                started_at='2026-11-04T00:00:00Z', completed_at='2026-11-04T00:00:01Z',
+                source_commit='a' * 40, version='1.1.0', target=target,
                 artifacts=target_artifacts, prepared_sha256=sha(receipt.name),
                 signing_identity='synthetic-native-identity', compiled=compiled)
             path = self.root / (target + '-build.json')
@@ -130,7 +133,7 @@ class PromotionCommand(unittest.TestCase):
                 signing_identity='synthetic-native-identity', compiled=compiled,
                 checks={check: dict(status='passed', evidence=['synthetic://' + check]) for check in self.checks})
         self.save()
-        accepted = dict(schema_version=1, fixture=True, release=binding, routes=routes, devices=devices,
+        accepted = dict(schema_version=2, fixture=True, provenance_kind='local-operator-acceptance', release=binding, routes=routes, devices=devices,
             evidence={name: dict(status='passed', evidence=['synthetic://' + name])
                 for name in ('automated', 'native_signing', 'deployment_readback')})
         self.acceptance_path = self.root / 'acceptance.json'
@@ -230,47 +233,13 @@ class PromotionCommand(unittest.TestCase):
             self.assertIn('cannot reach OSS', result.stderr)
             self.assertFalse(transcript.exists())
 
-    def test_production_destination_and_ci_gate_reject_before_provider_execution(self):
+    def test_legacy_real_publish_and_ci_promotion_are_disabled(self):
         accepted = self.acceptance('https://updates.invalid')
-        for target, record in self.release['targets'].items():
-            record['platform_signing'] = dict(verified=True,
-                kind='codesign' if target == 'darwin-aarch64' else 'authenticode', certificate_sha1='c' * 40,
-                artifact_sha256=hashlib.sha256((self.root / record['artifact']).read_bytes()).hexdigest(),
-                notarized=False, bundler_version='2.10.4', nsis_install_mode='currentUser')
-        for record in self.release['installers']:
-            record['platform_signing'] = dict(verified=True,
-                kind='codesign' if record['platform'] == 'darwin-aarch64' else 'authenticode', certificate_sha1='c' * 40,
-                artifact_sha256=hashlib.sha256((self.root / record['path']).read_bytes()).hexdigest())
-        self.save()
-        transcript = self.root / 'unexpected-provider-execution'
-        provider = self.root / 'ossutil'
-        provider.write_text('#!/bin/sh\ntouch "' + str(transcript) + '"\nexit 1\n')
-        provider.chmod(0o700)
-        env = {'TOKEN_MARKET_UPDATE_PUBLIC_BASE_URL': 'https://updates.invalid',
-            'TOKEN_MARKET_UPDATE_PRODUCTION_MANIFEST_KEY': 'production/stable.json',
-            'TOKEN_MARKET_UPDATE_RECOVERY_KEY': 'recovery/index.html',
-            'TOKEN_MARKET_UPDATE_TRUSTED_BUILD_REPOSITORY': 'fixture/project',
-            'TOKEN_MARKET_UPDATE_TRUSTED_BUILD_WORKFLOWS': '{}',
-            'OSS_REGION': 'fixture', 'OSS_ENDPOINT': 'https://oss.invalid',
-            'TOKEN_MARKET_UPDATE_OSS_BUCKET': 'fixture', 'TOKEN_MARKET_UPDATE_OSS_PREFIX': 'isolated',
-            'TOKEN_MARKET_UPDATE_PUBLISH_DESTINATION': 'oss://fixture/isolated',
-            'TOKEN_MARKET_UPDATE_PROMOTION_WORKFLOW_REF': 'fixture/project/.github/workflows/promote.yml@refs/heads/main',
-            'TOKEN_MARKET_UPDATE_PUBLISH_CONCURRENCY': 'token-market-client-update-distribution',
-            'GITHUB_ACTIONS': 'true', 'GITHUB_REPOSITORY': 'fixture/project',
-            'GITHUB_WORKFLOW_REF': 'fixture/project/.github/workflows/promote.yml@refs/heads/main',
-            'OSS_ACCESS_KEY_ID': 'fixture', 'OSS_ACCESS_KEY_SECRET': 'fixture', 'OSS_SESSION_TOKEN': 'fixture'}
-        for name, bad, expected in [('TOKEN_MARKET_UPDATE_PUBLISH_DESTINATION', 'oss://other/isolated', 'destination binding'),
-                ('GITHUB_WORKFLOW_REF', 'fixture/project/.github/workflows/other.yml@refs/heads/main', 'protected GitHub workflow'),
-                ('TOKEN_MARKET_UPDATE_PUBLISH_CONCURRENCY', 'workflow-specific-group', 'shared destination concurrency'),
-                (None, None, 'fixture classification')]:
-            with self.subTest(name=name):
-                changed = dict(env)
-                if name: changed[name] = bad
-                result = self.command('promote', '--inventory', str(self.inventory), '--acceptance', str(self.acceptance_path),
-                    '--ossutil', str(provider), env=changed)
-                self.assertNotEqual(result.returncode, 0)
-                self.assertIn(expected, result.stderr)
-                self.assertFalse(transcript.exists())
+        for name in ('publish', 'promote'):
+            extra = ['--acceptance', str(self.acceptance_path)] if name == 'promote' else ['--verifier', '/missing']
+            result = self.command(name, '--inventory', str(self.inventory), *extra, env={'GITHUB_ACTIONS': 'true'})
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('private --config', result.stderr)
 
     def test_acceptance_template_is_explicitly_pending_and_cannot_promote(self):
         template = distribution.ROOT / 'docs/client-update-acceptance.template.json'
@@ -388,46 +357,12 @@ class PromotionCommand(unittest.TestCase):
             self.assertEqual((store / candidate).read_bytes(), original)
             self.assertEqual((self.root / 'mac.app.tar.gz').read_bytes(), b'changed after snapshot')
 
-    def test_native_job_can_emit_provenance_from_actual_receipt_bytes_and_build_environment(self):
-        accepted = self.acceptance('http://127.0.0.1:1')
-        source = distribution.subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=distribution.ROOT, text=True).strip()
-        target = 'darwin-aarch64'
-        output = self.root / 'emitted-build.json'
-        env = {'TOKEN_MARKET_UPDATE_TRUSTED_BUILD_REPOSITORY': 'fixture/project',
-            'TOKEN_MARKET_UPDATE_TRUSTED_BUILD_WORKFLOWS': json.dumps({t: '.github/workflows/native-fixture.yml' for t in self.release['targets']}),
-            'TOKEN_MARKET_UPDATER_ENDPOINT': 'http://127.0.0.1:1/production/stable.json',
-            'TOKEN_MARKET_UPDATER_RECOVERY_URL': 'http://127.0.0.1:1/recovery/index.html',
-            'TOKEN_MARKET_UPDATER_PUBLIC_KEY': self.release['public_key'],
-            'GITHUB_ACTIONS': 'true', 'GITHUB_REPOSITORY': 'fixture/project',
-            'GITHUB_WORKFLOW_REF': 'fixture/project/.github/workflows/native-fixture.yml@refs/heads/main',
-            'GITHUB_SHA': source, 'GITHUB_RUN_ID': '321', 'GITHUB_RUN_ATTEMPT': '2'}
-        result = self.command('record-build', '--prepared-receipt', str(self.root / (target + '-prepared.json')),
-            '--output', str(output), '--verifier', str((distribution.ROOT / 'src-tauri/target/debug/examples/verify-update-artifacts').resolve()),
-            '--fixture', env=env)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        provenance = json.loads(output.read_text())
-        self.assertEqual(provenance['source_commit'], source)
-        self.assertEqual(provenance['run_url'], 'https://github.com/fixture/project/actions/runs/321')
-        self.assertEqual(provenance['run_attempt'], 2)
-        self.assertEqual(provenance['target'], 'darwin-aarch64')
-        self.assertEqual(provenance['artifacts'], [a for a in accepted['release']['artifacts'] if a['platform'] == target])
-        self.assertEqual(provenance['compiled'], accepted['devices'][target]['compiled'])
-        self.assertIs(provenance['fixture'], True)
-        self.assertNotIn('TAURI_SIGNING_PRIVATE_KEY', output.read_text())
-        output.unlink()
-        env['GITHUB_SHA'] = '0' * 40
-        refused = self.command('record-build', '--prepared-receipt', str(self.root / (target + '-prepared.json')),
-            '--output', str(output), '--fixture', env=env)
-        self.assertNotEqual(refused.returncode, 0)
-        self.assertIn('checked-out source', refused.stderr)
-        self.assertFalse(output.exists())
-
     def test_read_only_promotion_requires_explicit_destination_configuration(self):
         result = self.command('promote', '--inventory', str(self.inventory),
             '--acceptance', str(self.root / 'acceptance.json'), '--dry-run')
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn('TOKEN_MARKET_UPDATE_PRODUCTION_MANIFEST_KEY', result.stderr)
-        self.assertIn('TOKEN_MARKET_UPDATE_RECOVERY_KEY', result.stderr)
+        self.assertIn('manifest_key', result.stderr)
+        self.assertIn('recovery_key', result.stderr)
         self.assertFalse((self.root / 'releases').exists())
 
 if __name__ == '__main__':
