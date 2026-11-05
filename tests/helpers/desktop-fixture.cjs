@@ -59,6 +59,7 @@ module.exports = async function openFixture(browser, options = {}) {
           if(options.deferClientUpdateStatus) return new Promise(resolve=>fixture.resolveClientUpdateStatus=()=>resolve(value));
           return value;
         }
+        case 'download_client_update': if(options.deferClientDownload)return new Promise(resolve=>fixture.resolveClientDownload=resolve);return {status:'ready',currentVersion:'1.0.0',availableVersion:args.version,releaseNotes:'保留已有连接',error:null};
         case 'defer_client_update': fixture.clientUpdateStatus.remind=false;return clone(fixture.clientUpdateStatus);
         case 'ignore_client_update_version': fixture.clientUpdateStatus.remind=false;fixture.ignoredClientUpdate=args.version;return clone(fixture.clientUpdateStatus);
         case 'check_client_update': return clone(fixture.clientUpdate || options.clientUpdate || {status:'current',currentVersion:'1.0.0',availableVersion:null,releaseNotes:null,error:null});

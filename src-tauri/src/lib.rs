@@ -294,6 +294,7 @@ pub fn run() {
             window_lifecycle::quit_desktop_app,
             client_update::desktop_client_update_status,
             client_update::check_client_update,
+            client_update::download_client_update,
             client_update::defer_client_update,
             client_update::ignore_client_update_version,
         ])

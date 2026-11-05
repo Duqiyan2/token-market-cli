@@ -26,6 +26,67 @@ test('signed-out Settings shows a Client Update and release notes without downlo
   }finally{await f.close();}
 });
 
+test('signed-out Client Update downloads only after confirmation and leaves verified installation disabled', async () => {
+  const f=await openFixture({signedIn:false,clientUpdate:{status:'available',currentVersion:'1.0.0',availableVersion:'1.1.0',releaseNotes:'保留已有连接',error:null}});try {
+    const p=f.page;await p.locator('#login [data-desktop-settings]').click();
+    await p.getByRole('button',{name:'检查客户端更新',exact:true}).click();
+    await p.getByRole('button',{name:'下载客户端更新',exact:true}).click();
+    await p.locator('dialog[open]').filter({hasText:'确认下载客户端更新'}).waitFor();
+    assert.equal((await calls(p,'download_client_update')).length,0);
+    await p.getByRole('button',{name:'取消下载',exact:true}).click();
+    assert.equal((await calls(p,'download_client_update')).length,0);
+    await p.getByRole('button',{name:'下载客户端更新',exact:true}).click();
+    await p.getByRole('button',{name:'确认下载',exact:true}).click();
+    await p.locator('#client-update-status').filter({hasText:'签名验证通过'}).waitFor();
+    assert.deepEqual((await calls(p,'download_client_update')).map(c=>c.args),[{version:'1.1.0'}]);
+    assert.equal(await p.getByRole('button',{name:'安装并重启',exact:true}).isDisabled(),true);
+    assert.match(await p.locator('#client-install-unavailable').textContent(),/暂不可用/);
+    assert.equal((await p.evaluate(()=>window.__fixture.calls.filter(c=>/^(install|restart).*client|client.*(install|restart)/.test(c.command)))).length,0);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('a late download progress event cannot erase a verified Client Update', async () => {
+  const f=await openFixture({signedIn:false,clientUpdate:{status:'available',currentVersion:'1.0.0',availableVersion:'1.1.0',releaseNotes:null,error:null}});try {
+    const p=f.page;await p.locator('#login [data-desktop-settings]').click();
+    await p.getByRole('button',{name:'检查客户端更新',exact:true}).click();
+    await p.getByRole('button',{name:'下载客户端更新',exact:true}).click();
+    await p.getByRole('button',{name:'确认下载',exact:true}).click();
+    await p.locator('#client-update-status').filter({hasText:'签名验证通过'}).waitFor();
+    await p.evaluate(()=>window.__fixture.emit('desktop-client-update-status',{status:'verifying',currentVersion:'1.0.0',availableVersion:'1.1.0'}));
+    await p.evaluate(()=>window.__fixture.emit('desktop-client-update-status',{status:'available',currentVersion:'1.0.0',availableVersion:'1.1.0',automatic:true,remind:true}));
+    assert.equal(await p.locator('#client-update-reminder').isVisible(),false);
+    assert.match(await p.locator('#client-update-status').textContent(),/签名验证通过/);
+    assert.equal(await p.getByRole('button',{name:'安装并重启',exact:true}).isVisible(),true);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('Client Update shows download and verification separately and retries a failed package without changing Tool Connections', async () => {
+  const f=await openFixture({noBalance:true,deferClientDownload:true,clientUpdate:{status:'available',currentVersion:'1.0.0',availableVersion:'1.1.0',releaseNotes:'稳定版本',error:null}});try {
+    const p=f.page;await p.locator('#signed-in [data-desktop-settings]').click();
+    const connections=await p.evaluate(()=>window.__fixture.entries.map(e=>e.connection));
+    await p.getByRole('button',{name:'检查客户端更新',exact:true}).click();
+    await p.getByRole('button',{name:'下载客户端更新',exact:true}).click();
+    await p.getByRole('button',{name:'确认下载',exact:true}).click();
+    await p.locator('#client-update-status').filter({hasText:'正在下载客户端更新'}).waitFor();
+    assert.equal(await p.locator('#check-client-update').isDisabled(),true);
+    await p.evaluate(()=>window.__fixture.emit('desktop-client-update-status',{status:'verifying',currentVersion:'1.0.0',availableVersion:'1.1.0'}));
+    await p.locator('#client-update-status').filter({hasText:'正在验证更新包签名'}).waitFor();
+    assert.equal(await p.locator('#install-client-update').isVisible(),false);
+    await p.evaluate(()=>window.__fixture.resolveClientDownload({status:'failed',currentVersion:'1.0.0',availableVersion:'1.1.0',error:'签名无效，请重试下载'}));
+    await p.locator('#client-update-status').filter({hasText:'签名无效'}).waitFor();
+    await p.getByRole('button',{name:'重试下载客户端更新',exact:true}).click();
+    assert.equal((await calls(p,'download_client_update')).length,1);
+    await p.getByRole('button',{name:'确认下载',exact:true}).click();
+    await p.evaluate(()=>window.__fixture.resolveClientDownload({status:'ready',currentVersion:'1.0.0',availableVersion:'1.1.0'}));
+    await p.locator('#client-update-status').filter({hasText:'签名验证通过'}).waitFor();
+    assert.equal((await calls(p,'download_client_update')).length,2);
+    assert.deepEqual(await p.evaluate(()=>window.__fixture.entries.map(e=>e.connection)),connections);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
 test('Client Update reports no newer supported stable version without workspace balance and stays separate from Tool Upgrades', async () => {
   const f=await openFixture({noBalance:true});try {
     const p=f.page;await p.locator('#signed-in [data-desktop-settings]').click();

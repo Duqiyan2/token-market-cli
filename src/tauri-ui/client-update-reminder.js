@@ -7,8 +7,13 @@
   let version;
   let revision = 0;
   let busy = false;
+  let verifiedReady = false;
   document.addEventListener('client-update-manual-check', () => { ++revision; });
+  document.addEventListener('client-update-action-result', event => { ++revision; receive(event.detail); });
   function receive(value) {
+    // Native keeps the verified candidate until guarded installation is available.
+    if (verifiedReady && value.status !== 'ready') return;
+    if (value.status === 'ready') verifiedReady = true;
     document.dispatchEvent(new CustomEvent('client-update-status', {detail:value}));
     if (value.status === 'available' && value.automatic && value.remind) {
       version = value.availableVersion;

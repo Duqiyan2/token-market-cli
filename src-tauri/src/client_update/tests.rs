@@ -9,6 +9,7 @@ use std::{
     thread,
     time::Duration,
 };
+use tauri::Listener;
 
 const PUBLIC_KEY: &str = include_str!("../../tests/fixtures/client-update/public-key.txt");
 const SIGNATURE: &str = include_str!("../../tests/fixtures/client-update/package.txt.sig");
@@ -18,6 +19,8 @@ struct ManifestServer {
     requests: Arc<Mutex<Vec<String>>>,
     done: Arc<AtomicBool>,
     worker: Option<thread::JoinHandle<()>>,
+    artifact: Arc<Mutex<(u16, Vec<u8>)>>,
+    release_download: Arc<AtomicBool>,
 }
 
 impl ManifestServer {
@@ -29,7 +32,16 @@ impl ManifestServer {
         let done = Arc::new(AtomicBool::new(false));
         let log = requests.clone();
         let stopping = done.clone();
-        let body = manifest.to_string();
+        let body = manifest
+            .to_string()
+            .replace("$ARTIFACT", &url.replace("stable.json", "package"));
+        let artifact = Arc::new(Mutex::new((
+            200,
+            include_bytes!("../../tests/fixtures/client-update/package.txt").to_vec(),
+        )));
+        let package = artifact.clone();
+        let release_download = Arc::new(AtomicBool::new(true));
+        let release = release_download.clone();
         let worker = thread::spawn(move || {
             while !stopping.load(Ordering::SeqCst) {
                 match listener.accept() {
@@ -43,6 +55,8 @@ impl ManifestServer {
                         if read == 0 {
                             continue;
                         }
+                        let is_package =
+                            String::from_utf8_lossy(&buffer[..read]).starts_with("GET /package ");
                         log.lock().unwrap().push(
                             String::from_utf8_lossy(&buffer[..read])
                                 .lines()
@@ -50,7 +64,22 @@ impl ManifestServer {
                                 .unwrap_or("")
                                 .to_string(),
                         );
-                        write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+                        while is_package
+                            && !release.load(Ordering::SeqCst)
+                            && !stopping.load(Ordering::SeqCst)
+                        {
+                            thread::sleep(Duration::from_millis(2));
+                        }
+                        let (status, response) = if is_package {
+                            package.lock().unwrap().clone()
+                        } else {
+                            (200, body.as_bytes().to_vec())
+                        };
+                        if status == 0 {
+                            continue;
+                        } // Simulate a connection lost before headers.
+                        write!(stream, "HTTP/1.1 {status} Response\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", response.len()).unwrap();
+                        let _ = stream.write_all(&response);
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                         thread::sleep(Duration::from_millis(5))
@@ -64,6 +93,8 @@ impl ManifestServer {
             requests,
             done,
             worker: Some(worker),
+            artifact,
+            release_download,
         }
     }
 }
@@ -242,6 +273,213 @@ async fn unconfigured_checks_give_an_actionable_publisher_reason() {
     }
 }
 
+fn download_fixture() -> (ManifestServer, tempfile::TempDir, ClientUpdater) {
+    download_fixture_with("1.1.0", SIGNATURE.trim())
+}
+
+fn download_fixture_with(
+    version: &str,
+    signature: &str,
+) -> (ManifestServer, tempfile::TempDir, ClientUpdater) {
+    let server = ManifestServer::start(serde_json::json!({"version":version,"platforms":{
+        "darwin-aarch64":{"url":"$ARTIFACT","signature":signature}
+    }}));
+    let executable = tempfile::tempdir().unwrap();
+    let mut updater = ClientUpdater::new("1.0.0".into());
+    updater.config.endpoint = Some(server.url.clone());
+    updater.config.public_key = Some(PUBLIC_KEY.trim().into());
+    updater.config.target = Some("darwin-aarch64".into());
+    updater.config.allow_loopback_http = true;
+    updater.config.executable_path = Some(
+        executable
+            .path()
+            .join("Token Market.app/Contents/MacOS/Token Market"),
+    );
+    (server, executable, updater)
+}
+
+#[tokio::test]
+async fn confirmed_download_verifies_signed_bytes_without_installing_or_exposing_the_package() {
+    let app = app();
+    let (server, executable, updater) = download_fixture();
+    assert_eq!(updater.check(app.handle()).await.status, "available");
+    assert_eq!(
+        *server.requests.lock().unwrap(),
+        vec!["GET /stable.json HTTP/1.1"]
+    );
+    let result = updater.download(app.handle(), "1.1.0").await.unwrap();
+    assert_eq!(result.status, "ready", "{result:?}");
+    assert_eq!(result.available_version.as_deref(), Some("1.1.0"));
+    let public = serde_json::to_string(&result).unwrap();
+    assert!(!public.contains("http") && !public.contains(SIGNATURE.trim()));
+    assert_eq!(std::fs::read_dir(executable.path()).unwrap().count(), 0);
+    assert_eq!(
+        *server.requests.lock().unwrap(),
+        vec!["GET /stable.json HTTP/1.1", "GET /package HTTP/1.1"]
+    );
+}
+
+#[tokio::test]
+async fn download_rejects_untrusted_bytes_and_allows_a_deliberate_retry() {
+    let app = app();
+    let (server, executable, updater) = download_fixture();
+    assert_eq!(updater.check(app.handle()).await.status, "available");
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    let events = observed.clone();
+    let listener = app.listen("desktop-client-update-status", move |event| {
+        events.lock().unwrap().push(
+            serde_json::from_str::<serde_json::Value>(event.payload()).unwrap()["status"]
+                .as_str()
+                .unwrap()
+                .to_owned(),
+        );
+    });
+    for (status, bytes) in [
+        (0, Vec::new()),
+        (503, b"unavailable".to_vec()),
+        (200, b"altered package bytes".to_vec()),
+    ] {
+        *server.artifact.lock().unwrap() = (status, bytes);
+        let result = updater.download(app.handle(), "1.1.0").await.unwrap();
+        assert_eq!(result.status, "failed");
+        assert!(result.error.unwrap().contains("重试下载"));
+        assert_eq!(result.current_version, "1.0.0");
+        assert!(!observed
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|status| status == "ready"));
+        assert_eq!(std::fs::read_dir(executable.path()).unwrap().count(), 0);
+    }
+    // A completed transfer is explicitly reported as verifying, never as trusted.
+    assert!(observed
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|status| status == "verifying"));
+    *server.artifact.lock().unwrap() = (
+        200,
+        include_bytes!("../../tests/fixtures/client-update/package.txt").to_vec(),
+    );
+    assert_eq!(
+        updater
+            .download(app.handle(), "1.1.0")
+            .await
+            .unwrap()
+            .status,
+        "ready"
+    );
+    app.unlisten(listener);
+}
+
+#[tokio::test]
+async fn wrong_missing_or_version_mismatched_signatures_never_produce_ready() {
+    let app = app();
+    for (version, signature) in [
+        (
+            "1.1.0",
+            include_str!("../../tests/fixtures/client-update/wrong-key.sig").trim(),
+        ),
+        ("1.1.0", "malformed-signature"),
+        ("1.1.0", ""),
+        ("1.2.0", SIGNATURE.trim()),
+    ] {
+        let (server, executable, updater) = download_fixture_with(version, signature);
+        let checked = updater.check(app.handle()).await;
+        if checked.status == "available" {
+            let result = updater.download(app.handle(), version).await.unwrap();
+            assert_eq!(result.status, "failed", "{version}: {result:?}");
+            assert!(result.error.is_some());
+        } else {
+            assert_eq!(checked.status, "failed");
+            assert!(updater.download(app.handle(), version).await.is_err());
+            assert_eq!(server.requests.lock().unwrap().len(), 1);
+        }
+        assert_ne!(updater.status().status, "ready");
+        assert_eq!(std::fs::read_dir(executable.path()).unwrap().count(), 0);
+    }
+}
+
+#[tokio::test]
+async fn checks_cannot_replace_an_inflight_or_verified_candidate() {
+    let app = app();
+    let (server, _executable, updater) = download_fixture();
+    assert_eq!(updater.check(app.handle()).await.status, "available");
+    server.release_download.store(false, Ordering::SeqCst);
+    let download = updater.download(app.handle(), "1.1.0");
+    let competing_check = async {
+        for _ in 0..100 {
+            if updater.status().status == "downloading" {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert_eq!(updater.status().status, "downloading");
+        let checked = tokio::time::timeout(Duration::from_secs(1), updater.check(app.handle()))
+            .await
+            .unwrap();
+        assert_eq!(checked.status, "downloading");
+        assert_eq!(checked.available_version.as_deref(), Some("1.1.0"));
+        server.release_download.store(true, Ordering::SeqCst);
+    };
+    let (downloaded, _) = tokio::join!(download, competing_check);
+    assert_eq!(downloaded.unwrap().status, "ready");
+    assert_eq!(updater.check(app.handle()).await.status, "ready");
+    assert_eq!(
+        updater
+            .download(app.handle(), "1.1.0")
+            .await
+            .unwrap()
+            .status,
+        "ready"
+    );
+    assert_eq!(
+        *server.requests.lock().unwrap(),
+        vec!["GET /stable.json HTTP/1.1", "GET /package HTTP/1.1"]
+    );
+}
+
+#[tokio::test]
+async fn consent_for_an_obsolete_candidate_cannot_download_another_version() {
+    let app = app();
+    let (first, _executable, mut updater) = download_fixture();
+    assert!(updater.download(app.handle(), "1.1.0").await.is_err());
+    assert!(first.requests.lock().unwrap().is_empty());
+    assert_eq!(
+        updater
+            .check(app.handle())
+            .await
+            .available_version
+            .as_deref(),
+        Some("1.1.0")
+    );
+    let (newer, _newer_executable, _) = download_fixture_with("1.2.0", SIGNATURE.trim());
+    updater.config.endpoint = Some(newer.url.clone());
+    assert_eq!(
+        updater
+            .check(app.handle())
+            .await
+            .available_version
+            .as_deref(),
+        Some("1.2.0")
+    );
+    assert!(updater
+        .download(app.handle(), "1.1.0")
+        .await
+        .unwrap_err()
+        .contains("重新检查"));
+    assert_eq!(updater.status().status, "available");
+    assert_eq!(updater.status().available_version.as_deref(), Some("1.2.0"));
+    assert_eq!(
+        *first.requests.lock().unwrap(),
+        vec!["GET /stable.json HTTP/1.1"]
+    );
+    assert_eq!(
+        *newer.requests.lock().unwrap(),
+        vec!["GET /stable.json HTTP/1.1"]
+    );
+}
+
 #[tokio::test]
 async fn later_suppresses_startup_reminders_until_a_new_native_process() {
     let app = app();
@@ -341,4 +579,18 @@ async fn ignored_exact_version_persists_but_manual_and_next_version_remain_avail
         restarted.ignore_version("9.9.9").is_err(),
         "stale renderer must not ignore an unseen version"
     );
+}
+
+#[tokio::test]
+async fn downloading_a_startup_release_clears_automatic_reminder_metadata() {
+    let app = app();
+    let (_server, _executable, updater) = download_fixture();
+    let offered = updater.startup_check(app.handle()).await;
+    assert!(offered.automatic && offered.remind);
+    let downloaded = updater.download(app.handle(), "1.1.0").await.unwrap();
+    assert_eq!(downloaded.status, "ready");
+    assert!(!downloaded.automatic && !downloaded.remind);
+    let checked = updater.startup_check(app.handle()).await;
+    assert_eq!(checked.status, "ready");
+    assert!(!checked.automatic && !checked.remind);
 }
