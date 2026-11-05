@@ -2,7 +2,7 @@
 
 Product design confirmed on 2026-11-05. This document records the design and
 implementation status of the desktop updater, including isolated validation.
-Production OSS/domain configuration, release signing and protected builds, and
+Production OSS/domain configuration, native local release signing and builds, and
 actual installed-client upgrade acceptance remain outstanding. The updater has
 not been released.
 
@@ -23,9 +23,11 @@ not been released.
 - No mandatory updates or unexpected restarts during user operations in the
   initial scope.
 - Use a fixed HTTPS update address under a project-controlled domain, a static
-  version manifest and domestically accessible object storage/CDN. GitHub remains
-  the build and release-archive channel; no dedicated update backend is required
-  initially. Hosting and domain configuration still need to be provisioned.
+  version manifest and Alibaba Cloud OSS/CDN. Operators trigger local native
+  builds/signing, candidate upload and explicit accepted-byte promotion. Private
+  release configuration, keys, credential profiles, evidence and outputs stay
+  outside Git; GitHub secrets, R2 and a GitHub fallback are not required. No
+  dedicated update backend is needed. Hosting remains to be provisioned.
 - Offer only stable releases to production clients. Distribute test builds by
   separate links, without an in-app release-channel switch in the initial scope.
 - After confirmation, download and verify the package. Present an explicit
@@ -120,10 +122,6 @@ These tests do not establish configured production hosting or device upgrades.
 
 ## Implementation and release work remaining
 
-- Complete startup checks, persistent
-  ignored-version preferences and the confirmed install/restart interaction.
-- Add cross-process installation coordination without changing the independent
-  CLI update path or interrupting running mutations.
 - Provision the concrete HTTPS domain and storage/CDN; configure updater public
   keys and protect the corresponding release signing key outside the repository.
 - Generate updater packages and signatures from the final platform-signed
@@ -140,13 +138,14 @@ These tests do not establish configured production hosting or device upgrades.
   this design document.
 
 Older deployed desktop versions contain no built-in updater and require one
-manual installation of an updater-enabled release. The existing release workflow
-publishes installers; source implementation alone does not establish that deployed
-clients can already update themselves.
+manual installation of an updater-enabled release. The local release workflow
+prepares independently downloadable installers; source implementation alone does
+not establish that deployed clients can already update themselves.
 
 ## Release distribution tooling
 
-See [desktop update release distribution](desktop-update-distribution.md) for
+See the [Chinese local release guide](client-update-local-release.zh-CN.md) and
+[desktop update release distribution](desktop-update-distribution.md) for
 final-signature preparation, isolated OSS candidate publication, independent
 recovery installers and the real native-client published-fixture check. Hosting
 configuration may remain empty. Production promotion and actual platform

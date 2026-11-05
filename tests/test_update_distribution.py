@@ -251,54 +251,6 @@ class DistributionCommand(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(stable.read_bytes(), b'previous-release')
 
-    def test_oss_adapter_uses_v2_flags_and_suppresses_failed_upload_output(self):
-        # The provider executable is a public process boundary, not an internal mock.
-        # It records argv and refuses uploads, so this test cannot contact real OSS.
-        transcript = self.root / 'oss-argv.json'
-        ossutil = self.root / 'ossutil-fixture'
-        secret = 'synthetic-provider-private-secret'
-        ossutil.write_text('#!' + sys.executable + '\n' +
-            'import os,sys,json,pathlib\n' +
-            'if sys.argv[1:] == ["version"]: print("2.4.1"); sys.exit(0)\n' +
-            'if sys.argv[1:] == ["cp","--help"]: print("--cache-control --content-type --metadata --ignore-existing"); sys.exit(0)\n' +
-            'p=pathlib.Path(os.environ["FAKE_OSS_TRANSCRIPT"])\n' +
-            'items=json.loads(p.read_text()) if p.exists() else []\n' +
-            'items.append(sys.argv[1:]); p.write_text(json.dumps(items))\n' +
-            'print(os.environ["OSS_ACCESS_KEY_SECRET"])\n' +
-            'sys.exit(1 if len(items) >= int(os.environ["FAKE_OSS_FAIL_AT"]) else 0)\n')
-        ossutil.chmod(0o700)
-        for target, record in self.release['targets'].items():
-            record['platform_signing'] = dict(verified=True,
-                kind='codesign' if target == 'darwin-aarch64' else 'authenticode',
-                artifact_sha256=hashlib.sha256((self.root / record['artifact']).read_bytes()).hexdigest(),
-                bundler_version='2.10.4', nsis_install_mode='currentUser')
-        for record in self.release['installers']:
-            record['platform_signing'] = dict(verified=True,
-                kind='codesign' if record['platform'] == 'darwin-aarch64' else 'authenticode',
-                artifact_sha256=hashlib.sha256((self.root / record['path']).read_bytes()).hexdigest())
-        self.save()
-        result = self.command('publish', '--inventory', str(self.inventory), '--ossutil', str(ossutil),
-            '--verifier', str(ROOT / 'src-tauri/target/debug/examples/verify-update-artifacts'),
-            env={'OSS_REGION': 'fixture-region', 'OSS_ENDPOINT': 'https://oss.invalid',
-                 'TOKEN_MARKET_UPDATE_OSS_BUCKET': 'fixture-bucket', 'TOKEN_MARKET_UPDATE_OSS_PREFIX': 'isolated',
-                 'TOKEN_MARKET_UPDATE_PUBLIC_BASE_URL': 'https://127.0.0.1:1',
-                 'OSS_ACCESS_KEY_ID': 'fixture', 'OSS_ACCESS_KEY_SECRET': secret, 'OSS_SESSION_TOKEN': 'fixture',
-                 'FAKE_OSS_TRANSCRIPT': str(transcript), 'FAKE_OSS_FAIL_AT': '1'})
-        self.assertNotEqual(result.returncode, 0)
-        self.assertNotIn(secret, result.stdout + result.stderr)
-        writes = json.loads(transcript.read_text())
-        self.assertTrue(writes)
-        self.assertTrue(all('stable.json' not in ' '.join(write) for write in writes))
-        upload = writes[0]
-        self.assertEqual(upload[0], 'cp')
-        self.assertTrue(upload[2].startswith('oss://fixture-bucket/isolated/releases/1.1.0/'))
-        self.assertIn('--ignore-existing', upload)
-        self.assertIn('--cache-control', upload)
-        self.assertIn('--content-type', upload)
-        self.assertIn('--metadata', upload)
-        self.assertNotIn('--meta', upload)
-        self.assertNotIn(secret, ' '.join(upload))
-
     def test_unconfigured_plan_reports_missing_fields_without_inventing_routes(self):
         result = self.command('plan', '--inventory', str(self.inventory), '--fixture')
         self.assertEqual(result.returncode, 0, result.stderr)

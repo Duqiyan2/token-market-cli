@@ -205,7 +205,7 @@ def package(args):
     if len(cli_version) != 2 or cli_version[0] != "tokenmarket":
         raise RuntimeError("Unexpected CLI version response")
     app_version = info["CFBundleShortVersionString"]
-    if cli_version[1] != app_version:
+    if cli_version[1] != app_version and not args.independent_cli_version:
         raise RuntimeError("App and CLI versions must match")
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -378,6 +378,7 @@ def main():
     package_parser.add_argument("--app", type=Path, required=True)
     package_parser.add_argument("--cli", type=Path, required=True)
     package_parser.add_argument("--output", type=Path, required=True)
+    package_parser.add_argument("--independent-cli-version", action="store_true", help="Desktop Client Updates keep the CLI version independent")
     args = parser.parse_args()
     if sys.platform != "darwin":
         parser.error("Local signing requires macOS")

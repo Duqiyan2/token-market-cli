@@ -19,6 +19,10 @@ from urllib.request import build_opener, HTTPRedirectHandler, ProxyHandler, Requ
 import sys
 from urllib.parse import quote, unquote, urlsplit
 
+# A release command must not dirty its own clean source checkout when importing
+# the local orchestration module on standard CPython without a cache prefix.
+sys.dont_write_bytecode = True
+
 TARGETS = ('darwin-aarch64', 'windows-x86_64-nsis')
 CONFIG = ('OSS_REGION', 'OSS_ENDPOINT', 'TOKEN_MARKET_UPDATE_OSS_BUCKET',
           'TOKEN_MARKET_UPDATE_OSS_PREFIX', 'TOKEN_MARKET_UPDATE_PUBLIC_BASE_URL')
@@ -129,13 +133,13 @@ def release_plan(args):
     return inventory_plan(args)
 
 
-def child(command, *, stdin=None, label='Release tool', env=None):
+def child(command, *, stdin=None, label='Release tool', env=None, timeout=300):
     try:
         if env is None:
             env = {key: value for key, value in os.environ.items() if not key.startswith('TAURI_SIGNING_')}
         result = subprocess.run([str(part) for part in command], input=stdin, text=True,
-                                capture_output=True, env=env, timeout=300)
-    except (OSError, subprocess.TimeoutExpired):
+                                capture_output=True, env=env, timeout=timeout)
+    except (OSError, UnicodeError, subprocess.TimeoutExpired):
         raise ValueError(label + ' failed; child output suppressed') from None
     require(result.returncode == 0, label + ' failed; child output suppressed')
     return result.stdout
@@ -193,6 +197,7 @@ def recovery_document(plan):
 
 
 def publish(args):
+    require(args.fixture, 'Use local-candidate with private --config for real publication; legacy environment publishing is disabled')
     publish_verified(args, release_plan(args))
 
 
@@ -235,8 +240,8 @@ def publish_verified(args, plan):
         store = Path(local).resolve() if local else None
         if store:
             store.mkdir(parents=True, exist_ok=True)
-        # One local publisher per destination. OSS release jobs must additionally
-        # use a CI concurrency group spanning every publisher (see deployment doc).
+        # Local production commands hold the canonical OS destination lock.
+        # This extra fixture-store marker supports the legacy native fixture driver.
         lock = (store / '.publish-lock') if store else stage / '.publish-lock'
         try:
             lock.mkdir()
@@ -416,9 +421,7 @@ ACCEPTANCE_CHECKS = (
     'network_failure_retry', 'invalid_package_refusal_retry', 'installer_failure_retry',
     'external_recovery_opened', 'legacy_manual_bootstrap_then_update')
 PROMOTION_CONFIG = ('TOKEN_MARKET_UPDATE_PRODUCTION_MANIFEST_KEY', 'TOKEN_MARKET_UPDATE_RECOVERY_KEY',
-    'TOKEN_MARKET_UPDATE_PUBLIC_BASE_URL', 'TOKEN_MARKET_UPDATE_TRUSTED_BUILD_REPOSITORY',
-    'TOKEN_MARKET_UPDATE_TRUSTED_BUILD_WORKFLOWS')
-PUBLISH_CONCURRENCY = 'token-market-client-update-distribution'
+    'TOKEN_MARKET_UPDATE_PUBLIC_BASE_URL')
 
 
 def nonempty(value, label):
@@ -430,12 +433,18 @@ def object_fields(value, fields, label):
     require(isinstance(value, dict) and set(value) == set(fields), label + ' requires exactly: ' + ', '.join(fields))
 
 
-def evidence_passed(value, label, fixture, *, extra=()):
+def evidence_passed(value, label, fixture, *, extra=(), local=False):
     object_fields(value, ('status', 'evidence') + tuple(extra), label)
     require(value['status'] == 'passed', label + ' must have status passed')
     refs = value['evidence']
     require(isinstance(refs, list) and bool(refs), label + ' requires concrete result/log references')
     for ref in refs:
+        if local and isinstance(ref, dict):
+            import desktop_update_local
+            object_fields(ref, ('path', 'sha256'), label + ' local evidence')
+            path = desktop_update_local.external(ref['path'], label + ' evidence.path')
+            require(path.is_file() and digest(path) == ref['sha256'], label + ' local evidence digest mismatch')
+            continue
         nonempty(ref, label + ' evidence reference')
         parsed = urlsplit(ref)
         require((fixture and parsed.scheme == 'synthetic') or
@@ -462,26 +471,10 @@ def same_artifacts(value, expected, label):
     require(sorted(value, key=ordering) == sorted(expected, key=ordering), label + ' artifact digest/size/target mismatch')
 
 
-def destination_gate():
-    # Environment claims are a protected-workflow contract, not a distributed lock.
-    # Every live writer must use the same literal GitHub concurrency group.
-    names = CONFIG + ('TOKEN_MARKET_UPDATE_PUBLISH_DESTINATION', 'TOKEN_MARKET_UPDATE_PROMOTION_WORKFLOW_REF')
-    missing = [name for name in names if not os.environ.get(name, '').strip()]
-    require(not missing, 'Missing configuration: ' + ', '.join(missing))
-    expected = 'oss://' + os.environ['TOKEN_MARKET_UPDATE_OSS_BUCKET'] + '/' + os.environ['TOKEN_MARKET_UPDATE_OSS_PREFIX']
-    require(os.environ['TOKEN_MARKET_UPDATE_PUBLISH_DESTINATION'] == expected, 'Protected destination binding does not match bucket/prefix')
-    repository = os.environ['TOKEN_MARKET_UPDATE_TRUSTED_BUILD_REPOSITORY']
-    workflow = os.environ['TOKEN_MARKET_UPDATE_PROMOTION_WORKFLOW_REF']
-    require(re.fullmatch(re.escape(repository) + r'/[.]github/workflows/[A-Za-z0-9_.-]+[.]yml@refs/heads/main', workflow),
-            'Promotion workflow must name the protected main workflow in the trusted repository')
-    require(os.environ.get('GITHUB_ACTIONS') == 'true' and os.environ.get('GITHUB_REPOSITORY') == repository and
-            os.environ.get('GITHUB_WORKFLOW_REF') == workflow and
-            os.environ.get('TOKEN_MARKET_UPDATE_PUBLISH_CONCURRENCY') == PUBLISH_CONCURRENCY,
-            'Production promotion requires the protected GitHub workflow and shared destination concurrency group')
-
-
 def promotion_plan(args):
-    required = PROMOTION_CONFIG + (() if args.fixture else CONFIG + ('TOKEN_MARKET_UPDATE_PUBLISH_DESTINATION', 'TOKEN_MARKET_UPDATE_PROMOTION_WORKFLOW_REF'))
+    local = getattr(args, 'local_configuration', None)
+    require(args.fixture or local, 'Use local-publish with private --config (manifest_key/recovery_key); legacy CI/environment promotion is disabled')
+    required = PROMOTION_CONFIG
     missing = [name for name in dict.fromkeys(required) if not os.environ.get(name, '').strip()]
     require(not missing, 'Missing configuration: ' + ', '.join(missing))
     require(not args.fixture or args.local_store, '--fixture requires an isolated --local-store; synthetic acceptance cannot reach OSS')
@@ -493,11 +486,15 @@ def promotion_plan(args):
             'Recovery must be a fixed HTML alias outside test/ and immutable releases/')
     plan = inventory_plan(args, production_route=route)
     plan['recovery_key'] = recovery_key
-    if not args.fixture:
-        destination_gate()
+    if not local:
+        # Existing low-level fixture driver uses the same explicit local schema.
+        local = dict(version=plan['version'], public_key=plan['public_key'], public_base_url=plan['public_base_url'],
+            manifest_key=route, recovery_key=recovery_key)
     accepted = json.loads(Path(args.acceptance).read_text())
-    object_fields(accepted, ('schema_version', 'fixture', 'release', 'routes', 'devices', 'evidence'), 'Acceptance')
-    require(type(accepted['schema_version']) is int and accepted['schema_version'] == 1, 'Unsupported acceptance schema_version')
+    object_fields(accepted, ('schema_version', 'fixture', 'release', 'routes', 'devices', 'evidence', 'provenance_kind'), 'Acceptance')
+    require(type(accepted['schema_version']) is int and accepted['schema_version'] == 2, 'Unsupported acceptance schema_version')
+    if local:
+        require(accepted['provenance_kind'] == 'local-operator-acceptance', 'Invalid local acceptance provenance_kind')
     require(accepted['fixture'] is args.fixture, 'Acceptance fixture classification mismatch')
     binding = accepted['release']
     object_fields(binding, ('source_commit', 'version', 'artifacts', 'manifest_sha256'), 'Acceptance release')
@@ -520,12 +517,8 @@ def promotion_plan(args):
     object_fields(accepted['devices'], TARGETS, 'Acceptance devices')
     object_fields(accepted['evidence'], ('automated', 'native_signing', 'deployment_readback'), 'Acceptance evidence')
     for name, evidence in accepted['evidence'].items():
-        evidence_passed(evidence, name, args.fixture)
+        evidence_passed(evidence, name, args.fixture, local=bool(local))
     release = json.loads(Path(args.inventory).read_text())
-    repository = os.environ['TOKEN_MARKET_UPDATE_TRUSTED_BUILD_REPOSITORY']
-    require(re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repository), 'Invalid trusted build repository')
-    workflows = json.loads(os.environ['TOKEN_MARKET_UPDATE_TRUSTED_BUILD_WORKFLOWS'])
-    object_fields(workflows, TARGETS, 'Trusted build workflows')
     for target in TARGETS:
         label = 'Acceptance ' + target
         record = release['targets'][target]
@@ -546,14 +539,14 @@ def promotion_plan(args):
         require(isinstance(older, str) and re.fullmatch(r'(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)', older) and
                 tuple(map(int, older.split('.'))) < tuple(map(int, plan['version'].split('.'))) and device['starting_updater_enabled'] is True,
                 label + ' requires an older updater-enabled installed starting version')
-        evidence_passed(device['installed_upgrade'], label + ' installed upgrade', args.fixture)
-        evidence_passed(device['startup'], label + ' startup', args.fixture, extra=('version', 'executable', 'artifact_sha256'))
+        evidence_passed(device['installed_upgrade'], label + ' installed upgrade', args.fixture, local=bool(local))
+        evidence_passed(device['startup'], label + ' startup', args.fixture, extra=('version', 'executable', 'artifact_sha256'), local=bool(local))
         updater = next(obj for obj in plan['objects'] if obj['role'] == 'updater' and obj['platform'] == target)
         require(device['startup']['version'] == plan['version'] and device['startup']['artifact_sha256'] == updater['sha256'], label + ' new installed startup version/digest mismatch')
         nonempty(device['startup']['executable'], label + ' new installed executable')
         object_fields(device['checks'], ACCEPTANCE_CHECKS, label + ' checks')
         for name, evidence in device['checks'].items():
-            evidence_passed(evidence, label + ' ' + name, args.fixture)
+            evidence_passed(evidence, label + ' ' + name, args.fixture, local=bool(local))
         require(device['compiled'] == expected_compiled, label + ' compiled endpoint/recovery/key mismatch')
         path = Path(args.inventory).resolve().parent
         provenance_path = path / nonempty(record.get('build_provenance'), label + ' build_provenance path')
@@ -561,16 +554,8 @@ def promotion_plan(args):
         require(provenance_path.is_file() and prepared_path.is_file(), label + ' missing build provenance/prepared receipt')
         require(digest(provenance_path) == device['build_provenance_sha256'] and digest(prepared_path) == device['prepared_sha256'], label + ' build provenance/prepared receipt digest mismatch')
         provenance = json.loads(provenance_path.read_text())
-        object_fields(provenance, ('schema_version', 'fixture', 'repository', 'workflow', 'run_url', 'run_attempt',
-            'source_commit', 'version', 'target', 'artifacts', 'prepared_sha256', 'signing_identity', 'compiled'), label + ' build provenance')
-        require(type(provenance['schema_version']) is int and provenance['schema_version'] == 1 and provenance['fixture'] is args.fixture,
-                label + ' invalid build provenance schema/classification')
-        workflow = workflows[target]
-        require(isinstance(workflow, str) and re.fullmatch(r'[.]github/workflows/[A-Za-z0-9_.-]+[.]yml', workflow), 'Trusted native workflow must be an exact repository workflow path')
-        require(provenance['repository'] == repository and provenance['workflow'] == workflow and
-                isinstance(provenance['run_url'], str) and re.fullmatch('https://github[.]com/' + re.escape(repository) + r'/actions/runs/[1-9][0-9]*', provenance['run_url']) and
-                type(provenance['run_attempt']) is int and provenance['run_attempt'] > 0,
-                label + ' build provenance must identify the configured trusted native CI run')
+        import desktop_update_local
+        desktop_update_local.validate_provenance(provenance, local, args.fixture, sys.modules[__name__], label)
         require(provenance['source_commit'] == plan['source_commit'] and provenance['version'] == plan['version'] and
                 provenance['target'] == target and provenance['compiled'] == expected_compiled and
                 provenance['prepared_sha256'] == device['prepared_sha256'], label + ' source/build/compiled provenance mismatch')
@@ -596,98 +581,9 @@ def promotion_plan(args):
     return plan
 
 
-def record_build(args):
-    """Emit native-job output from finalized prepared bytes and protected build inputs.
-
-    The trusted job must retain the same compile environment from build through
-    this invocation. This records those inputs; it does not reverse-engineer or
-    cryptographically attest a binary's compiled configuration.
-    """
-    receipt_path = Path(args.prepared_receipt).resolve()
-    prepared = json.loads(receipt_path.read_text())
-    target, version = prepared.get('target'), prepared.get('version', '')
-    require(target in TARGETS and re.fullmatch(r'(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)', version),
-            'Prepared receipt requires a supported target and stable version')
-    names = ('TOKEN_MARKET_UPDATE_TRUSTED_BUILD_REPOSITORY', 'TOKEN_MARKET_UPDATE_TRUSTED_BUILD_WORKFLOWS',
-             'TOKEN_MARKET_UPDATER_ENDPOINT', 'TOKEN_MARKET_UPDATER_RECOVERY_URL', 'TOKEN_MARKET_UPDATER_PUBLIC_KEY',
-             'GITHUB_REPOSITORY', 'GITHUB_WORKFLOW_REF', 'GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT')
-    missing = [name for name in names if not os.environ.get(name, '').strip()]
-    require(not missing, 'Missing build provenance configuration: ' + ', '.join(missing))
-    root = Path(__file__).resolve().parents[1]
-    source = child(['git', '-C', root, 'rev-parse', 'HEAD'], label='Checked-out source inspection').strip()
-    require(re.fullmatch(r'[a-f0-9]{40}', source) and source == os.environ['GITHUB_SHA'], 'Build GITHUB_SHA must match the actual checked-out source')
-    repository = os.environ['TOKEN_MARKET_UPDATE_TRUSTED_BUILD_REPOSITORY']
-    require(re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repository) and os.environ['GITHUB_REPOSITORY'] == repository,
-            'Build repository must match configured trusted repository')
-    workflows = json.loads(os.environ['TOKEN_MARKET_UPDATE_TRUSTED_BUILD_WORKFLOWS'])
-    object_fields(workflows, TARGETS, 'Trusted build workflows')
-    workflow = workflows[target]
-    require(isinstance(workflow, str) and re.fullmatch(r'[.]github/workflows/[A-Za-z0-9_.-]+[.]yml', workflow) and
-            os.environ['GITHUB_WORKFLOW_REF'] == repository + '/' + workflow + '@refs/heads/main',
-            'Build must use the configured protected native main workflow')
-    if not args.fixture:
-        require(os.environ.get('GITHUB_ACTIONS') == 'true', 'Native production provenance must be emitted inside trusted GitHub CI')
-        require(not child(['git', '-C', root, 'status', '--porcelain', '--untracked-files=no'], label='Clean source inspection').strip(),
-                'Native production provenance requires a clean tracked source checkout')
-        config = json.loads((root / 'src-tauri/tauri.conf.json').read_text())
-        require(config.get('version') == version, 'Prepared version must match checked-out desktop build configuration')
-    run_id, attempt = os.environ['GITHUB_RUN_ID'], os.environ['GITHUB_RUN_ATTEMPT']
-    require(re.fullmatch(r'[1-9][0-9]*', run_id) and re.fullmatch(r'[1-9][0-9]*', attempt), 'Build run ID/attempt must be positive integers')
-    endpoint = public_base(os.environ['TOKEN_MARKET_UPDATER_ENDPOINT'], args.fixture)
-    recovery = public_base(os.environ['TOKEN_MARKET_UPDATER_RECOVERY_URL'], args.fixture)
-    require(endpoint == os.environ['TOKEN_MARKET_UPDATER_ENDPOINT'] and recovery == os.environ['TOKEN_MARKET_UPDATER_RECOVERY_URL'],
-            'Build routes must match exact compiled values without whitespace or trailing slash normalization')
-    require(urlsplit(endpoint).path.endswith('/stable.json') and '/test/' not in urlsplit(endpoint).path and
-            urlsplit(recovery).path.endswith('.html') and '/releases/' not in urlsplit(recovery).path and '/test/' not in urlsplit(recovery).path,
-            'Native release build must compile production discovery and a fixed recovery HTML alias')
-    public_key = os.environ['TOKEN_MARKET_UPDATER_PUBLIC_KEY'].strip()
-    identity = prepared.get('platform_signing', {}).get('identity' if args.fixture else 'certificate_sha1')
-    nonempty(identity, 'Prepared native signing identity')
-    objects = []
-    def artifact(name, role, platform, signing):
-        require(isinstance(name, str) and Path(name).name == name and name not in ('', '.', '..'), 'Prepared artifact requires a basename')
-        path = receipt_path.parent / name
-        require(path.is_file() and not path.is_symlink() and path.stat().st_size > 0, 'Prepared artifact is unavailable or empty')
-        sha = digest(path)
-        if not args.fixture:
-            require(signing.get('verified') is True and not signing.get('fixture') and signing.get('artifact_sha256') == sha and
-                    signing.get('certificate_sha1') == identity and
-                    signing.get('kind') == ('codesign' if platform == 'darwin-aarch64' else 'authenticode'),
-                    'Prepared native signing evidence does not match finalized bytes/identity')
-        objects.append(dict(path=str(path), role=role, platform=platform, sha256=sha, size=path.stat().st_size))
-    artifact(prepared.get('artifact'), 'updater', target, prepared.get('platform_signing', {}))
-    objects[0]['signature'] = nonempty(prepared.get('signature'), 'Prepared updater signature')
-    manual_platform = 'darwin-aarch64' if target == 'darwin-aarch64' else 'windows-x86_64'
-    manual = prepared.get('installers')
-    require(isinstance(manual, list) and bool(manual), 'Prepared manual installers are required for native provenance')
-    for item in manual:
-        require(item.get('platform') == manual_platform, 'Prepared manual installer target mismatch')
-        artifact(item.get('path'), 'manual', manual_platform, item.get('platform_signing', {}))
-    if not args.fixture:
-        require(re.fullmatch(r'[a-f0-9]{40}', identity), 'Native signing identity must be certificate SHA-1')
-        signing = prepared['platform_signing']
-        if target == 'darwin-aarch64':
-            require(type(signing.get('notarized')) is bool, 'Record macOS notarization honestly as true or false')
-        else:
-            require(signing.get('bundler_version') == '2.10.4' and signing.get('nsis_install_mode') == 'currentUser', 'Native Windows updater provenance requires pinned currentUser NSIS')
-    probe = dict(version=version, public_key=public_key, required_targets=1, objects=objects)
-    verify(probe, args.verifier)
-    provenance = dict(schema_version=1, fixture=args.fixture, repository=repository, workflow=workflow,
-        run_url='https://github.com/' + repository + '/actions/runs/' + run_id, run_attempt=int(attempt),
-        source_commit=source, version=version, target=target, artifacts=artifact_bindings(probe),
-        prepared_sha256=digest(receipt_path), signing_identity=identity,
-        compiled=dict(endpoint=endpoint, recovery_url=recovery,
-                      public_key_sha256=hashlib.sha256(public_key.encode()).hexdigest()))
-    output = Path(args.output).resolve()
-    require(not output.exists(), 'Build provenance output already exists; preserve native run output')
-    output.parent.mkdir(parents=True, exist_ok=True)
-    with output.open('x') as stream:
-        stream.write(json.dumps(provenance, indent=2) + '\n')
-    print(json.dumps(dict(recorded=True, fixture=args.fixture, source_commit=source, target=target, provenance=str(output))))
-
-
-def promote(args):
-    plan = promotion_plan(args)
+def promote(args, plan=None):
+    if plan is None:
+        plan = promotion_plan(args)
     if args.dry_run:
         # Verify the same snapshots without credentials, network, locks or writes.
         with tempfile.TemporaryDirectory(prefix='tokenmarket-promotion-plan-') as temporary:
@@ -705,6 +601,7 @@ def promote(args):
 
 
 def main():
+    os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
     plan = commands.add_parser('plan', help='Read-only inventory; no credentials or network required')
@@ -726,11 +623,6 @@ def main():
     promotion.add_argument('--local-store')
     promotion.add_argument('--verifier')
     promotion.add_argument('--ossutil', default='ossutil')
-    recording = commands.add_parser('record-build', help='Emit native CI provenance from checked-out source, prepared bytes and unchanged compile environment')
-    recording.add_argument('--prepared-receipt', required=True)
-    recording.add_argument('--output', required=True)
-    recording.add_argument('--verifier')
-    recording.add_argument('--fixture', action='store_true')
     preparing = commands.add_parser('prepare', help='Package final OS-signed bytes and sign their exact updater artifact')
     preparing.add_argument('--version', required=True)
     preparing.add_argument('--target', choices=TARGETS + ('windows-x86_64-msi',), required=True)
@@ -744,15 +636,30 @@ def main():
     preparing.add_argument('--signer', default='tauri')
     preparing.add_argument('--verifier')
     preparing.add_argument('--fixture', action='store_true')
+    for name in ('local-build', 'local-inventory', 'local-candidate', 'local-validate', 'local-publish'):
+        command = commands.add_parser(name, help='Explicit local operator release workflow; private JSON config outside Git')
+        command.add_argument('--config', required=True)
+        command.add_argument('--fixture', action='store_true')
+        command.add_argument('--local-store')
+        if name == 'local-build':
+            command.add_argument('--target', choices=TARGETS, required=True)
+            command.add_argument('--fixture-native-command', nargs='+')
+        elif name == 'local-inventory':
+            command.add_argument('--prepared', action='append', required=True)
+            command.add_argument('--notes-file', required=True)
+        else:
+            command.add_argument('--inventory', required=True)
+            if name != 'local-candidate': command.add_argument('--acceptance', required=True)
     args = parser.parse_args()
-    if args.command == 'plan':
+    if args.command.startswith('local-'):
+        import desktop_update_local
+        desktop_update_local.run(args, sys.modules[__name__])
+    elif args.command == 'plan':
         print(json.dumps(release_plan(args), indent=2))
     elif args.command == 'publish':
         publish(args)
     elif args.command == 'promote':
         promote(args)
-    elif args.command == 'record-build':
-        record_build(args)
     elif args.command == 'prepare':
         prepare(args)
 
