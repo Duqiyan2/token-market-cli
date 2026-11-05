@@ -8,12 +8,17 @@ use sha2::{Digest, Sha256};
 use std::sync::Arc;
 
 pub fn login_directory(origin: &str) -> std::path::PathBuf {
-    config::token_market_home()
-        .join("client-login")
-        .join(format!(
-            "{:x}",
-            Sha256::digest(origin.trim_end_matches('/').as_bytes())
-        ))
+    login_directory_in(&config::token_market_home(), origin)
+}
+
+pub(crate) fn login_directory_in(
+    client_home: &std::path::Path,
+    origin: &str,
+) -> std::path::PathBuf {
+    client_home.join("client-login").join(format!(
+        "{:x}",
+        Sha256::digest(origin.trim_end_matches('/').as_bytes())
+    ))
 }
 
 pub fn login_manager() -> DesktopLogin {

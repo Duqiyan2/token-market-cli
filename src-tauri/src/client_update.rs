@@ -2,7 +2,7 @@ use serde::Serialize;
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
-        Mutex,
+        Arc, Mutex,
     },
     time::Duration,
 };
@@ -21,6 +21,39 @@ pub struct ClientUpdateStatus {
     pub error: Option<String>,
     pub automatic: bool,
     pub remind: bool,
+    pub install_available: bool,
+}
+
+/// Constructed only from a successfully verified native download. Never IPC data.
+#[allow(dead_code)] // Read by validated platform installers in the following slices.
+pub struct VerifiedClientUpdate {
+    update: Update,
+    bytes: Vec<u8>,
+}
+
+impl VerifiedClientUpdate {
+    #[allow(dead_code)]
+    pub fn into_parts(self) -> (Update, Vec<u8>) {
+        (self.update, self.bytes)
+    }
+}
+
+/// Platform boundary: prepare must obtain the full legacy lock set and retain it
+/// in the returned object (or its already-running guardian) before returning.
+/// No platform implementation is registered until its lifetime is validated.
+pub trait ClientUpdateInstaller: Send + Sync {
+    fn prepare(&self, update: VerifiedClientUpdate)
+        -> Result<Box<dyn ClientUpdateHandoff>, String>;
+}
+
+/// Dropping before commit must abort without installation. Commit must retain
+/// protection until known installer termination, even if the desktop exits.
+/// Success means handoff only; actual target-version startup is separate.
+/// Err is allowed only when installation is known inactive (precommit abort,
+/// launch failure, or known termination). An uncertain postcommit result stays
+/// a pending handoff in the durable journal; it must not enable another attempt.
+pub trait ClientUpdateHandoff: Send {
+    fn commit(self: Box<Self>) -> Result<(), String>;
 }
 
 struct UpdateConfig {
@@ -88,6 +121,7 @@ struct UpdateState {
 
 pub struct ClientUpdater {
     config: UpdateConfig,
+    installer: Option<Arc<dyn ClientUpdateInstaller>>,
     reminders: Mutex<Reminders>,
     startup_started: AtomicBool,
     state: Mutex<UpdateState>,
@@ -113,6 +147,7 @@ impl ClientUpdater {
     fn with_preferences(current_version: String, path: Option<std::path::PathBuf>) -> Self {
         Self {
             config: UpdateConfig::from_build(),
+            installer: None,
             reminders: Mutex::new(Reminders::new(path)),
             startup_started: AtomicBool::new(false),
             state: Mutex::new(UpdateState {
@@ -124,12 +159,69 @@ impl ClientUpdater {
                     error: None,
                     automatic: false,
                     remind: false,
+                    install_available: false,
                 },
                 candidate: None,
                 verified_bytes: None,
             }),
             operation: tauri::async_runtime::Mutex::new(()),
         }
+    }
+
+    /// Native platform registration only; renderer cannot select an executor.
+    #[allow(dead_code)] // Real platform registration remains intentionally unavailable.
+    pub fn with_installer(mut self, installer: Arc<dyn ClientUpdateInstaller>) -> Self {
+        self.installer = Some(installer);
+        self.state
+            .lock()
+            .expect("client update state")
+            .status
+            .install_available = true;
+        self
+    }
+
+    pub async fn install<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        expected_version: &str,
+    ) -> Result<ClientUpdateStatus, String> {
+        let _operation = self.operation.lock().await;
+        let installer = self
+            .installer
+            .as_ref()
+            .ok_or("安装并重启暂不可用，请使用官方安装包更新")?;
+        let verified = {
+            let mut state = self.state.lock().expect("client update state");
+            if state.status.status != "ready"
+                || state.status.available_version.as_deref() != Some(expected_version)
+            {
+                return Err("请先下载并验证当前客户端更新，再确认安装".into());
+            }
+            let update = state.candidate.clone().ok_or("请重新检查客户端更新")?;
+            let bytes = state.verified_bytes.clone().ok_or("请先验证客户端更新包")?;
+            state.status.status = "installing".into();
+            state.status.error = None;
+            state.status.automatic = false;
+            state.status.remind = false;
+            VerifiedClientUpdate { update, bytes }
+        };
+        let _ = app.emit("desktop-client-update-status", self.status());
+        let result = installer
+            .prepare(verified)
+            .and_then(|handoff| handoff.commit());
+        let status = {
+            let mut state = self.state.lock().expect("client update state");
+            match result {
+                Ok(()) => state.status.status = "handoff".into(),
+                Err(error) => {
+                    state.status.status = "ready".into();
+                    state.status.error = Some(error);
+                }
+            }
+            state.status.clone()
+        };
+        let _ = app.emit("desktop-client-update-status", &status);
+        Ok(status)
     }
 
     pub fn status(&self) -> ClientUpdateStatus {
@@ -178,12 +270,15 @@ impl ClientUpdater {
     ) -> ClientUpdateStatus {
         if matches!(
             self.status().status.as_str(),
-            "downloading" | "verifying" | "ready"
+            "downloading" | "verifying" | "ready" | "installing" | "handoff"
         ) {
             return self.status();
         }
         let _operation = self.operation.lock().await;
-        if self.status().status == "ready" {
+        if matches!(
+            self.status().status.as_str(),
+            "ready" | "installing" | "handoff"
+        ) {
             return self.status();
         }
         {
@@ -236,7 +331,10 @@ impl ClientUpdater {
                 .filter(|candidate| candidate.version == expected_version)
                 .ok_or("更新版本已改变，请重新检查并确认下载")?
                 .clone();
-            if state.status.status == "ready" {
+            if matches!(
+                state.status.status.as_str(),
+                "ready" | "installing" | "handoff"
+            ) {
                 return Ok(state.status.clone());
             }
             state.verified_bytes = None;
@@ -396,3 +494,11 @@ pub async fn download_client_update(
 
 #[cfg(test)]
 mod tests;
+
+#[tauri::command]
+pub async fn install_client_update(
+    app: AppHandle,
+    version: String,
+) -> Result<ClientUpdateStatus, String> {
+    app.state::<ClientUpdater>().install(&app, &version).await
+}
