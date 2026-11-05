@@ -1,7 +1,10 @@
 # Desktop client updates
 
-Product design confirmed on 2026-11-05. The decisions below describe intended
-behavior, not an implemented or released updater.
+Product design confirmed on 2026-11-05. This document records the design and
+implementation status of the desktop updater, including isolated validation.
+Production OSS/domain configuration, release signing and protected builds, and
+actual installed-client upgrade acceptance remain outstanding. The updater has
+not been released.
 
 ## Confirmed behavior
 

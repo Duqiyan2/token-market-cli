@@ -909,6 +909,125 @@ async fn pending_macos_startup_is_reconciled_before_blank_distribution_configura
 }
 
 #[cfg(target_os = "macos")]
+#[tokio::test]
+async fn completed_macos_update_recovers_after_busy_startup_on_explicit_check() {
+    use tokenmarket_core::client_update::{ClientUpdateJournal, ClientUpdatePhase};
+    let home = tempfile::tempdir().unwrap();
+    let executable = home
+        .path()
+        .join("Token Market.app/Contents/MacOS/Token Market");
+    let mut journal =
+        ClientUpdateJournal::begin(home.path(), "0.9.0", "1.0.0", &executable).unwrap();
+    for phase in [
+        ClientUpdatePhase::Guarded,
+        ClientUpdatePhase::Committed,
+        ClientUpdatePhase::InstallerRunning,
+        ClientUpdatePhase::AwaitingStartup,
+    ] {
+        journal.record(phase).unwrap();
+    }
+    journal.acknowledge_startup("1.0.0", &executable).unwrap();
+    let cli_lock_path = home
+        .path()
+        .join(".tokenmarket/desktop-connections/operation.lock");
+    std::fs::create_dir_all(cli_lock_path.parent().unwrap()).unwrap();
+    let cli_lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(cli_lock_path)
+        .unwrap();
+    cli_lock.try_lock().unwrap();
+    let app = app();
+    let (_server, _executable, updater) = download_fixture();
+    let home_path = home.path().to_owned();
+    let updater = updater
+        .with_installer(Arc::new(super::macos::MacInstaller::fixture(
+            home_path.clone(),
+            executable.clone(),
+            "1.0.0".into(),
+            Arc::new(|| {}),
+        )))
+        .with_startup_reconciliation(move || {
+            super::macos::reconcile(&home_path, "1.0.0", &executable)
+        });
+    assert_eq!(updater.startup_check(app.handle()).await.status, "handoff");
+    assert_eq!(updater.check(app.handle()).await.status, "handoff");
+    drop(cli_lock);
+    // Automatic checks stay quiet; only the user's deliberate retry reconciles.
+    assert_eq!(updater.startup_check(app.handle()).await.status, "handoff");
+    let recovered = updater.check(app.handle()).await;
+    assert_eq!(recovered.status, "available", "{recovered:?}");
+    assert_eq!(recovered.available_version.as_deref(), Some("1.1.0"));
+    assert!(updater.install(app.handle(), "1.1.0").await.is_err());
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn explicit_macos_reconciliation_requires_inactive_installer_and_actual_target_startup() {
+    use tokenmarket_core::client_update::{
+        ClientUpdateGuard, ClientUpdateJournal, ClientUpdatePhase,
+    };
+    for (running_version, wrong_path, still_running) in [
+        ("0.9.0", false, false),
+        ("1.0.0", true, false),
+        ("1.0.0", false, true),
+        ("1.0.0", false, false),
+    ] {
+        let home = tempfile::tempdir().unwrap();
+        let executable = home
+            .path()
+            .join("Token Market.app/Contents/MacOS/Token Market");
+        let mut journal =
+            ClientUpdateJournal::begin(home.path(), "0.9.0", "1.0.0", &executable).unwrap();
+        for phase in [
+            ClientUpdatePhase::Guarded,
+            ClientUpdatePhase::Committed,
+            ClientUpdatePhase::InstallerRunning,
+        ] {
+            journal.record(phase).unwrap();
+        }
+        let active = ClientUpdateGuard::acquire(home.path(), "https://fixture.invalid").unwrap();
+        let app = app();
+        let (_server, _executable, updater) = download_fixture();
+        let home_path = home.path().to_owned();
+        let running_executable = if wrong_path {
+            home.path().join("other-client")
+        } else {
+            executable
+        };
+        let updater = updater.with_startup_reconciliation(move || {
+            super::macos::reconcile(&home_path, running_version, &running_executable)
+        });
+        assert_eq!(updater.startup_check(app.handle()).await.status, "handoff");
+        let retained_guard = if still_running {
+            Some(active)
+        } else {
+            drop(active);
+            None
+        };
+        let result = updater.check(app.handle()).await;
+        let expected = if running_version == "1.0.0" && !wrong_path && !still_running {
+            "available"
+        } else {
+            "handoff"
+        };
+        assert_eq!(
+            result.status, expected,
+            "version={running_version}, wrong_path={wrong_path}, live={still_running}: {result:?}"
+        );
+        if expected == "handoff" {
+            assert!(updater.download(app.handle(), "1.1.0").await.is_err());
+        }
+        if let Some(active) = retained_guard {
+            drop(active);
+            assert_eq!(updater.check(app.handle()).await.status, "available");
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
 struct InterruptedMacInstaller {
     executor: super::macos::MacInstaller,
     bundle: std::path::PathBuf,

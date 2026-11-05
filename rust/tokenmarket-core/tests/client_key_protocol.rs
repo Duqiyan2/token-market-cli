@@ -631,9 +631,10 @@ async fn fresh_scope_negotiates_naming_and_both_client_entries_reuse_safely_save
     assert!(std::fs::read_to_string(path)
         .unwrap()
         .contains(&state.secret));
-    let saved: Value =
-        serde_json::from_slice(&support::read_private(&root.path().join("state/keys.json")))
-            .unwrap();
+    let saved: Value = serde_json::from_slice(&support::read_private(
+        &root.path().join("state").join("keys.json"),
+    ))
+    .unwrap();
     assert_eq!(saved[0]["key"]["issuance"]["naming_version"], 1);
 }
 
@@ -848,7 +849,7 @@ async fn ambiguous_valid_response_preserves_local_copies_without_issuing_or_repo
             .await
             .unwrap();
         let config_before = std::fs::read(&path).unwrap();
-        let cache = root.path().join("state/keys.json");
+        let cache = root.path().join("state").join("keys.json");
         let keys_before = support::read_private(&cache);
         let secret_before = api.state.lock().unwrap().secret.clone();
         api.state.lock().unwrap().reply_override = Some((
@@ -1213,7 +1214,7 @@ async fn adopted_binding_cannot_be_reported_as_requiring_another_naming_migratio
         .await
         .unwrap();
     let before = std::fs::read(&path).unwrap();
-    let cache = root.path().join("state/keys.json");
+    let cache = root.path().join("state").join("keys.json");
     let keys_before = support::read_private(&cache);
     api.state.lock().unwrap().reply_override = Some((
         "inspect",
@@ -1540,8 +1541,9 @@ async fn switching_service_addresses_keeps_each_migration_and_saved_identity_ind
     let config = std::fs::read_to_string(path).unwrap();
     assert!(config.contains(&second_state.secret));
     assert!(config.contains(&second.url));
-    let saved: Value =
-        serde_json::from_slice(&support::read_private(&root.path().join("state/keys.json")))
-            .unwrap();
+    let saved: Value = serde_json::from_slice(&support::read_private(
+        &root.path().join("state").join("keys.json"),
+    ))
+    .unwrap();
     assert_eq!(saved.as_array().unwrap().len(), 2);
 }

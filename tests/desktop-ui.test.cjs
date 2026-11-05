@@ -68,13 +68,79 @@ test('Client Update installation explains active work and requires an explicit r
 });
 
 test('pending Client Update startup shows recovery without claiming completion or enabling another install', async () => {
-  const f=await openFixture({signedIn:false,startupClientUpdate:{status:'handoff',currentVersion:'1.0.0',error:'尚未确认目标客户端版本启动，请使用官方安装包恢复'}});try {
+  const pending={status:'handoff',currentVersion:'1.0.0',error:'尚未确认目标客户端版本启动，请使用官方安装包恢复'};
+  const f=await openFixture({signedIn:false,startupClientUpdate:pending,clientUpdate:pending});try {
     const p=f.page;await p.locator('#login [data-desktop-settings]').click();
     await p.locator('#client-install-error').filter({hasText:'尚未确认目标客户端版本启动'}).waitFor();
     assert.doesNotMatch(await p.locator('#client-update-status').textContent(),/更新完成|安装完成/);
-    assert.equal(await p.locator('#check-client-update').isDisabled(),true);
+    assert.equal(await p.locator('#check-client-update').isEnabled(),true);
+    await p.locator('#check-client-update').click();
+    await p.locator('#client-update-status').filter({hasText:'安装交接已启动'}).waitFor();
     assert.equal(await p.locator('#install-client-update').isVisible(),false);
     assert.equal((await calls(p,'install_client_update')).length,0);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('explicit Client Update recovery clears handoff and rejects late pre-recovery events before a later intentional install', async () => {
+  const pending={status:'handoff',currentVersion:'1.0.0',error:'工具连接操作正在进行，请完成后重试'};
+  const f=await openFixture({signedIn:false,startupClientUpdate:pending});try {
+    const p=f.page;await p.locator('#login [data-desktop-settings]').click();
+    await p.locator('#client-update-status').filter({hasText:'安装交接已启动'}).waitFor();
+    assert.equal(await p.locator('#check-client-update').isEnabled(),true);
+    await p.locator('#check-client-update').click();
+    await p.locator('#client-update-status').filter({hasText:'没有更新的受支持稳定版本'}).waitFor();
+    await p.evaluate(value=>{
+      window.__fixture.emit('desktop-client-update-status',value);
+      window.__fixture.emit('desktop-client-update-status',{status:'verifying',currentVersion:'1.0.0',availableVersion:'1.1.0'});
+      window.__fixture.emit('desktop-client-update-status',{status:'available',currentVersion:'1.0.0',availableVersion:'1.1.0',automatic:true,remind:true});
+    },pending);
+    assert.match(await p.locator('#client-update-status').textContent(),/没有更新的受支持稳定版本/);
+    assert.equal(await p.locator('#client-update-reminder').isVisible(),false);
+    await p.evaluate(()=>{window.__fixture.clientUpdate={status:'available',currentVersion:'1.0.0',availableVersion:'1.1.0',installAvailable:true};});
+    await p.locator('#check-client-update').click();
+    await p.getByRole('button',{name:'下载客户端更新',exact:true}).click();
+    await p.getByRole('button',{name:'确认下载',exact:true}).click();
+    await p.locator('#client-update-status').filter({hasText:'签名验证通过'}).waitFor();
+    // The download fixture has no native executor by default; enable its reply.
+    await p.evaluate(()=>window.__fixture.emit('desktop-client-update-status',{status:'ready',currentVersion:'1.0.0',availableVersion:'1.1.0',installAvailable:true}));
+    await p.getByRole('button',{name:'安装并重启',exact:true}).click();
+    await p.getByRole('button',{name:'确认安装并重启',exact:true}).click();
+    await p.locator('#client-update-status').filter({hasText:'安装交接已启动'}).waitFor();
+    assert.equal((await calls(p,'install_client_update')).length,1);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('a rejected current Client Update install restores retry despite old handoff events before and after its result', async () => {
+  const pending={status:'handoff',currentVersion:'1.0.0',error:'上次客户端交接尚未确认'};
+  const available={status:'available',currentVersion:'1.0.0',availableVersion:'1.1.0',installAvailable:true};
+  const f=await openFixture({signedIn:false,startupClientUpdate:pending,clientUpdate:available,deferClientDownload:true,deferClientInstall:true});try {
+    const p=f.page;await p.locator('#login [data-desktop-settings]').click();
+    await p.locator('#client-update-status').filter({hasText:'安装交接已启动'}).waitFor();
+    await p.locator('#check-client-update').click();
+    await p.getByRole('button',{name:'下载客户端更新',exact:true}).click();
+    await p.getByRole('button',{name:'确认下载',exact:true}).click();
+    await p.waitForFunction(()=>Boolean(window.__fixture.resolveClientDownload));
+    await p.evaluate(()=>window.__fixture.resolveClientDownload({status:'ready',currentVersion:'1.0.0',availableVersion:'1.1.0',installAvailable:true}));
+    await p.getByRole('button',{name:'安装并重启',exact:true}).click();
+    await p.getByRole('button',{name:'确认安装并重启',exact:true}).click();
+    await p.waitForFunction(()=>Boolean(window.__fixture.resolveClientInstall));
+    await p.evaluate(value=>window.__fixture.emit('desktop-client-update-status',value),pending);
+    await p.locator('#client-update-status').filter({hasText:'安装交接已启动'}).waitFor();
+    await p.evaluate(()=>window.__fixture.resolveClientInstall({status:'ready',currentVersion:'1.0.0',availableVersion:'1.1.0',installAvailable:true,error:'工具连接操作正在进行，请完成后重试安装客户端更新'}));
+    await p.locator('#client-install-error').filter({hasText:'工具连接操作正在进行'}).waitFor({timeout:5000});
+    await p.evaluate(value=>window.__fixture.emit('desktop-client-update-status',value),pending);
+    assert.match(await p.locator('#client-update-status').textContent(),/签名验证通过/);
+    assert.equal(await p.getByRole('button',{name:'安装并重启',exact:true}).isEnabled(),true);
+    await p.getByRole('button',{name:'安装并重启',exact:true}).click();
+    await p.getByRole('button',{name:'确认安装并重启',exact:true}).click();
+    await p.waitForFunction(()=>window.__fixture.calls.filter(c=>c.command==='install_client_update').length===2);
+    await p.evaluate(()=>window.__fixture.resolveClientInstall({status:'handoff',currentVersion:'1.0.0',availableVersion:'1.1.0',installAvailable:true}));
+    await p.locator('#client-update-status').filter({hasText:'安装交接已启动'}).waitFor();
+    await p.evaluate(()=>window.__fixture.emit('desktop-client-update-status',{status:'ready',currentVersion:'1.0.0',availableVersion:'1.1.0',installAvailable:true}));
+    assert.match(await p.locator('#client-update-status').textContent(),/安装交接已启动/);
+    assert.equal(await p.locator('#install-client-update').isVisible(),false);
     assert.deepEqual(f.errors,[]);
   }finally{await f.close();}
 });
