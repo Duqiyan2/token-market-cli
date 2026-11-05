@@ -722,7 +722,9 @@ pub mod fixtures {
                     bytes,
                 }
             };
-            self.installer.prepare(verified)
+            self.installer
+                .prepare(verified)
+                .map_err(|error| format!("prepare: {error}"))
         }
         pub fn staged_packages(&self) -> Vec<PathBuf> {
             fs::read_dir(self.home.join(".tokenmarket/client-update-stage"))

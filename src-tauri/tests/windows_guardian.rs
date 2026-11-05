@@ -110,17 +110,38 @@ fn fixture_legacy_mutator() {
     let Some(root) = std::env::var_os("WINDOWS_GUARDIAN_PROBE") else {
         return;
     };
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(PathBuf::from(root).join(".tokenmarket/desktop-connections/operation.lock"))
-        .unwrap();
+    let root = PathBuf::from(root);
+    let mut locked = 0;
+    let mut acquired = Vec::new();
+    for path in [
+        ".tokenmarket/desktop-connections/operation.lock",
+        ".tokenmarket/install-locks/claude-code.lock",
+        ".tokenmarket/install-locks/codex.lock",
+        ".tokenmarket/install-locks/workbuddy.lock",
+        ".tokenmarket/install-locks/deepseek-harness.lock",
+        ".tokenmarket/install-locks/openclaw.lock",
+        ".tokenmarket/install-locks/opencode.lock",
+        ".tokenmarket/install-locks/grok-build.lock",
+        ".tokenmarket/install-locks/hermes.lock",
+        ".tokenmarket/install-locks/pi.lock",
+        ".tokenmarket/install-locks/minimax-code.lock",
+        ".tokenmarket/install-locks/oh-my-pi.lock",
+        ".tokenmarket/install-locks/kimi-code.lock",
+        ".tokenmarket/install-locks/dumate.lock",
+        ".tokenmarket/client-login/65622f37e6d4c2b67cd1f675e3c3a89982a65a38d41a4157161a27c0297eeb80/operation.lock",
+        ".tokenmarket/client-login/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/operation.lock",
+    ] {
+        let file = fs::OpenOptions::new().read(true).write(true).open(root.join(path)).unwrap();
+        if file.try_lock().is_ok() { acquired.push(file); } else { locked += 1; }
+    }
     println!(
         "{}",
-        if file.try_lock().is_ok() {
+        if locked == 16 {
+            "BUSY"
+        } else if locked == 0 {
             "MUTATED"
         } else {
-            "BUSY"
+            "PARTIAL"
         }
     );
 }
@@ -141,6 +162,7 @@ struct Fixture {
 impl Fixture {
     fn new() -> Self {
         let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join(".tokenmarket/client-login/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")).unwrap();
         fs::create_dir(root.path().join("stage")).unwrap();
         fs::create_dir(root.path().join("应用 Token Market")).unwrap();
         let app = env!("CARGO_BIN_EXE_app");
@@ -542,6 +564,10 @@ mod native_preparation {
                 .phase(),
             ClientUpdatePhase::Failed
         );
+        // A later explicit preparation gets a fresh guardian after safe cancel.
+        let retry = installed.client("nsis-currentUser");
+        let handoff = retry.prepare(false).await.unwrap();
+        drop(handoff);
     }
     #[tokio::test]
     async fn altered_verified_bytes_are_rejected_by_official_signature_reverification_before_ready()
@@ -553,6 +579,7 @@ mod native_preparation {
             .await
             .err()
             .expect("corrupt staging must never prepare");
+        assert!(error.starts_with("prepare: "), "{error}");
         assert!(error.to_ascii_lowercase().contains("signature"), "{error}");
         assert!(ClientUpdateJournal::read(installed.home.path())
             .unwrap()
@@ -560,7 +587,15 @@ mod native_preparation {
     }
     #[tokio::test]
     async fn raw_unmarked_msi_and_mismatched_installation_never_prepare_or_create_a_journal() {
-        for mode in ["raw", "msi", "nsis-both", "unmarked", "mismatch", "system"] {
+        for mode in [
+            "raw",
+            "msi",
+            "nsis-both",
+            "unmarked",
+            "mismatch",
+            "owned-msi",
+            "system",
+        ] {
             let installed = Installed::new();
             match mode {
                 "unmarked" => {
@@ -575,6 +610,13 @@ mod native_preparation {
                         .registry
                         .key()
                         .set_value("TokenMarketUpdateDirectory", &"C:\\Other Installation")
+                        .unwrap();
+                }
+                "owned-msi" => {
+                    installed
+                        .registry
+                        .key()
+                        .set_value("WindowsInstaller", &1u32)
                         .unwrap();
                 }
                 "system" => {
@@ -592,7 +634,8 @@ mod native_preparation {
                 "nsis-currentUser"
             };
             let client = installed.client(family);
-            assert!(client.prepare(false).await.is_err(), "{mode}");
+            let error = client.prepare(false).await.err().expect(mode);
+            assert!(error.starts_with("prepare: "), "{mode}: {error}");
             assert!(
                 ClientUpdateJournal::read(installed.home.path())
                     .unwrap()
@@ -601,5 +644,54 @@ mod native_preparation {
             );
             assert!(client.staged_packages().is_empty(), "{mode}");
         }
+    }
+}
+
+#[test]
+fn native_launch_failure_and_nonzero_exit_record_recovery_and_allow_later_explicit_retry() {
+    for failure in ["invalid-image", "nonzero"] {
+        let fixture = Fixture::new();
+        let root = fixture.root.path();
+        if failure == "invalid-image" {
+            fs::write(
+                root.join("stage/installer.exe"),
+                b"not a Windows executable",
+            )
+            .unwrap();
+        } else {
+            fs::write(root.join("nonzero"), b"fixture").unwrap();
+        }
+        fs::write(root.join("finish-installer"), b"finish").unwrap();
+        let (mut parent, mut reader, nonce, guardian) = fixture.parent();
+        writeln!(parent.stdin.as_mut().unwrap(), "{{\"commit\":\"{nonce}\"}}").unwrap();
+        until(&mut reader, "committed");
+        writeln!(parent.stdin.take().unwrap(), "exit").unwrap();
+        assert!(parent.wait().unwrap().success());
+        assert_eq!(
+            unsafe { WaitForSingleObject(guardian.as_raw_handle(), 20_000) },
+            WAIT_OBJECT_0
+        );
+        wait_file(&root.join("relaunched"));
+        let journal = ClientUpdateJournal::read(root).unwrap().unwrap();
+        assert_eq!(journal.phase(), ClientUpdatePhase::Failed);
+        assert!(journal
+            .failure_reason()
+            .unwrap()
+            .contains(if failure == "nonzero" { "2" } else { "启动" }));
+        probe(root, false);
+        if failure == "invalid-image" {
+            fs::copy(
+                root.join("应用 Token Market/app.exe"),
+                root.join("stage/installer.exe"),
+            )
+            .unwrap();
+        } else {
+            fs::remove_file(root.join("nonzero")).unwrap();
+        }
+        let (mut parent, mut reader, _, _) = fixture.parent();
+        writeln!(parent.stdin.take().unwrap(), "cancel").unwrap();
+        let mut rest = String::new();
+        reader.read_to_string(&mut rest).unwrap();
+        assert!(parent.wait().unwrap().success(), "{rest}");
     }
 }
