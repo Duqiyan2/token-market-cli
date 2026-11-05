@@ -1,6 +1,6 @@
 use serde::Serialize;
 use std::{sync::Mutex, time::Duration};
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 #[derive(Clone, Debug, Serialize)]
@@ -73,6 +73,7 @@ struct UpdateState {
     status: ClientUpdateStatus,
     // Keep the native candidate here; the renderer never receives package URLs or signatures.
     candidate: Option<Update>,
+    verified_bytes: Option<Vec<u8>>,
 }
 
 pub struct ClientUpdater {
@@ -94,6 +95,7 @@ impl ClientUpdater {
                     error: None,
                 },
                 candidate: None,
+                verified_bytes: None,
             }),
             operation: tauri::async_runtime::Mutex::new(()),
         }
@@ -108,10 +110,20 @@ impl ClientUpdater {
     }
 
     pub async fn check<R: Runtime>(&self, app: &AppHandle<R>) -> ClientUpdateStatus {
+        if matches!(
+            self.status().status.as_str(),
+            "downloading" | "verifying" | "ready"
+        ) {
+            return self.status();
+        }
         let _operation = self.operation.lock().await;
+        if self.status().status == "ready" {
+            return self.status();
+        }
         {
             let mut state = self.state.lock().expect("client update state");
             state.candidate = None;
+            state.verified_bytes = None;
             state.status.status = "checking".into();
             state.status.available_version = None;
             state.status.release_notes = None;
@@ -133,6 +145,65 @@ impl ClientUpdater {
             }
         }
         state.status.clone()
+    }
+
+    // Version is only a consent context; URLs, signatures and bytes never cross IPC.
+    pub async fn download<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        expected_version: &str,
+    ) -> Result<ClientUpdateStatus, String> {
+        let _operation = self.operation.lock().await;
+        let mut update = {
+            let mut state = self.state.lock().expect("client update state");
+            let update = state
+                .candidate
+                .as_ref()
+                .filter(|candidate| candidate.version == expected_version)
+                .ok_or("更新版本已改变，请重新检查并确认下载")?
+                .clone();
+            if state.status.status == "ready" {
+                return Ok(state.status.clone());
+            }
+            state.verified_bytes = None;
+            state.status.status = "downloading".into();
+            state.status.error = None;
+            update
+        };
+        // Upstream's check timeout is not copied onto Update.
+        update.timeout = Some(Duration::from_secs(120));
+        let _ = app.emit("desktop-client-update-status", self.status());
+        let result = update
+            .download(
+                |_, _| {},
+                || {
+                    self.state
+                        .lock()
+                        .expect("client update state")
+                        .status
+                        .status = "verifying".into();
+                    let _ = app.emit("desktop-client-update-status", self.status());
+                },
+            )
+            .await;
+        let status = {
+            let mut state = self.state.lock().expect("client update state");
+            match result {
+                Ok(bytes) => {
+                    state.verified_bytes = Some(bytes);
+                    state.status.status = "ready".into();
+                }
+                Err(error) => {
+                    state.verified_bytes = None;
+                    state.status.status = "failed".into();
+                    state.status.error =
+                        Some(format!("更新包下载或签名验证失败，请重试下载：{error}"));
+                }
+            }
+            state.status.clone()
+        };
+        let _ = app.emit("desktop-client-update-status", &status);
+        Ok(status)
     }
 
     async fn check_release<R: Runtime>(
@@ -211,6 +282,14 @@ pub fn desktop_client_update_status(app: AppHandle) -> ClientUpdateStatus {
 #[tauri::command]
 pub async fn check_client_update(app: AppHandle) -> ClientUpdateStatus {
     app.state::<ClientUpdater>().check(&app).await
+}
+
+#[tauri::command]
+pub async fn download_client_update(
+    app: AppHandle,
+    version: String,
+) -> Result<ClientUpdateStatus, String> {
+    app.state::<ClientUpdater>().download(&app, &version).await
 }
 
 #[cfg(test)]

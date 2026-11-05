@@ -58,6 +58,7 @@ module.exports = async function openFixture(browser, options = {}) {
           if(options.deferClientUpdateStatus) return new Promise(resolve=>fixture.resolveClientUpdateStatus=()=>resolve(value));
           return value;
         }
+        case 'download_client_update': if(options.deferClientDownload)return new Promise(resolve=>fixture.resolveClientDownload=resolve);return {status:'ready',currentVersion:'1.0.0',availableVersion:args.version,releaseNotes:'保留已有连接',error:null};
         case 'check_client_update': return clone(fixture.clientUpdate || options.clientUpdate || {status:'current',currentVersion:'1.0.0',availableVersion:null,releaseNotes:null,error:null});
         case 'desktop_window_preferences': if(fixture.deferPreferences)return new Promise(resolve=>{fixture.resolvePreferences=()=>resolve(clone(fixture.windowPreferences));});return clone(fixture.windowPreferences);
         case 'save_desktop_window_preferences': if(options.preferenceSaveError)throw Error('无法保存应用设置');fixture.windowPreferences.run_in_background=args.runInBackground;return clone(fixture.windowPreferences);
