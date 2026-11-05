@@ -2,8 +2,9 @@
 
 Alibaba Cloud OSS is the selected origin. Domain, bucket, identity and release
 keys may remain unconfigured. The commands below prepare release inputs and
-publish **isolated candidates only**; production promotion and real installed
-client acceptance remain #38. No resource provisioning, production manifest
+publish isolated candidates; a separately gated [promotion command](client-update-promotion.md)
+validates operator acceptance before stable publication. Real installed-client
+acceptance and actual promotion remain open under #38. No resource provisioning, production manifest
 publication or real-device upgrade is established by this implementation.
 GitHub workflows still build installers and retain release archives.
 
@@ -184,8 +185,9 @@ python3 scripts/desktop-update-release.py publish --inventory "$INVENTORY" \
 This command is provided for a future configured **isolated** destination. Do
 not execute it against live infrastructure until authorized. It cannot publish
 `stable.json` or another production discovery route: only `test/.../stable.json`
-is enabled. #38 owns the separately gated production-promotion command and
-actual installed-client acceptance; the candidate publisher is not that gate.
+is enabled on `publish`. Use the separately gated [promotion command](client-update-promotion.md)
+only with complete build provenance and actual installed-client acceptance; the
+candidate publisher is not that gate.
 
 Before any write, publish validates the complete inventory, snapshots every file
 and verifies exact artifact bytes and signed version through the real updater.

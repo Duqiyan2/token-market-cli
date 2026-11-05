@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Prepare and publish signed desktop releases. Production promotion is disabled."""
+"""Prepare, publish isolated candidates, and gate accepted desktop release promotion."""
 from __future__ import annotations
 import argparse
+from datetime import datetime, timezone
 import hashlib
 import html
 import json
@@ -55,7 +56,7 @@ def public_base(value, fixture):
     return value.rstrip('/')
 
 
-def release_plan(args):
+def inventory_plan(args, *, production_route=None):
     inventory = Path(args.inventory).resolve()
     release = json.loads(inventory.read_text())
     version = release.get('version', '')
@@ -69,9 +70,9 @@ def release_plan(args):
     prefix = os.environ.get('TOKEN_MARKET_UPDATE_OSS_PREFIX', '').strip()
     if prefix:
         safe_key(prefix)
-    # This command deliberately cannot publish production discovery before #38.
-    route = safe_key(args.manifest_key)
-    require(route.startswith('test/') and route.endswith('/stable.json'), 'Only isolated test/<name>/stable.json routes are enabled; production promotion remains disabled')
+    route = safe_key(production_route if production_route is not None else args.manifest_key)
+    if production_route is None:
+        require(route.startswith('test/') and route.endswith('/stable.json'), 'Only isolated test/<name>/stable.json routes are enabled; use the separately gated promote command for production')
     objects = []
 
     def artifact(relative, role, platform):
@@ -121,6 +122,11 @@ def release_plan(args):
                 fixture=args.fixture, objects=objects, manifest=manifest, manifest_key=route,
                 manifest_url=f'{base}/{quote(route)}' if base else None, missing_configuration=missing,
                 public_base_url=base, prefix=prefix or None)
+
+
+def release_plan(args):
+    # No command-line production bypass exists on plan/publish.
+    return inventory_plan(args)
 
 
 def child(command, *, stdin=None, label='Release tool', env=None):
@@ -187,7 +193,10 @@ def recovery_document(plan):
 
 
 def publish(args):
-    plan = release_plan(args)
+    publish_verified(args, release_plan(args))
+
+
+def publish_verified(args, plan):
     local = args.local_store
     require(not local or args.fixture, '--local-store requires --fixture; fixture signing evidence cannot reach OSS')
     require(not args.fixture or local, '--fixture requires an isolated --local-store')
@@ -218,6 +227,7 @@ def publish(args):
         recovery_obj = dict(path=str(recovery), key=f'releases/{plan["version"]}/{recovery_sha}/recovery.html',
                             sha256=recovery_sha, size=recovery.stat().st_size, content_type='text/html', cache_control=IMMUTABLE)
         objects = plan['objects'] + [recovery_obj]
+        recovery_alias = dict(recovery_obj, key=plan['recovery_key'], cache_control=DISCOVERY) if 'recovery_key' in plan else None
         manifest = stage / 'stable.json'
         manifest.write_text(json.dumps(plan['manifest'], indent=2) + '\n')
         manifest_obj = dict(path=str(manifest), key=plan['manifest_key'], sha256=digest(manifest),
@@ -255,13 +265,21 @@ def publish(args):
             for obj in objects:
                 put(obj, True)
                 public_readback(plan, obj)
+            if recovery_alias:
+                put(recovery_alias, False)
+                public_readback(plan, recovery_alias)
             # The only discovery write is last, after every public GET succeeds.
             put(manifest_obj, False)
-            public_readback(plan, manifest_obj)
+            try:
+                public_readback(plan, manifest_obj)
+            except ValueError:
+                raise ValueError('Final manifest PUT succeeded but public readback failed; discovery may have advanced; inspect discovery state before retrying') from None
         finally:
             lock.rmdir()
     print(json.dumps(dict(published=True, manifest_url=plan['manifest_url'],
-                          recovery_url=plan['public_base_url'] + '/' + recovery_obj['key'])))
+                          recovery_url=plan['public_base_url'] + '/' + (recovery_alias or recovery_obj)['key'],
+                          mode='synthetic-fixture' if args.fixture else 'production' if 'recovery_key' in plan else 'isolated-candidate',
+                          actual_device_acceptance='operator-recorded; not independently authenticated' if 'recovery_key' in plan and not args.fixture else False)))
 
 
 def platform_signing(args, app, artifact, temporary):
@@ -387,6 +405,305 @@ def prepare(args):
     print(json.dumps(dict(prepared=True, receipt=str(output / 'prepared.json'))))
 
 
+ACCEPTANCE_CHECKS = (
+    'signed_out', 'zero_balance', 'automatic_discovery', 'manual_discovery',
+    'release_notes', 'download_consent', 'install_consent', 'later_process_restart',
+    'ignore_process_restart', 'ignored_manual_discovery', 'newer_version_reminder',
+    'desktop_busy_refusal_retry', 'cli_mutation_refusal_retry', 'guard_transition_race',
+    'active_work_not_cancelled', 'client_session_retained', 'credential_identity_retained',
+    'tool_connections_retained', 'billing_owner_retained', 'models_retained',
+    'user_configuration_retained', 'restoration_records_retained', 'independent_cli_use',
+    'network_failure_retry', 'invalid_package_refusal_retry', 'installer_failure_retry',
+    'external_recovery_opened', 'legacy_manual_bootstrap_then_update')
+PROMOTION_CONFIG = ('TOKEN_MARKET_UPDATE_PRODUCTION_MANIFEST_KEY', 'TOKEN_MARKET_UPDATE_RECOVERY_KEY',
+    'TOKEN_MARKET_UPDATE_PUBLIC_BASE_URL', 'TOKEN_MARKET_UPDATE_TRUSTED_BUILD_REPOSITORY',
+    'TOKEN_MARKET_UPDATE_TRUSTED_BUILD_WORKFLOWS')
+PUBLISH_CONCURRENCY = 'token-market-client-update-distribution'
+
+
+def nonempty(value, label):
+    require(isinstance(value, str) and bool(value.strip()), label + ' must be a nonempty string')
+    return value
+
+
+def object_fields(value, fields, label):
+    require(isinstance(value, dict) and set(value) == set(fields), label + ' requires exactly: ' + ', '.join(fields))
+
+
+def evidence_passed(value, label, fixture, *, extra=()):
+    object_fields(value, ('status', 'evidence') + tuple(extra), label)
+    require(value['status'] == 'passed', label + ' must have status passed')
+    refs = value['evidence']
+    require(isinstance(refs, list) and bool(refs), label + ' requires concrete result/log references')
+    for ref in refs:
+        nonempty(ref, label + ' evidence reference')
+        parsed = urlsplit(ref)
+        require((fixture and parsed.scheme == 'synthetic') or
+                (parsed.scheme == 'https' and parsed.hostname and not parsed.username and not parsed.password),
+                label + ' requires HTTPS evidence references (synthetic requires --fixture)')
+        if not fixture:
+            require(not re.search(r'fixture|synthetic|example[.]|localhost|127[.]0[.]0[.]1', ref, re.I) and
+                    not parsed.hostname.endswith(('.invalid', '.test', '.localhost')),
+                    label + ' cannot use synthetic evidence')
+
+
+def artifact_bindings(plan, target=None):
+    platforms = (target, 'windows-x86_64') if target == 'windows-x86_64-nsis' else (target,)
+    return [dict(role=obj['role'], platform=obj['platform'], sha256=obj['sha256'], size=obj['size'])
+            for obj in plan['objects'] if target is None or obj['platform'] in platforms]
+
+
+def same_artifacts(value, expected, label):
+    require(isinstance(value, list) and len(value) == len(expected), label + ' artifact set mismatch')
+    for item in value:
+        object_fields(item, ('role', 'platform', 'sha256', 'size'), label + ' artifact')
+        require(type(item['size']) is int and item['size'] > 0, label + ' artifact size must be a positive integer')
+    ordering = lambda item: (item['platform'], item['role'], item['sha256'], item['size'])
+    require(sorted(value, key=ordering) == sorted(expected, key=ordering), label + ' artifact digest/size/target mismatch')
+
+
+def destination_gate():
+    # Environment claims are a protected-workflow contract, not a distributed lock.
+    # Every live writer must use the same literal GitHub concurrency group.
+    names = CONFIG + ('TOKEN_MARKET_UPDATE_PUBLISH_DESTINATION', 'TOKEN_MARKET_UPDATE_PROMOTION_WORKFLOW_REF')
+    missing = [name for name in names if not os.environ.get(name, '').strip()]
+    require(not missing, 'Missing configuration: ' + ', '.join(missing))
+    expected = 'oss://' + os.environ['TOKEN_MARKET_UPDATE_OSS_BUCKET'] + '/' + os.environ['TOKEN_MARKET_UPDATE_OSS_PREFIX']
+    require(os.environ['TOKEN_MARKET_UPDATE_PUBLISH_DESTINATION'] == expected, 'Protected destination binding does not match bucket/prefix')
+    repository = os.environ['TOKEN_MARKET_UPDATE_TRUSTED_BUILD_REPOSITORY']
+    workflow = os.environ['TOKEN_MARKET_UPDATE_PROMOTION_WORKFLOW_REF']
+    require(re.fullmatch(re.escape(repository) + r'/[.]github/workflows/[A-Za-z0-9_.-]+[.]yml@refs/heads/main', workflow),
+            'Promotion workflow must name the protected main workflow in the trusted repository')
+    require(os.environ.get('GITHUB_ACTIONS') == 'true' and os.environ.get('GITHUB_REPOSITORY') == repository and
+            os.environ.get('GITHUB_WORKFLOW_REF') == workflow and
+            os.environ.get('TOKEN_MARKET_UPDATE_PUBLISH_CONCURRENCY') == PUBLISH_CONCURRENCY,
+            'Production promotion requires the protected GitHub workflow and shared destination concurrency group')
+
+
+def promotion_plan(args):
+    required = PROMOTION_CONFIG + (() if args.fixture else CONFIG + ('TOKEN_MARKET_UPDATE_PUBLISH_DESTINATION', 'TOKEN_MARKET_UPDATE_PROMOTION_WORKFLOW_REF'))
+    missing = [name for name in dict.fromkeys(required) if not os.environ.get(name, '').strip()]
+    require(not missing, 'Missing configuration: ' + ', '.join(missing))
+    require(not args.fixture or args.local_store, '--fixture requires an isolated --local-store; synthetic acceptance cannot reach OSS')
+    require(not args.local_store or args.fixture, '--local-store requires --fixture')
+    route = safe_key(os.environ['TOKEN_MARKET_UPDATE_PRODUCTION_MANIFEST_KEY'])
+    recovery_key = safe_key(os.environ['TOKEN_MARKET_UPDATE_RECOVERY_KEY'])
+    require(route.endswith('stable.json') and not route.startswith(('test/', 'releases/')), 'Production manifest must be an explicit stable route outside test/ and releases/')
+    require(recovery_key.endswith('.html') and not recovery_key.startswith(('test/', 'releases/')) and recovery_key != route,
+            'Recovery must be a fixed HTML alias outside test/ and immutable releases/')
+    plan = inventory_plan(args, production_route=route)
+    plan['recovery_key'] = recovery_key
+    if not args.fixture:
+        destination_gate()
+    accepted = json.loads(Path(args.acceptance).read_text())
+    object_fields(accepted, ('schema_version', 'fixture', 'release', 'routes', 'devices', 'evidence'), 'Acceptance')
+    require(type(accepted['schema_version']) is int and accepted['schema_version'] == 1, 'Unsupported acceptance schema_version')
+    require(accepted['fixture'] is args.fixture, 'Acceptance fixture classification mismatch')
+    binding = accepted['release']
+    object_fields(binding, ('source_commit', 'version', 'artifacts', 'manifest_sha256'), 'Acceptance release')
+    require(binding['source_commit'] == plan['source_commit'] and binding['version'] == plan['version'], 'Acceptance source/version mismatch')
+    same_artifacts(binding['artifacts'], artifact_bindings(plan), 'Acceptance release')
+    manifest_sha = hashlib.sha256((json.dumps(plan['manifest'], indent=2) + '\n').encode()).hexdigest()
+    require(binding['manifest_sha256'] == manifest_sha, 'Acceptance candidate manifest bytes mismatch')
+    routes = accepted['routes']
+    object_fields(routes, ('public_base_url', 'candidate_manifest_url', 'production_manifest_url', 'recovery_url', 'public_key_sha256'), 'Acceptance routes')
+    fingerprint = hashlib.sha256(plan['public_key'].strip().encode()).hexdigest()
+    require(routes['public_base_url'] == plan['public_base_url'] and routes['production_manifest_url'] == plan['manifest_url'] and
+            routes['recovery_url'] == plan['public_base_url'] + '/' + recovery_key and routes['public_key_sha256'] == fingerprint,
+            'Acceptance route/key binding mismatch')
+    candidate = nonempty(routes['candidate_manifest_url'], 'Candidate manifest URL')
+    require(candidate.startswith(plan['public_base_url'] + '/test/') and candidate.endswith('/stable.json'),
+            'Accepted candidate must use an isolated test route on the configured public service')
+    candidate_key = candidate[len(plan['public_base_url']) + 1:]
+    safe_key(candidate_key)
+    expected_compiled = dict(endpoint=plan['manifest_url'], recovery_url=routes['recovery_url'], public_key_sha256=fingerprint)
+    object_fields(accepted['devices'], TARGETS, 'Acceptance devices')
+    object_fields(accepted['evidence'], ('automated', 'native_signing', 'deployment_readback'), 'Acceptance evidence')
+    for name, evidence in accepted['evidence'].items():
+        evidence_passed(evidence, name, args.fixture)
+    release = json.loads(Path(args.inventory).read_text())
+    repository = os.environ['TOKEN_MARKET_UPDATE_TRUSTED_BUILD_REPOSITORY']
+    require(re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repository), 'Invalid trusted build repository')
+    workflows = json.loads(os.environ['TOKEN_MARKET_UPDATE_TRUSTED_BUILD_WORKFLOWS'])
+    object_fields(workflows, TARGETS, 'Trusted build workflows')
+    for target in TARGETS:
+        label = 'Acceptance ' + target
+        record = release['targets'][target]
+        device = accepted['devices'][target]
+        object_fields(device, ('actual_device', 'fixture', 'operator', 'tested_at', 'os_version', 'architecture',
+            'starting_version', 'starting_updater_enabled', 'starting_install_path', 'installed_upgrade', 'startup',
+            'build_provenance_sha256', 'prepared_sha256', 'signing_identity', 'compiled', 'checks'), label)
+        require(device['fixture'] is args.fixture and device['actual_device'] is (not args.fixture), label + ' requires actual installed-client device evidence; fixtures never fill device slots')
+        for field in ('operator', 'os_version', 'starting_install_path'):
+            nonempty(device[field], label + ' ' + field)
+        try:
+            tested_at = datetime.strptime(device['tested_at'], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
+        except (ValueError, TypeError):
+            raise ValueError(label + ' tested_at must be a UTC date/time') from None
+        require(tested_at <= datetime.now(timezone.utc), label + ' tested_at cannot be in the future')
+        require(device['architecture'] == ('arm64' if target == 'darwin-aarch64' else 'x86_64'), label + ' architecture mismatch')
+        older = device['starting_version']
+        require(isinstance(older, str) and re.fullmatch(r'(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)', older) and
+                tuple(map(int, older.split('.'))) < tuple(map(int, plan['version'].split('.'))) and device['starting_updater_enabled'] is True,
+                label + ' requires an older updater-enabled installed starting version')
+        evidence_passed(device['installed_upgrade'], label + ' installed upgrade', args.fixture)
+        evidence_passed(device['startup'], label + ' startup', args.fixture, extra=('version', 'executable', 'artifact_sha256'))
+        updater = next(obj for obj in plan['objects'] if obj['role'] == 'updater' and obj['platform'] == target)
+        require(device['startup']['version'] == plan['version'] and device['startup']['artifact_sha256'] == updater['sha256'], label + ' new installed startup version/digest mismatch')
+        nonempty(device['startup']['executable'], label + ' new installed executable')
+        object_fields(device['checks'], ACCEPTANCE_CHECKS, label + ' checks')
+        for name, evidence in device['checks'].items():
+            evidence_passed(evidence, label + ' ' + name, args.fixture)
+        require(device['compiled'] == expected_compiled, label + ' compiled endpoint/recovery/key mismatch')
+        path = Path(args.inventory).resolve().parent
+        provenance_path = path / nonempty(record.get('build_provenance'), label + ' build_provenance path')
+        prepared_path = path / nonempty(record.get('prepared_receipt'), label + ' prepared_receipt path')
+        require(provenance_path.is_file() and prepared_path.is_file(), label + ' missing build provenance/prepared receipt')
+        require(digest(provenance_path) == device['build_provenance_sha256'] and digest(prepared_path) == device['prepared_sha256'], label + ' build provenance/prepared receipt digest mismatch')
+        provenance = json.loads(provenance_path.read_text())
+        object_fields(provenance, ('schema_version', 'fixture', 'repository', 'workflow', 'run_url', 'run_attempt',
+            'source_commit', 'version', 'target', 'artifacts', 'prepared_sha256', 'signing_identity', 'compiled'), label + ' build provenance')
+        require(type(provenance['schema_version']) is int and provenance['schema_version'] == 1 and provenance['fixture'] is args.fixture,
+                label + ' invalid build provenance schema/classification')
+        workflow = workflows[target]
+        require(isinstance(workflow, str) and re.fullmatch(r'[.]github/workflows/[A-Za-z0-9_.-]+[.]yml', workflow), 'Trusted native workflow must be an exact repository workflow path')
+        require(provenance['repository'] == repository and provenance['workflow'] == workflow and
+                isinstance(provenance['run_url'], str) and re.fullmatch('https://github[.]com/' + re.escape(repository) + r'/actions/runs/[1-9][0-9]*', provenance['run_url']) and
+                type(provenance['run_attempt']) is int and provenance['run_attempt'] > 0,
+                label + ' build provenance must identify the configured trusted native CI run')
+        require(provenance['source_commit'] == plan['source_commit'] and provenance['version'] == plan['version'] and
+                provenance['target'] == target and provenance['compiled'] == expected_compiled and
+                provenance['prepared_sha256'] == device['prepared_sha256'], label + ' source/build/compiled provenance mismatch')
+        same_artifacts(provenance['artifacts'], artifact_bindings(plan, target), label + ' build provenance')
+        identity = nonempty(device['signing_identity'], label + ' signing identity')
+        require(provenance['signing_identity'] == identity and
+                record['platform_signing'].get('identity' if args.fixture else 'certificate_sha1') == identity,
+                label + ' native signing identity mismatch')
+        if not args.fixture:
+            require(re.fullmatch(r'[a-f0-9]{40}', identity), label + ' native identity must be a certificate SHA-1')
+            if target == 'darwin-aarch64':
+                require(type(record['platform_signing'].get('notarized')) is bool, 'Record macOS notarization honestly as true or false')
+        prepared = json.loads(prepared_path.read_text())
+        require(prepared.get('version') == plan['version'] and prepared.get('target') == target and
+                prepared.get('artifact') == Path(record['artifact']).name and prepared.get('signature') == record['signature'] and
+                prepared.get('platform_signing') == record['platform_signing'], label + ' prepared receipt does not match finalized inventory')
+        manual = [item for item in release['installers'] if item['platform'] == ('windows-x86_64' if target.startswith('windows') else target)]
+        normalized_manual = [dict(item, path=Path(item['path']).name) for item in manual]
+        require(prepared.get('installers') == normalized_manual, label + ' prepared manual installer evidence mismatch')
+        for item in manual:
+            require(item['platform_signing'].get('identity' if args.fixture else 'certificate_sha1') == identity,
+                    label + ' manual installer native signing identity mismatch')
+    return plan
+
+
+def record_build(args):
+    """Emit native-job output from finalized prepared bytes and protected build inputs.
+
+    The trusted job must retain the same compile environment from build through
+    this invocation. This records those inputs; it does not reverse-engineer or
+    cryptographically attest a binary's compiled configuration.
+    """
+    receipt_path = Path(args.prepared_receipt).resolve()
+    prepared = json.loads(receipt_path.read_text())
+    target, version = prepared.get('target'), prepared.get('version', '')
+    require(target in TARGETS and re.fullmatch(r'(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)', version),
+            'Prepared receipt requires a supported target and stable version')
+    names = ('TOKEN_MARKET_UPDATE_TRUSTED_BUILD_REPOSITORY', 'TOKEN_MARKET_UPDATE_TRUSTED_BUILD_WORKFLOWS',
+             'TOKEN_MARKET_UPDATER_ENDPOINT', 'TOKEN_MARKET_UPDATER_RECOVERY_URL', 'TOKEN_MARKET_UPDATER_PUBLIC_KEY',
+             'GITHUB_REPOSITORY', 'GITHUB_WORKFLOW_REF', 'GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT')
+    missing = [name for name in names if not os.environ.get(name, '').strip()]
+    require(not missing, 'Missing build provenance configuration: ' + ', '.join(missing))
+    root = Path(__file__).resolve().parents[1]
+    source = child(['git', '-C', root, 'rev-parse', 'HEAD'], label='Checked-out source inspection').strip()
+    require(re.fullmatch(r'[a-f0-9]{40}', source) and source == os.environ['GITHUB_SHA'], 'Build GITHUB_SHA must match the actual checked-out source')
+    repository = os.environ['TOKEN_MARKET_UPDATE_TRUSTED_BUILD_REPOSITORY']
+    require(re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repository) and os.environ['GITHUB_REPOSITORY'] == repository,
+            'Build repository must match configured trusted repository')
+    workflows = json.loads(os.environ['TOKEN_MARKET_UPDATE_TRUSTED_BUILD_WORKFLOWS'])
+    object_fields(workflows, TARGETS, 'Trusted build workflows')
+    workflow = workflows[target]
+    require(isinstance(workflow, str) and re.fullmatch(r'[.]github/workflows/[A-Za-z0-9_.-]+[.]yml', workflow) and
+            os.environ['GITHUB_WORKFLOW_REF'] == repository + '/' + workflow + '@refs/heads/main',
+            'Build must use the configured protected native main workflow')
+    if not args.fixture:
+        require(os.environ.get('GITHUB_ACTIONS') == 'true', 'Native production provenance must be emitted inside trusted GitHub CI')
+        require(not child(['git', '-C', root, 'status', '--porcelain', '--untracked-files=no'], label='Clean source inspection').strip(),
+                'Native production provenance requires a clean tracked source checkout')
+        config = json.loads((root / 'src-tauri/tauri.conf.json').read_text())
+        require(config.get('version') == version, 'Prepared version must match checked-out desktop build configuration')
+    run_id, attempt = os.environ['GITHUB_RUN_ID'], os.environ['GITHUB_RUN_ATTEMPT']
+    require(re.fullmatch(r'[1-9][0-9]*', run_id) and re.fullmatch(r'[1-9][0-9]*', attempt), 'Build run ID/attempt must be positive integers')
+    endpoint = public_base(os.environ['TOKEN_MARKET_UPDATER_ENDPOINT'], args.fixture)
+    recovery = public_base(os.environ['TOKEN_MARKET_UPDATER_RECOVERY_URL'], args.fixture)
+    require(endpoint == os.environ['TOKEN_MARKET_UPDATER_ENDPOINT'] and recovery == os.environ['TOKEN_MARKET_UPDATER_RECOVERY_URL'],
+            'Build routes must match exact compiled values without whitespace or trailing slash normalization')
+    require(urlsplit(endpoint).path.endswith('/stable.json') and '/test/' not in urlsplit(endpoint).path and
+            urlsplit(recovery).path.endswith('.html') and '/releases/' not in urlsplit(recovery).path and '/test/' not in urlsplit(recovery).path,
+            'Native release build must compile production discovery and a fixed recovery HTML alias')
+    public_key = os.environ['TOKEN_MARKET_UPDATER_PUBLIC_KEY'].strip()
+    identity = prepared.get('platform_signing', {}).get('identity' if args.fixture else 'certificate_sha1')
+    nonempty(identity, 'Prepared native signing identity')
+    objects = []
+    def artifact(name, role, platform, signing):
+        require(isinstance(name, str) and Path(name).name == name and name not in ('', '.', '..'), 'Prepared artifact requires a basename')
+        path = receipt_path.parent / name
+        require(path.is_file() and not path.is_symlink() and path.stat().st_size > 0, 'Prepared artifact is unavailable or empty')
+        sha = digest(path)
+        if not args.fixture:
+            require(signing.get('verified') is True and not signing.get('fixture') and signing.get('artifact_sha256') == sha and
+                    signing.get('certificate_sha1') == identity and
+                    signing.get('kind') == ('codesign' if platform == 'darwin-aarch64' else 'authenticode'),
+                    'Prepared native signing evidence does not match finalized bytes/identity')
+        objects.append(dict(path=str(path), role=role, platform=platform, sha256=sha, size=path.stat().st_size))
+    artifact(prepared.get('artifact'), 'updater', target, prepared.get('platform_signing', {}))
+    objects[0]['signature'] = nonempty(prepared.get('signature'), 'Prepared updater signature')
+    manual_platform = 'darwin-aarch64' if target == 'darwin-aarch64' else 'windows-x86_64'
+    manual = prepared.get('installers')
+    require(isinstance(manual, list) and bool(manual), 'Prepared manual installers are required for native provenance')
+    for item in manual:
+        require(item.get('platform') == manual_platform, 'Prepared manual installer target mismatch')
+        artifact(item.get('path'), 'manual', manual_platform, item.get('platform_signing', {}))
+    if not args.fixture:
+        require(re.fullmatch(r'[a-f0-9]{40}', identity), 'Native signing identity must be certificate SHA-1')
+        signing = prepared['platform_signing']
+        if target == 'darwin-aarch64':
+            require(type(signing.get('notarized')) is bool, 'Record macOS notarization honestly as true or false')
+        else:
+            require(signing.get('bundler_version') == '2.10.4' and signing.get('nsis_install_mode') == 'currentUser', 'Native Windows updater provenance requires pinned currentUser NSIS')
+    probe = dict(version=version, public_key=public_key, required_targets=1, objects=objects)
+    verify(probe, args.verifier)
+    provenance = dict(schema_version=1, fixture=args.fixture, repository=repository, workflow=workflow,
+        run_url='https://github.com/' + repository + '/actions/runs/' + run_id, run_attempt=int(attempt),
+        source_commit=source, version=version, target=target, artifacts=artifact_bindings(probe),
+        prepared_sha256=digest(receipt_path), signing_identity=identity,
+        compiled=dict(endpoint=endpoint, recovery_url=recovery,
+                      public_key_sha256=hashlib.sha256(public_key.encode()).hexdigest()))
+    output = Path(args.output).resolve()
+    require(not output.exists(), 'Build provenance output already exists; preserve native run output')
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.open('x') as stream:
+        stream.write(json.dumps(provenance, indent=2) + '\n')
+    print(json.dumps(dict(recorded=True, fixture=args.fixture, source_commit=source, target=target, provenance=str(output))))
+
+
+def promote(args):
+    plan = promotion_plan(args)
+    if args.dry_run:
+        # Verify the same snapshots without credentials, network, locks or writes.
+        with tempfile.TemporaryDirectory(prefix='tokenmarket-promotion-plan-') as temporary:
+            for index, obj in enumerate(plan['objects']):
+                snapshot = Path(temporary) / str(index)
+                shutil.copyfile(obj['path'], snapshot)
+                require(digest(snapshot) == obj['sha256'], 'Artifact changed after acceptance validation')
+                obj['path'] = str(snapshot)
+            verify(plan, args.verifier)
+        print(json.dumps(dict(validated=True, dry_run=True, mode='synthetic-fixture' if args.fixture else 'production',
+                              manifest_url=plan['manifest_url'], recovery_url=plan['public_base_url'] + '/' + plan['recovery_key'],
+                              actual_device_acceptance=False if args.fixture else 'operator-recorded; not independently authenticated')))
+    else:
+        publish_verified(args, plan)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
@@ -401,6 +718,19 @@ def main():
     publishing.add_argument('--local-store')
     publishing.add_argument('--verifier', required=True)
     publishing.add_argument('--ossutil', default='ossutil')
+    promotion = commands.add_parser('promote', help='Validate installed-client acceptance and promote; --dry-run performs no writes')
+    promotion.add_argument('--inventory', required=True)
+    promotion.add_argument('--acceptance', required=True)
+    promotion.add_argument('--dry-run', action='store_true')
+    promotion.add_argument('--fixture', action='store_true')
+    promotion.add_argument('--local-store')
+    promotion.add_argument('--verifier')
+    promotion.add_argument('--ossutil', default='ossutil')
+    recording = commands.add_parser('record-build', help='Emit native CI provenance from checked-out source, prepared bytes and unchanged compile environment')
+    recording.add_argument('--prepared-receipt', required=True)
+    recording.add_argument('--output', required=True)
+    recording.add_argument('--verifier')
+    recording.add_argument('--fixture', action='store_true')
     preparing = commands.add_parser('prepare', help='Package final OS-signed bytes and sign their exact updater artifact')
     preparing.add_argument('--version', required=True)
     preparing.add_argument('--target', choices=TARGETS + ('windows-x86_64-msi',), required=True)
@@ -419,6 +749,10 @@ def main():
         print(json.dumps(release_plan(args), indent=2))
     elif args.command == 'publish':
         publish(args)
+    elif args.command == 'promote':
+        promote(args)
+    elif args.command == 'record-build':
+        record_build(args)
     elif args.command == 'prepare':
         prepare(args)
 
