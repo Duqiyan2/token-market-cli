@@ -138,7 +138,7 @@ def child(command, *, stdin=None, label='Release tool', env=None):
 def verify(plan, executable):
     require(executable and Path(executable).is_file(), 'Build and supply --verifier (official updater 2.14.1 artifact verifier)')
     clean = {key: value for key, value in os.environ.items() if not key.startswith(('TAURI_SIGNING_', 'OSS_', 'OSSUTIL_'))}
-    output = child([executable], stdin=json.dumps(plan), label='Updater signature/version verifier', env=clean)
+    output = child([Path(executable).resolve()], stdin=json.dumps(plan), label='Updater signature/version verifier', env=clean)
     verified = json.loads(output)
     require(verified.get('verified') is True and verified.get('verifier') == 'tauri-plugin-updater/2.14.1', 'Updater verification did not succeed')
 

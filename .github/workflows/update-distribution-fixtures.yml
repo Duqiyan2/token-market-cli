@@ -26,7 +26,7 @@ jobs:
       - name: Check isolated prepare and publication failures
         env:
           TOKEN_MARKET_TEST_TAURI_SIGNER: ${{ runner.temp }}/update-release-tools/node_modules/.bin/tauri
-        run: python3 -m unittest discover -s tests -p test_update_distribution.py
+        run: python3 -m unittest discover -s tests -p 'test_update_*.py'
       - name: Check and download the CLI-published fixture through the native client
         run: >-
           cargo test --locked --manifest-path src-tauri/Cargo.toml
