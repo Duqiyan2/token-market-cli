@@ -140,3 +140,11 @@ Older deployed desktop versions contain no built-in updater and require one
 manual installation of an updater-enabled release. The existing release workflow
 publishes installers; source implementation alone does not establish that deployed
 clients can already update themselves.
+
+## Release distribution tooling
+
+See [desktop update release distribution](desktop-update-distribution.md) for
+final-signature preparation, isolated OSS candidate publication, independent
+recovery installers and the real native-client published-fixture check. Hosting
+configuration may remain empty. Production promotion and actual platform
+installed-client acceptance remain separate #38 work.

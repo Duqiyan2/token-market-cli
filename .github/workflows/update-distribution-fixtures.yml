@@ -1,0 +1,33 @@
+name: Update distribution fixtures
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  signed-fixture:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Install the exact release CLI and bundled NSIS template
+        run: npm install --prefix "$RUNNER_TEMP/update-release-tools" --no-save @tauri-apps/cli@2.12.4
+      - name: Build the pinned official updater verifier
+        run: cargo build --locked --manifest-path src-tauri/Cargo.toml --example verify-update-artifacts
+      - name: Check isolated prepare and publication failures
+        env:
+          TOKEN_MARKET_TEST_TAURI_SIGNER: ${{ runner.temp }}/update-release-tools/node_modules/.bin/tauri
+        run: python3 -m unittest discover -s tests -p test_update_distribution.py
+      - name: Check and download the CLI-published fixture through the native client
+        run: >-
+          cargo test --locked --manifest-path src-tauri/Cargo.toml
+          release_distribution_client -- --ignored --nocapture

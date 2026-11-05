@@ -22,7 +22,7 @@ sha2 = "0.10"
 rand = "0.8"
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
-tauri-plugin-updater = "2.14.1"
+tauri-plugin-updater = "=2.14.1"
 tokenmarket-core = { path = "../rust/tokenmarket-core" }
 
 tauri-plugin-deep-link = "2"
