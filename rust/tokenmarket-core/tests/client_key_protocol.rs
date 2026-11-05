@@ -38,6 +38,10 @@ struct State {
     block_cache: Option<PathBuf>,
     require_naming_capability: bool,
     logout_on_catalogue: Option<Arc<support::Credentials>>,
+    pause_catalogue: Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>,
+    current_workspace: Option<String>,
+    switch_workspace_on_catalogue: Option<String>,
+    replace_login_on_catalogue: Option<(Arc<support::Credentials>, String)>,
 }
 struct Platform {
     url: String,
@@ -94,6 +98,15 @@ impl Platform {
                     .nth(1)
                     .unwrap();
                 let body: Value = serde_json::from_slice(&bytes[end + 4..]).unwrap_or(Value::Null);
+                let pause = if route == "/v1/models" {
+                    shared.lock().unwrap().pause_catalogue.take()
+                } else {
+                    None
+                };
+                if let Some((entered, resume)) = pause {
+                    entered.notify_one();
+                    resume.notified().await;
+                }
                 let response = {
                     let mut s = shared.lock().unwrap();
                     let mut failure = false;
@@ -101,6 +114,12 @@ impl Platform {
                     let data = if route == "/v1/models" {
                         if let Some(credentials) = s.logout_on_catalogue.take() {
                             *credentials.0.lock().unwrap() = None;
+                        }
+                        if let Some(workspace) = s.switch_workspace_on_catalogue.take() {
+                            s.current_workspace = Some(workspace);
+                        }
+                        if let Some((credentials, session)) = s.replace_login_on_catalogue.take() {
+                            *credentials.0.lock().unwrap() = Some(session);
                         }
                         failure = s.fail_catalogue;
                         json!({"data":[{"id":"glm-5.3","model_types":["TEXT_GENERATION"]},{"id":"glm-5.2","model_types":["TEXT_GENERATION"]}]})
@@ -212,7 +231,13 @@ impl Platform {
                         if status == "ISSUED" {
                             reply["api_key"] = json!(s.secret);
                         }
-                        if action == "inspect" && s.inspect_tool_error.is_some() {
+                        if matches!(action, "inspect" | "issue" | "recover")
+                            && s.current_workspace
+                                .as_deref()
+                                .is_some_and(|current| body["workspace_id"] != current)
+                        {
+                            json!({"success":false,"message":"current workspace changed; refresh before connecting"})
+                        } else if action == "inspect" && s.inspect_tool_error.is_some() {
                             json!({"success":false,"message":s.inspect_tool_error})
                         } else if action == "inspect" && s.inspect_business_failure {
                             json!({"success":false,"message":"connection operation unavailable; retry without changing credentials"})
@@ -768,4 +793,310 @@ async fn old_pending_protocol_cannot_rotate_or_reuse_historical_raw() {
     assert_eq!(s.rotations, 0);
     assert_eq!(s.issues, 1);
     assert_eq!(before, std::fs::read(path).unwrap());
+}
+
+#[tokio::test]
+async fn independent_cli_and_desktop_managers_cannot_publish_competing_migrations() {
+    let root = tempdir().unwrap();
+    let api = Platform::start().await;
+    let cli = api.manager(root.path());
+    let desktop = api.manager(root.path());
+    let inv = inventory(root.path());
+    // Separate detections still share the same connection store and device identity.
+    let desktop_inv = inventory(&root.path().join("desktop-detection"));
+    let path = root.path().join("settings.json");
+    let old = cli
+        .connect(context(), ToolId::ClaudeCode, &inv, path.clone())
+        .await
+        .unwrap();
+    let before = std::fs::read(&path).unwrap();
+    let historical_secret = api.state.lock().unwrap().secret.clone();
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let resume = Arc::new(tokio::sync::Notify::new());
+    {
+        let mut state = api.state.lock().unwrap();
+        state.legacy = true;
+        state.pause_catalogue = Some((entered.clone(), resume.clone()));
+    }
+    let migration = cli.reconnect(
+        context(),
+        ToolId::ClaudeCode,
+        &old.key_id,
+        &inv,
+        path.clone(),
+    );
+    let competing = async {
+        entered.notified().await;
+        let error = desktop
+            .reconnect(
+                context(),
+                ToolId::ClaudeCode,
+                &old.key_id,
+                &desktop_inv,
+                path.clone(),
+            )
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("工具操作正在进行"), "{error}");
+        assert_eq!(before, std::fs::read(&path).unwrap());
+        assert_eq!(desktop.list().unwrap()[0].key_id, old.key_id);
+        resume.notify_one();
+    };
+    let (next, ()) = tokio::join!(migration, competing);
+    let next = next.unwrap();
+    // A delayed UI request captured before migration cannot revert the committed binding.
+    assert!(desktop
+        .reconnect(
+            context(),
+            ToolId::ClaudeCode,
+            &old.key_id,
+            &desktop_inv,
+            path.clone()
+        )
+        .await
+        .is_err());
+    let reused = desktop
+        .reconnect(
+            context(),
+            ToolId::ClaudeCode,
+            &next.connection.key_id,
+            &desktop_inv,
+            path.clone(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(reused.connection.key_id, next.connection.key_id);
+    assert_ne!(reused.connection.key_id, old.key_id);
+    let state = api.state.lock().unwrap();
+    assert_eq!(
+        state.historical,
+        vec![(1, historical_secret, "ACTIVE".into())]
+    );
+    assert_eq!(state.id.to_string(), reused.connection.key_id);
+    assert_eq!(state.issues, 2);
+    assert_eq!(state.rotations, 0);
+    assert_eq!(state.retired, 0);
+    assert!(std::fs::read_to_string(&path)
+        .unwrap()
+        .contains(&state.secret));
+    assert_eq!(cli.list().unwrap()[0].key_id, reused.connection.key_id);
+}
+
+#[tokio::test]
+async fn workspace_change_during_migration_keeps_existing_configuration_and_resumes_same_key() {
+    let root = tempdir().unwrap();
+    let api = Platform::start().await;
+    let inv = inventory(root.path());
+    let path = root.path().join("settings.json");
+    let old = api
+        .manager(root.path())
+        .connect(context(), ToolId::ClaudeCode, &inv, path.clone())
+        .await
+        .unwrap();
+    let before = std::fs::read(&path).unwrap();
+    let history = api.state.lock().unwrap().secret.clone();
+    {
+        let mut state = api.state.lock().unwrap();
+        state.legacy = true;
+        state.switch_workspace_on_catalogue = Some("84".into());
+    }
+    assert!(api
+        .manager(root.path())
+        .reconnect(
+            context(),
+            ToolId::ClaudeCode,
+            &old.key_id,
+            &inv,
+            path.clone()
+        )
+        .await
+        .is_err());
+    assert_eq!(before, std::fs::read(&path).unwrap());
+    assert_eq!(
+        api.manager(root.path()).list().unwrap()[0].key_id,
+        old.key_id
+    );
+    let pending = api.state.lock().unwrap().id;
+    api.state.lock().unwrap().current_workspace = Some("42".into());
+    let next = api
+        .manager(root.path())
+        .reconnect(
+            context(),
+            ToolId::ClaudeCode,
+            &old.key_id,
+            &inv,
+            path.clone(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(next.connection.key_id, pending.to_string());
+    let state = api.state.lock().unwrap();
+    assert_eq!(state.historical, vec![(1, history, "ACTIVE".into())]);
+    assert_eq!(state.issues, 2);
+    assert_eq!(state.rotations, 0);
+    assert_eq!(state.retired, 0);
+    assert!(std::fs::read_to_string(path)
+        .unwrap()
+        .contains(&state.secret));
+}
+
+#[tokio::test]
+async fn account_change_during_migration_keeps_old_configuration_and_saved_new_identity() {
+    let root = tempdir().unwrap();
+    let api = Platform::start().await;
+    let inv = inventory(root.path());
+    let path = root.path().join("settings.json");
+    let old = api
+        .manager(root.path())
+        .connect(context(), ToolId::ClaudeCode, &inv, path.clone())
+        .await
+        .unwrap();
+    let before = std::fs::read(&path).unwrap();
+    let credentials = Arc::new(support::Credentials::default());
+    let session = json!({"session_token":"management-fixture","expires_at":"2999-01-01T00:00:00Z","user":{"id":"u1","name":"Fixture"},"default_workspace":{"id":"42","name":"Scope"}}).to_string();
+    *credentials.0.lock().unwrap() = Some(session.clone());
+    let login = tokenmarket_core::desktop::DesktopLogin::with_credentials(
+        root.path().join("login"),
+        tokenmarket_core::desktop::DesktopClient::new(api.url.clone()),
+        credentials.clone(),
+    );
+    let manager = api.manager(root.path()).with_shared_login(login);
+    {
+        let mut state = api.state.lock().unwrap();
+        state.legacy = true;
+        let other = json!({"session_token":"other-account","expires_at":"2999-01-01T00:00:00Z","user":{"id":"u2","name":"Other"},"default_workspace":{"id":"84","name":"Other"}}).to_string();
+        state.replace_login_on_catalogue = Some((credentials.clone(), other));
+    }
+    let error = manager
+        .reconnect(
+            context(),
+            ToolId::ClaudeCode,
+            &old.key_id,
+            &inv,
+            path.clone(),
+        )
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("共享登录已改变"), "{error}");
+    assert_eq!(before, std::fs::read(&path).unwrap());
+    assert_eq!(manager.list().unwrap()[0].key_id, old.key_id);
+    let saved = api.state.lock().unwrap().id;
+    *credentials.0.lock().unwrap() = Some(session);
+    let next = manager
+        .reconnect(
+            context(),
+            ToolId::ClaudeCode,
+            &old.key_id,
+            &inv,
+            path.clone(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(next.connection.key_id, saved.to_string());
+    let state = api.state.lock().unwrap();
+    assert_eq!(state.issues, 2);
+    assert_eq!(state.retired, 0);
+    assert!(std::fs::read_to_string(path)
+        .unwrap()
+        .contains(&state.secret));
+}
+
+#[tokio::test]
+async fn switching_service_addresses_keeps_each_migration_and_saved_identity_independent() {
+    let root = tempdir().unwrap();
+    let first = Platform::start().await;
+    let second = Platform::start().await;
+    let inv = inventory(root.path());
+    let path = root.path().join("settings.json");
+    let old = first
+        .manager(root.path())
+        .connect(context(), ToolId::ClaudeCode, &inv, path.clone())
+        .await
+        .unwrap();
+    first.state.lock().unwrap().legacy = true;
+    {
+        let mut state = second.state.lock().unwrap();
+        state.id = 100;
+        state.secret = "other-service-historical-secret".into();
+        state.status = "ACTIVE".into();
+        state.stage = "APPLIED".into();
+        state.legacy = true;
+    }
+    let migrated_first = first
+        .manager(root.path())
+        .reconnect(
+            context(),
+            ToolId::ClaudeCode,
+            &old.key_id,
+            &inv,
+            path.clone(),
+        )
+        .await
+        .unwrap();
+    let migrated_second = second
+        .manager(root.path())
+        .reconnect(
+            context(),
+            ToolId::ClaudeCode,
+            &migrated_first.connection.key_id,
+            &inv,
+            path.clone(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(migrated_first.connection.key_id, "2");
+    assert_eq!(migrated_second.connection.key_id, "101");
+    let returned = first
+        .manager(root.path())
+        .reconnect(
+            context(),
+            ToolId::ClaudeCode,
+            &migrated_second.connection.key_id,
+            &inv,
+            path.clone(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(returned.connection.key_id, migrated_first.connection.key_id);
+    assert!(returned.key_reused);
+    let returned = second
+        .manager(root.path())
+        .reconnect(
+            context(),
+            ToolId::ClaudeCode,
+            &returned.connection.key_id,
+            &inv,
+            path.clone(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        returned.connection.key_id,
+        migrated_second.connection.key_id
+    );
+    assert!(returned.key_reused);
+    let first_state = first.state.lock().unwrap();
+    let second_state = second.state.lock().unwrap();
+    assert_eq!(first_state.issues, 2);
+    assert_eq!(second_state.issues, 1);
+    assert_eq!(
+        first_state.historical,
+        vec![(1, "fixture-secret-1-1".into(), "ACTIVE".into())]
+    );
+    assert_eq!(
+        second_state.historical,
+        vec![(
+            100,
+            "other-service-historical-secret".into(),
+            "ACTIVE".into()
+        )]
+    );
+    assert_eq!((first_state.retired, second_state.retired), (0, 0));
+    let config = std::fs::read_to_string(path).unwrap();
+    assert!(config.contains(&second_state.secret));
+    assert!(config.contains(&second.url));
+    let saved: Value =
+        serde_json::from_slice(&support::read_private(&root.path().join("state/keys.json")))
+            .unwrap();
+    assert_eq!(saved.as_array().unwrap().len(), 2);
 }
