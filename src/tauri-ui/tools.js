@@ -143,7 +143,7 @@
       return cell;
     }
     const current = text('span', update ? versionDisplay(update.currentVersion) : checking ? '读取中…' : '已安装', 'tool-version'); current.title = update?.currentVersion || '正在读取版本'; copy.append(current);
-    if (update?.canUpgrade || update?.manualUpgrade) copy.append(text('small', `新版本 ${versionDisplay(update.latestVersion || update.targetVersion)}`, 'tool-version-target'));
+    if ((update?.canUpgrade || update?.manualUpgrade) && (update.latestVersion || update.targetVersion)) copy.append(text('small', `新版本 ${versionDisplay(update.latestVersion || update.targetVersion)}`, 'tool-version-target'));
     else if (update?.state === 'unsupported_update') {copy.append(text('small', `新版本 ${versionDisplay(update.latestVersion)}`, 'tool-version-target'),text('small', '接入适配需更新', 'tool-update-badge'));}
     else if (update?.state === 'check_failed' || update?.state === 'unknown') copy.append(text('small', '版本检查未完成', 'tool-update-badge'));
     if (update?.note) copy.title = update.note;
@@ -288,7 +288,9 @@
     const update = updates.get(entry.id);
     if (entry.installed && update) {
       const version = text('section', '', `sheet tool-version-sheet${update.manualUpgrade ? ' tool-manual-update' : ''}`);
-      version.append(text('h2', update.manualUpgrade ? '手动更新' : '版本与更新'), detailRow('当前版本', versionDisplay(update.currentVersion)), detailRow('官方最新版本', update.latestVersion || '检查未完成'), text('p', update.manualUpgrade ? ` ${update.note}。目标版本 ${versionDisplay(update.latestVersion || update.targetVersion)}，完成后返回点击“检查更新”。`.trim() : update.note));
+      const target = update.latestVersion || update.targetVersion;
+      const updateNote = update.manualUpgrade ? `${update.note}${target ? `。目标版本 ${versionDisplay(target)}` : ''}${entry.id === 'qwenwork' ? '。' : '，完成后返回点击“检查更新”。'}` : update.note;
+      version.append(text('h2', update.manualUpgrade ? '手动更新' : '版本与更新'), detailRow('当前版本', versionDisplay(update.currentVersion)), detailRow('官方最新版本', update.latestVersion || (update.manualUpgrade && !target ? '请在原安装渠道查看' : '检查未完成')), text('p', updateNote));
       if (['check_failed','unknown','manual_update','unsupported_update'].includes(update.state) || !update.canUpgrade && update.currentVersion !== update.targetVersion) version.append(actionButton(update.manualUpgrade ? '打开官方更新指引' : '官方更新说明', 'quiet tool-download', async () => { try { await invoke('download_tool', {tool:entry.id}); } catch (error) { showResult('无法打开说明', String(error)); } }));
       nextDetail.append(version);
     }
@@ -302,6 +304,7 @@
       const result = text('section', '', 'sheet'); result.append(text('h2', '最近一次接口文本测试'), detailRow('测试模型', connection.testResult.model), detailRow('测试时间', connection.testResult.testedAt), text('p', connection.testResult.detail), text('p', window.TokenMarketConnectionTests.scope, 'test-history-scope')); left.append(result);
     }
     const guidance = text('section', '', 'sheet'); guidance.append(text('h2', '使用前提醒'), text('p', '配置完成后，请完全退出并重新打开已有工具会话。'));
+    if (entry.id === 'qwenwork') guidance.append(text('p', '先登录并完全退出客户端后接入；重新打开后，在模型列表中选择 Token Market 模型。API Key 由 Token Market 在本机保管，模型请求通过本地代理转发。升级、降级或重新安装千问办公后，请返回 Token Market 点击“重新接入”；接入时会自动检查并修复配置，如提示尚未适配，请联系管理员适配。取消接入前也请完全退出。'));
     if (entry.id === 'openclaw') guidance.append(text('p', 'OpenClaw 需要重启 Gateway 或会话，已有模型白名单仍可能限制可选模型。'));
     if (entry.id === 'opencode') guidance.append(text('p', '项目或运行时配置可能覆盖全局模型设置。'));
     left.append(guidance);
@@ -448,7 +451,7 @@
     finally { disconnecting = false; if (authenticated && current === generation) render(); }
   }
   const reconnectDialog = document.createElement('dialog'); reconnectDialog.className = 'reconnect-dialog';
-  reconnectDialog.innerHTML = '<h3>确认重新接入</h3><p class="reconnect-from"></p><p class="reconnect-to"></p><p>将使用当前账号与空间更新此工具的连接，并重新读取可用模型。接入本身不会发起模型测试。</p><div class="tool-actions"><button class="reconnect-cancel">取消</button><button class="primary reconnect-confirm">确认重新接入</button></div>';
+  reconnectDialog.innerHTML = '<h3>确认重新接入</h3><p class="reconnect-from"></p><p class="reconnect-to"></p><p>将使用当前账号与空间更新此工具的连接，并重新读取可用模型。接入本身不会发起模型测试。</p><p class="qwenwork-reconnect-note" hidden>将重新生成 Token Market 管理的模型和本地接入配置，直接替换其中丢失或被修改的内容，保留其他模型、聊天和设置。若当前安装尚未适配，将保留原连接并提示联系管理员适配。</p><div class="tool-actions"><button class="reconnect-cancel">取消</button><button class="primary reconnect-confirm">确认重新接入</button></div>';
   document.body.append(reconnectDialog);
   reconnectDialog.querySelector('.reconnect-cancel').onclick = () => { pendingReconnect = null; reconnectDialog.close(); };
   reconnectDialog.addEventListener('cancel', () => { pendingReconnect = null; });
@@ -462,6 +465,7 @@
     const preview = await invoke('prepare_tool_reconnect', {tool:entry.id,expectedKeyId:entry.connection.keyId});
     if (!authenticated || current !== generation) return;
     pendingReconnect = {entry,preview};
+    reconnectDialog.querySelector('.qwenwork-reconnect-note').hidden = entry.id !== 'qwenwork';
     reconnectDialog.querySelector('.reconnect-from').textContent = `原连接：${preview.oldOwner.name} · ${preview.oldWorkspace.name}`;
     reconnectDialog.querySelector('.reconnect-to').textContent = `新连接：${preview.currentOwner.name} · ${preview.currentWorkspace.name}`;
     if (!reconnectDialog.open) reconnectDialog.showModal();
@@ -493,7 +497,7 @@
     runConnect(pending.tool);
   };
   window.addEventListener('current-workspace-changed', () => { pendingConnect = null; if (connectDialog.open) connectDialog.close(); });
-  const supportedConnections = {'claude-code':'Claude Code', codex:'Codex', 'deepseek-harness':'DeepSeek Harness',workbuddy:'WorkBuddy',openclaw:'OpenClaw',opencode:'OpenCode','grok-build':'Grok Build',hermes:'Hermes',pi:'Pi','minimax-code':'MiniMax Code','oh-my-pi':'Oh My Pi','kimi-code':'Kimi Code',dumate:'百度搭子 DuMate（个人版）','dumate-enterprise':'百度搭子 DuMate（企业版）'};
+  const supportedConnections = {'claude-code':'Claude Code', codex:'Codex', 'deepseek-harness':'DeepSeek Harness',workbuddy:'WorkBuddy',openclaw:'OpenClaw',opencode:'OpenCode','grok-build':'Grok Build',hermes:'Hermes',pi:'Pi','minimax-code':'MiniMax Code','oh-my-pi':'Oh My Pi','kimi-code':'Kimi Code',dumate:'百度搭子 DuMate（个人版）','dumate-enterprise':'百度搭子 DuMate（企业版）',qwenwork:'千问办公'};
   let launchTool = 'claude-code';
   const dialog = document.createElement('dialog');
   dialog.innerHTML = '<h3></h3><p class="restart-notice"></p><p>模型测试由你另行发起，可能产生少量费用。</p><div class="tool-actions"><button class="primary launch">打开终端运行 Claude Code</button><button class="close">完成</button></div><p class="launch-error" role="status"></p>';
@@ -541,6 +545,7 @@
       dialog.querySelector('h3').textContent = `${name} 已接入`;
       const guidance = {
         'deepseek-harness':'Harness 当前版本可在后续请求重新读取配置；若现有会话仍使用旧设置，请退出后重新打开所选 profile。',
+        qwenwork:'请重新打开千问办公，在模型列表中选择 Token Market 模型。API Key 由 Token Market 在本机保管，模型请求通过本地代理转发。升级、降级或重新安装千问办公后，请返回 Token Market 点击“重新接入”；接入时会自动检查并修复配置，如提示尚未适配，请联系管理员适配。接入与取消接入前须完全退出客户端；语音和多媒体等专项模型仍按千问办公自身配置使用。',
         workbuddy:'请完全退出并重新打开 WorkBuddy，在模型列表中选择导入模型。',
         openclaw:'请重启 OpenClaw Gateway 并重新打开会话。原有模型白名单或 agent 专属配置仍可能限制可选模型，请在 OpenClaw 中检查。',
         opencode:'请退出并重新启动 OpenCode，在模型列表中选择导入模型。项目或运行时的配置覆盖仍按 OpenCode 自身规则生效。',
@@ -554,7 +559,7 @@
         hermes:'请重新启动 Hermes，通过 /model 选择 Token Market provider 下的模型。已有 provider 和默认模型选择会保留；命令行参数可能覆盖本地配置。',
       };
       dialog.querySelector('.restart-notice').textContent = `${modelNotice} ${guidance[tool] || `现有 ${name} 会话需要退出后重新启动，新终端将读取接入配置。`}`;
-      dialog.querySelector('.launch').textContent = ['deepseek-harness','workbuddy','dumate','dumate-enterprise'].includes(tool) ? `打开 ${name}` : `打开工具 / 终端运行 ${name}`;
+      dialog.querySelector('.launch').textContent = ['deepseek-harness','workbuddy','dumate','dumate-enterprise','qwenwork'].includes(tool) ? `打开 ${name}` : `打开工具 / 终端运行 ${name}`;
       dialog.querySelector('.launch-error').textContent = ''; dialog.showModal();
     } catch(error) {
       if (authenticated && actionGeneration === generation) {

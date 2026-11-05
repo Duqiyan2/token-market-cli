@@ -57,7 +57,7 @@ struct SavedTest {
     result: ConnectionTestResult,
 }
 impl ConnectionManager {
-    fn matches_environment(&self, record: &ConnectionRecord) -> bool {
+    pub(super) fn matches_environment(&self, record: &ConnectionRecord) -> bool {
         record.gateway_url.trim_end_matches('/') == self.gateway_url.trim_end_matches('/')
             && (record.platform_url.is_empty()
                 || record.platform_url.trim_end_matches('/')

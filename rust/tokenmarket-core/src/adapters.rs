@@ -51,6 +51,8 @@ pub enum ToolId {
     DuMate,
     #[serde(rename = "dumate-enterprise")]
     DuMateEnterprise,
+    #[serde(rename = "qwenwork")]
+    QwenWork,
 }
 
 impl ToolId {
@@ -71,6 +73,7 @@ impl ToolId {
             Self::KimiCode => "kimi",
             Self::DuMate => "dumate",
             Self::DuMateEnterprise => "dumate",
+            Self::QwenWork => "qwenwork",
         }
     }
 }
@@ -92,6 +95,7 @@ impl std::fmt::Display for ToolId {
             ToolId::KimiCode => "kimi-code",
             ToolId::DuMate => "dumate",
             ToolId::DuMateEnterprise => "dumate-enterprise",
+            ToolId::QwenWork => "qwenwork",
         };
         f.write_str(value)
     }
@@ -152,12 +156,16 @@ enum PathKind {
     KimiCode,
     DuMate,
     DuMateEnterprise,
+    QwenWork,
 }
 
 impl Adapter {
     pub fn config_path(&self) -> PathBuf {
         let home = home_dir();
         match self.path_kind {
+            PathKind::QwenWork => {
+                crate::inventory::ToolInventory::current().config_path(ToolId::QwenWork)
+            }
             PathKind::DuMate => {
                 crate::inventory::ToolInventory::current().config_path(ToolId::DuMate)
             }
@@ -222,6 +230,7 @@ impl Adapter {
 
     pub fn read_config(&self) -> Result<Option<ToolConfig>> {
         match self.id {
+            ToolId::QwenWork => bail!("请使用共享客户端连接状态查看千问办公配置"),
             ToolId::DuMate => bail!("请使用共享客户端连接状态查看 DuMate 个人版配置"),
             ToolId::DuMateEnterprise => bail!("请使用共享客户端连接状态查看 DuMate 企业版配置"),
             ToolId::KimiCode => bail!("请使用共享客户端连接状态查看 Kimi Code 配置"),
@@ -497,11 +506,15 @@ impl Adapter {
         config: &ToolConfig,
         context: &AdapterContext,
     ) -> Result<AdapterWriteResult> {
+        if self.id == ToolId::QwenWork {
+            bail!("请使用 tokenmarket connect qwenwork 接入千问办公")
+        }
         config.validate()?;
         let config_path = self.config_path();
         let backup_path = create_backup(&config_path)?;
 
         match self.id {
+            ToolId::QwenWork => unreachable!(),
             ToolId::DuMate => bail!("请使用共享客户端接入流程配置 DuMate 个人版"),
             ToolId::DuMateEnterprise => bail!("请使用共享客户端接入流程配置 DuMate 企业版"),
             ToolId::KimiCode => bail!("请使用共享客户端接入流程配置 Kimi Code"),
@@ -799,6 +812,13 @@ pub fn adapters() -> Vec<Adapter> {
             protocol: Protocol::OpenAiCompatible,
             requires_restart: true,
             path_kind: PathKind::DuMateEnterprise,
+        },
+        Adapter {
+            id: ToolId::QwenWork,
+            name: "千问办公",
+            protocol: Protocol::OpenAiCompatible,
+            requires_restart: true,
+            path_kind: PathKind::QwenWork,
         },
     ]
 }
