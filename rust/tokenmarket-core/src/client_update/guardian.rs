@@ -77,7 +77,7 @@ pub fn run_guardian(
     journal.record(Phase::Guarded)?;
     if let Err(error) = send(
         output,
-        serde_json::json!({"ready":true,"nonce":journal.nonce()}),
+        serde_json::json!({"ready":true,"nonce":journal.nonce(),"guardian":execution.guardian}),
     ) {
         journal.record(Phase::Failed)?;
         return Err(error);
@@ -105,7 +105,11 @@ pub fn run_guardian(
     let mut installer = match environment.launch_installer() {
         Ok(child) => child,
         Err(error) => {
-            journal.record(Phase::Failed)?;
+            journal.record_failure(&format!("无法启动安装器，请重试或使用官方安装包：{error}"))?;
+            // The original desktop has already exited. Reopen whatever is now
+            // at the native application path for recovery; this is not rollback
+            // or proof that an update completed.
+            let _ = environment.relaunch();
             return Err(error.context("无法启动安装器，请重试或使用官方安装包"));
         }
     };
@@ -127,15 +131,17 @@ pub fn run_guardian(
     if let Err(error) = identity_result {
         // Known terminated, but do not assert startup completion without durable
         // trustworthy process identity. The prior unresolved record is recovery.
-        let _ = journal.record(Phase::Failed);
+        let _ = journal.record_failure("安装器已结束，但无法保存恢复信息，请使用官方安装包检查");
         return Err(error.context("安装器已结束，但无法保存恢复信息，请使用官方安装包检查"));
     }
     if !status.success() {
-        journal.record(Phase::Failed)?;
-        bail!(
+        let message = format!(
             "安装器未完成（退出码 {:?}），请重试或使用官方安装包恢复",
             status.code()
         );
+        journal.record_failure(&message)?;
+        let _ = environment.relaunch();
+        bail!("{message}");
     }
     journal.record(Phase::AwaitingStartup)?;
     // No journal writes after launch: only actual compiled target startup may

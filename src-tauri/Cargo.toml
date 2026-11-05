@@ -7,6 +7,9 @@ license = "UNLICENSED"
 edition = "2021"
 rust-version = "1.90"
 
+[features]
+windows-update-fixtures = ["tauri/test"]
+
 [lib]
 name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]

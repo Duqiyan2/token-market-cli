@@ -27,6 +27,8 @@ struct Record {
     phase: ClientUpdatePhase,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     execution: Option<super::guardian::ExecutionIdentity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    failure_reason: Option<String>,
 }
 
 pub struct ClientUpdateJournal {
@@ -58,6 +60,7 @@ impl ClientUpdateJournal {
                 application: application.into(),
                 phase: ClientUpdatePhase::Preparing,
                 execution: None,
+                failure_reason: None,
             },
         };
         journal.save()?;
@@ -86,6 +89,21 @@ impl ClientUpdateJournal {
     }
     pub fn phase(&self) -> ClientUpdatePhase {
         self.record.phase
+    }
+
+    pub fn failure_reason(&self) -> Option<&str> {
+        self.record.failure_reason.as_deref()
+    }
+
+    /// Persist only a failure whose installer is known inactive. An uncertain
+    /// postcommit lifetime remains pending and must not use this operation.
+    pub fn record_failure(&mut self, reason: &str) -> Result<()> {
+        let previous = self.record.failure_reason.replace(reason.to_owned());
+        if let Err(error) = self.record(ClientUpdatePhase::Failed) {
+            self.record.failure_reason = previous;
+            return Err(error);
+        }
+        Ok(())
     }
 
     pub(super) fn execution(
