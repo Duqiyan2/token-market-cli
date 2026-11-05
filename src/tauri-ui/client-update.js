@@ -5,6 +5,16 @@
   const publish = value => document.dispatchEvent(new CustomEvent('client-update-action-result', {detail:value}));
   const el = id => document.getElementById(id);
   const check = el('check-client-update');
+  const recovery = el('client-update-recovery');
+  recovery.onclick = async () => {
+    recovery.disabled = true;
+    try { await invoke('open_client_update_recovery'); }
+    catch (error) {
+      el('client-recovery-help').textContent = String(error);
+      el('client-recovery-help').hidden = false;
+    }
+    finally { recovery.disabled = !latest?.recoveryAvailable; }
+  };
   let checking = false;
   let currentVersion = '未知';
   let latest = null;
@@ -64,6 +74,8 @@
     if (latest?.status === 'handoff' && value.status !== 'handoff') return;
     if (['ready','installing'].includes(latest?.status) && !['ready','installing','handoff'].includes(value.status)) return;
     latest = value;
+    recovery.disabled = !value.recoveryAvailable;
+    el('client-recovery-help').hidden = Boolean(value.recoveryAvailable);
     currentVersion = value.currentVersion;
     el('client-current-version').textContent = `当前版本 ${value.currentVersion}`;
     el('client-update-status').textContent = value.status === 'available'
@@ -73,10 +85,11 @@
         ? '没有更新的受支持稳定版本' : value.status === 'downloading'
           ? '正在下载客户端更新…' : value.status === 'verifying'
             ? '下载完成，正在验证更新包签名…' : value.status === 'ready'
-              ? `更新包 ${value.availableVersion} 签名验证通过，等待安装` : value.status === 'failed'
+              ? `更新包 ${value.availableVersion} 签名验证通过，等待安装` : value.status === 'install_failed'
+                ? `客户端安装失败：${value.error || '请重新检查更新或使用官方安装包恢复'}` : value.status === 'failed'
                 ? `${value.availableVersion ? '下载或验证失败' : '检查失败'}：${value.error || '请重试'}` : '';
-    el('client-update-status').className = value.status === 'failed' ? 'error' : '';
-    check.textContent = value.status === 'failed' && !value.availableVersion ? '重试检查客户端更新' : '检查客户端更新';
+    el('client-update-status').className = ['failed','install_failed'].includes(value.status) ? 'error' : '';
+    check.textContent = ['failed','install_failed'].includes(value.status) && !value.availableVersion ? '重试检查客户端更新' : '检查客户端更新';
     const busy = ['downloading','verifying','ready','installing','handoff'].includes(value.status);
     check.disabled = checking || busy;
     download.hidden = !value.availableVersion || ['ready','installing','handoff'].includes(value.status);
@@ -85,7 +98,7 @@
     install.hidden = !['ready','installing'].includes(value.status);
     install.disabled = installing || value.status !== 'ready' || !value.installAvailable;
     el('client-install-unavailable').hidden = value.status !== 'ready' || Boolean(value.installAvailable);
-    el('client-install-error').textContent = value.status === 'ready' ? value.error || '' : '';
+    el('client-install-error').textContent = ['ready','handoff'].includes(value.status) ? value.error || '' : '';
     el('client-install-error').hidden = !el('client-install-error').textContent;
     el('client-update-notes').textContent = value.releaseNotes || '';
     el('client-update-notes').hidden = !value.releaseNotes;

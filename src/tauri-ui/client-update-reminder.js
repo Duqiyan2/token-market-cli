@@ -9,6 +9,13 @@
   let busy = false;
   let verifiedReady = false;
   let handedOff = false;
+  let failureAnnounced = false;
+  const failureNotice = el('client-update-failure-notice');
+  el('client-update-failure-dismiss').onclick = () => { failureNotice.hidden = true; };
+  el('client-update-failure-view').onclick = () => {
+    failureNotice.hidden = true;
+    document.querySelector('[data-desktop-settings]').click();
+  };
   document.addEventListener('client-update-manual-check', () => { ++revision; });
   document.addEventListener('client-update-action-result', event => { ++revision; receive(event.detail); });
   function receive(value) {
@@ -18,6 +25,14 @@
     if (['ready','installing','handoff'].includes(value.status)) verifiedReady = true;
     if (value.status === 'handoff') handedOff = true;
     document.dispatchEvent(new CustomEvent('client-update-status', {detail:value}));
+    if (value.status === 'install_failed' && value.showRecoveryNotice && !failureAnnounced) {
+      failureAnnounced = true;
+      el('client-update-failure-message').textContent = value.error || '上次客户端安装未完成，请查看更新与恢复说明。';
+      failureNotice.hidden = false;
+      // Native acknowledgement persists for this application process, so a
+      // renderer reload does not repeat an already displayed notice.
+      invoke('acknowledge_client_update_failure').catch(() => {});
+    } else if (value.status !== 'install_failed') failureNotice.hidden = true;
     if (value.status === 'available' && value.automatic && value.remind) {
       version = value.availableVersion;
       el('client-update-reminder-version').textContent = `Token Market ${version}`;

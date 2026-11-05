@@ -661,12 +661,12 @@ struct FixtureHandoff {
     launched: Arc<std::sync::atomic::AtomicUsize>,
 }
 impl ClientUpdateHandoff for FixtureHandoff {
-    fn commit(self: Box<Self>) -> Result<(), String> {
+    fn commit(self: Box<Self>) -> Result<ClientUpdateCommit, String> {
         if self.fail_launch {
             return Err("安装器启动失败，请重试".into());
         }
         self.launched.fetch_add(1, Ordering::SeqCst);
-        Ok(())
+        Ok(ClientUpdateCommit::Handoff)
     }
 }
 impl ClientUpdateInstaller for FixtureInstaller {
@@ -768,4 +768,529 @@ async fn guarded_install_refuses_busy_work_retains_verified_retry_and_reports_ha
         "handoff",
         "repeated download cannot erase a committed handoff"
     );
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn macos_installs_a_verified_archive_under_guard_and_only_acknowledges_target_startup() {
+    let fixture = tempfile::tempdir().unwrap();
+    let installed = fixture.path().join("installed");
+    std::fs::create_dir(&installed).unwrap();
+    tar::Archive::new(flate2::read::GzDecoder::new(
+        include_bytes!("../../tests/fixtures/client-update/macos/installed.tar.gz").as_slice(),
+    ))
+    .unpack(&installed)
+    .unwrap();
+    let (server, _unused, mut updater) = download_fixture_with(
+        "1.1.0",
+        include_str!("../../tests/fixtures/client-update/macos/update.tar.gz.sig").trim(),
+    );
+    updater.config.public_key = Some(
+        include_str!("../../tests/fixtures/client-update/macos/updater.key.pub")
+            .trim()
+            .into(),
+    );
+    *server.artifact.lock().unwrap() = (
+        200,
+        include_bytes!("../../tests/fixtures/client-update/macos/update.tar.gz").to_vec(),
+    );
+    let executable = fixture
+        .path()
+        .join("installed/Token Market.app/Contents/MacOS/Token Market");
+    updater.config.executable_path = Some(executable.clone());
+    let home = fixture.path().join("home");
+    std::fs::create_dir_all(home.join(".tokenmarket/credentials")).unwrap();
+    let retained = home.join(".tokenmarket/credentials/synthetic-encrypted-record");
+    std::fs::write(&retained, b"fixture-account-device-tool-key-identity").unwrap();
+    let restarted = Arc::new(AtomicBool::new(false));
+    let observed = restarted.clone();
+    let protected_home = home.clone();
+    let installed_executable = executable.clone();
+    updater = updater.with_installer(Arc::new(super::macos::MacInstaller::fixture(
+        home.clone(),
+        executable.clone(),
+        "1.0.0".into(),
+        Arc::new(move || {
+            assert!(tokenmarket_core::client_update::ClientUpdateGuard::acquire(
+                &protected_home,
+                "https://fixture.invalid"
+            )
+            .is_err());
+            let output = std::process::Command::new(&installed_executable)
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "1.1.0");
+            observed.store(true, Ordering::SeqCst);
+        }),
+    )));
+    let app = app();
+    assert_eq!(updater.check(app.handle()).await.status, "available");
+    assert_eq!(
+        updater
+            .download(app.handle(), "1.1.0")
+            .await
+            .unwrap()
+            .status,
+        "ready"
+    );
+    let result = updater.install(app.handle(), "1.1.0").await.unwrap();
+    assert_eq!(result.status, "handoff", "{result:?}");
+    assert!(restarted.load(Ordering::SeqCst));
+    use tokenmarket_core::client_update::{ClientUpdateJournal, ClientUpdatePhase};
+    assert_eq!(
+        ClientUpdateJournal::read(&home).unwrap().unwrap().phase(),
+        ClientUpdatePhase::AwaitingStartup
+    );
+    assert!(matches!(
+        super::macos::reconcile(&home, "1.0.0", &executable).unwrap(),
+        ClientUpdateStartup::Pending(_)
+    ));
+    assert_eq!(
+        ClientUpdateJournal::read(&home).unwrap().unwrap().phase(),
+        ClientUpdatePhase::AwaitingStartup
+    );
+    assert!(matches!(
+        super::macos::reconcile(&home, "1.1.0", &fixture.path().join("other")).unwrap(),
+        ClientUpdateStartup::Pending(_)
+    ));
+    assert!(matches!(
+        super::macos::reconcile(&home, "1.1.0", &executable).unwrap(),
+        ClientUpdateStartup::Clear
+    ));
+    assert_eq!(
+        ClientUpdateJournal::read(&home).unwrap().unwrap().phase(),
+        ClientUpdatePhase::Succeeded
+    );
+    assert_eq!(
+        std::fs::read(&retained).unwrap(),
+        b"fixture-account-device-tool-key-identity"
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn pending_macos_startup_is_reconciled_before_blank_distribution_configuration() {
+    use tokenmarket_core::client_update::{ClientUpdateJournal, ClientUpdatePhase};
+    let home = tempfile::tempdir().unwrap();
+    let executable = home
+        .path()
+        .join("Token Market.app/Contents/MacOS/Token Market");
+    let mut journal =
+        ClientUpdateJournal::begin(home.path(), "1.0.0", "1.1.0", &executable).unwrap();
+    for phase in [
+        ClientUpdatePhase::Guarded,
+        ClientUpdatePhase::Committed,
+        ClientUpdatePhase::InstallerRunning,
+        ClientUpdatePhase::AwaitingStartup,
+    ] {
+        journal.record(phase).unwrap();
+    }
+    let app = app();
+    let mut updater = ClientUpdater::new("1.0.0".into());
+    updater.config.endpoint = None;
+    updater.config.public_key = None;
+    updater.reconcile_startup_result(super::macos::reconcile(home.path(), "1.0.0", &executable));
+    let status = updater.startup_check(app.handle()).await;
+    assert_eq!(status.status, "handoff");
+    assert!(status.error.unwrap().contains("目标客户端版本启动"));
+    assert_eq!(updater.check(app.handle()).await.status, "handoff");
+    let mut upgraded = ClientUpdater::new("1.1.0".into());
+    upgraded.config.endpoint = None;
+    upgraded.reconcile_startup_result(super::macos::reconcile(home.path(), "1.1.0", &executable));
+    assert_eq!(
+        ClientUpdateJournal::read(home.path())
+            .unwrap()
+            .unwrap()
+            .phase(),
+        ClientUpdatePhase::Succeeded
+    );
+    assert_eq!(upgraded.startup_check(app.handle()).await.status, "failed");
+}
+
+#[cfg(target_os = "macos")]
+struct InterruptedMacInstaller {
+    executor: super::macos::MacInstaller,
+    bundle: std::path::PathBuf,
+    move_once: AtomicBool,
+}
+#[cfg(target_os = "macos")]
+struct InterruptedMacHandoff {
+    inner: Box<dyn ClientUpdateHandoff>,
+    bundle: std::path::PathBuf,
+    move_aside: bool,
+}
+#[cfg(target_os = "macos")]
+impl ClientUpdateInstaller for InterruptedMacInstaller {
+    fn prepare(
+        &self,
+        update: VerifiedClientUpdate,
+    ) -> Result<Box<dyn ClientUpdateHandoff>, String> {
+        let inner = self.executor.prepare(update)?;
+        Ok(Box::new(InterruptedMacHandoff {
+            inner,
+            bundle: self.bundle.clone(),
+            move_aside: self.move_once.swap(false, Ordering::SeqCst),
+        }))
+    }
+}
+#[cfg(target_os = "macos")]
+impl ClientUpdateHandoff for InterruptedMacHandoff {
+    fn commit(self: Box<Self>) -> Result<ClientUpdateCommit, String> {
+        // System-boundary fault: an external actor removes the disposable install
+        // location after preflight. The real official installer must report it.
+        let backup = self.bundle.with_extension("fixture-backup");
+        if self.move_aside {
+            std::fs::rename(&self.bundle, &backup).unwrap();
+        }
+        let result = self.inner.commit();
+        if self.move_aside {
+            std::fs::rename(&backup, &self.bundle).unwrap();
+        }
+        result
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn macos_busy_and_known_official_install_failure_retain_verified_retry_without_data_changes()
+{
+    let fixture = tempfile::tempdir().unwrap();
+    let installed = fixture.path().join("installed");
+    std::fs::create_dir(&installed).unwrap();
+    tar::Archive::new(flate2::read::GzDecoder::new(
+        include_bytes!("../../tests/fixtures/client-update/macos/installed.tar.gz").as_slice(),
+    ))
+    .unpack(&installed)
+    .unwrap();
+    let (server, _unused, mut updater) = download_fixture_with(
+        "1.1.0",
+        include_str!("../../tests/fixtures/client-update/macos/update.tar.gz.sig").trim(),
+    );
+    updater.config.public_key = Some(
+        include_str!("../../tests/fixtures/client-update/macos/updater.key.pub")
+            .trim()
+            .into(),
+    );
+    *server.artifact.lock().unwrap() = (
+        200,
+        include_bytes!("../../tests/fixtures/client-update/macos/update.tar.gz").to_vec(),
+    );
+    let executable = installed.join("Token Market.app/Contents/MacOS/Token Market");
+    updater.config.executable_path = Some(executable.clone());
+    let home = fixture.path().join("home");
+    let records = [
+        ".tokenmarket/client-login/fixture/encrypted-session",
+        ".tokenmarket/credentials/encrypted-agent-key",
+        ".tokenmarket/device-id",
+        ".tokenmarket/connection-owner-billing-models",
+        ".tokenmarket/restoration-record",
+        ".codex/config.toml",
+        ".codex/auth.json",
+    ];
+    for path in records {
+        let path = home.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, b"synthetic-data-retained-byte-for-byte").unwrap();
+    }
+    let restarted = Arc::new(AtomicBool::new(false));
+    let observed = restarted.clone();
+    updater = updater.with_installer(Arc::new(InterruptedMacInstaller {
+        executor: super::macos::MacInstaller::fixture(
+            home.clone(),
+            executable.clone(),
+            "1.0.0".into(),
+            Arc::new(move || {
+                observed.store(true, Ordering::SeqCst);
+            }),
+        ),
+        bundle: installed.join("Token Market.app"),
+        move_once: AtomicBool::new(true),
+    }));
+    let app = app();
+    assert_eq!(updater.check(app.handle()).await.status, "available");
+    assert_eq!(
+        updater
+            .download(app.handle(), "1.1.0")
+            .await
+            .unwrap()
+            .status,
+        "ready"
+    );
+    let lock_path = home.join(".tokenmarket/desktop-connections/operation.lock");
+    std::fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
+    let active = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(lock_path)
+        .unwrap();
+    active.try_lock().unwrap();
+    let busy = updater.install(app.handle(), "1.1.0").await.unwrap();
+    assert_eq!(busy.status, "ready");
+    assert!(busy.error.unwrap().contains("连接操作正在进行"));
+    drop(active);
+    let failed = updater.install(app.handle(), "1.1.0").await.unwrap();
+    assert_eq!(failed.status, "ready");
+    assert!(failed.error.unwrap().contains("客户端安装失败"));
+    assert!(!restarted.load(Ordering::SeqCst));
+    assert_eq!(
+        tokenmarket_core::client_update::ClientUpdateJournal::read(&home)
+            .unwrap()
+            .unwrap()
+            .phase(),
+        tokenmarket_core::client_update::ClientUpdatePhase::Failed
+    );
+    assert_eq!(
+        updater.install(app.handle(), "1.1.0").await.unwrap().status,
+        "handoff"
+    );
+    assert!(restarted.load(Ordering::SeqCst));
+    assert_eq!(
+        server
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|request| request.contains("GET /package "))
+            .count(),
+        1
+    );
+    for path in records {
+        assert_eq!(
+            std::fs::read(home.join(path)).unwrap(),
+            b"synthetic-data-retained-byte-for-byte"
+        );
+    }
+}
+
+#[test]
+fn client_update_recovery_is_native_owned_https_and_unavailable_without_publisher_configuration() {
+    let app = app();
+    let mut updater = ClientUpdater::new("1.0.0".into());
+    for invalid in [
+        None,
+        Some(""),
+        Some("http://updates.example.invalid/recovery"),
+        Some("file:///tmp/recovery"),
+        Some("not a URL"),
+    ] {
+        updater.config.recovery_url = invalid.map(str::to_owned);
+        assert!(!updater.status().recovery_available);
+        let error = updater.open_recovery(app.handle()).unwrap_err();
+        assert!(error.contains("发布方"));
+        assert!(!error.contains("TOKEN_MARKET"));
+    }
+    updater.config.recovery_url = Some("https://updates.example.invalid/recovery/".into());
+    assert!(updater.status().recovery_available);
+    assert!(!serde_json::to_string(&updater.status())
+        .unwrap()
+        .contains("https://"));
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn macos_refuses_verified_non_app_bytes_and_a_changed_certificate_without_replacing_the_app()
+{
+    for changed_identity in [false, true] {
+        let fixture = tempfile::tempdir().unwrap();
+        let installed = fixture.path().join("installed");
+        std::fs::create_dir(&installed).unwrap();
+        tar::Archive::new(flate2::read::GzDecoder::new(
+            include_bytes!("../../tests/fixtures/client-update/macos/installed.tar.gz").as_slice(),
+        ))
+        .unpack(&installed)
+        .unwrap();
+        let (server, _unused, mut updater) = if changed_identity {
+            download_fixture_with(
+                "1.1.0",
+                include_str!(
+                    "../../tests/fixtures/client-update/macos/changed-identity.tar.gz.sig"
+                )
+                .trim(),
+            )
+        } else {
+            download_fixture()
+        };
+        if changed_identity {
+            updater.config.public_key = Some(
+                include_str!("../../tests/fixtures/client-update/macos/updater.key.pub")
+                    .trim()
+                    .into(),
+            );
+            *server.artifact.lock().unwrap() = (
+                200,
+                include_bytes!("../../tests/fixtures/client-update/macos/changed-identity.tar.gz")
+                    .to_vec(),
+            );
+        }
+        let executable = installed.join("Token Market.app/Contents/MacOS/Token Market");
+        let original = std::fs::read(&executable).unwrap();
+        updater.config.executable_path = Some(executable.clone());
+        let home = fixture.path().join("home");
+        updater = updater.with_installer(Arc::new(super::macos::MacInstaller::fixture(
+            home.clone(),
+            executable.clone(),
+            "1.0.0".into(),
+            Arc::new(|| panic!("rejected packages must not restart")),
+        )));
+        let app = app();
+        assert_eq!(updater.check(app.handle()).await.status, "available");
+        assert_eq!(
+            updater
+                .download(app.handle(), "1.1.0")
+                .await
+                .unwrap()
+                .status,
+            "ready"
+        );
+        let refused = updater.install(app.handle(), "1.1.0").await.unwrap();
+        assert_eq!(refused.status, "ready");
+        let error = refused.error.unwrap();
+        assert!(
+            if changed_identity {
+                error.contains("签名身份已改变")
+            } else {
+                error.contains("有效应用归档")
+            },
+            "{error}"
+        );
+        assert_eq!(std::fs::read(&executable).unwrap(), original);
+        assert!(
+            tokenmarket_core::client_update::ClientUpdateJournal::read(&home)
+                .unwrap()
+                .is_none()
+        );
+    }
+}
+
+struct PendingWarningInstaller;
+struct PendingWarningHandoff;
+impl ClientUpdateInstaller for PendingWarningInstaller {
+    fn prepare(&self, _: VerifiedClientUpdate) -> Result<Box<dyn ClientUpdateHandoff>, String> {
+        Ok(Box::new(PendingWarningHandoff))
+    }
+}
+impl ClientUpdateHandoff for PendingWarningHandoff {
+    fn commit(self: Box<Self>) -> Result<ClientUpdateCommit, String> {
+        Ok(ClientUpdateCommit::HandoffWithWarning(
+            "已替换客户端但恢复记录未保存，请使用官方安装包检查恢复".into(),
+        ))
+    }
+}
+#[tokio::test]
+async fn uncertain_postreplacement_warning_keeps_handoff_and_recovery_without_install_retry() {
+    let app = app();
+    let (_server, _executable, updater) = download_fixture();
+    let updater = updater.with_installer(Arc::new(PendingWarningInstaller));
+    updater.check(app.handle()).await;
+    assert_eq!(
+        updater
+            .download(app.handle(), "1.1.0")
+            .await
+            .unwrap()
+            .status,
+        "ready"
+    );
+    let pending = updater.install(app.handle(), "1.1.0").await.unwrap();
+    assert_eq!(pending.status, "handoff");
+    assert!(pending.error.unwrap().contains("恢复记录未保存"));
+    assert!(updater.install(app.handle(), "1.1.0").await.is_err());
+    assert_eq!(updater.check(app.handle()).await.status, "handoff");
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_reconciles_interrupted_synchronous_install_only_after_guard_and_actual_target_startup() {
+    use tokenmarket_core::client_update::{ClientUpdateJournal, ClientUpdatePhase};
+    let home = tempfile::tempdir().unwrap();
+    let executable = home
+        .path()
+        .join("Token Market.app/Contents/MacOS/Token Market");
+    let mut journal =
+        ClientUpdateJournal::begin(home.path(), "1.0.0", "1.1.0", &executable).unwrap();
+    for phase in [
+        ClientUpdatePhase::Guarded,
+        ClientUpdatePhase::Committed,
+        ClientUpdatePhase::InstallerRunning,
+    ] {
+        journal.record(phase).unwrap();
+    }
+    let active = tokenmarket_core::client_update::ClientUpdateGuard::acquire(
+        home.path(),
+        "https://fixture.invalid",
+    )
+    .unwrap();
+    assert!(super::macos::reconcile(home.path(), "1.1.0", &executable).is_err());
+    assert_eq!(
+        ClientUpdateJournal::read(home.path())
+            .unwrap()
+            .unwrap()
+            .phase(),
+        ClientUpdatePhase::InstallerRunning
+    );
+    drop(active);
+    assert!(matches!(
+        super::macos::reconcile(home.path(), "1.0.0", &executable).unwrap(),
+        ClientUpdateStartup::Pending(_)
+    ));
+    assert_eq!(
+        ClientUpdateJournal::read(home.path())
+            .unwrap()
+            .unwrap()
+            .phase(),
+        ClientUpdatePhase::AwaitingStartup
+    );
+    assert!(matches!(
+        super::macos::reconcile(home.path(), "1.1.0", &executable).unwrap(),
+        ClientUpdateStartup::Clear
+    ));
+    assert_eq!(
+        ClientUpdateJournal::read(home.path())
+            .unwrap()
+            .unwrap()
+            .phase(),
+        ClientUpdatePhase::Succeeded
+    );
+    let mut abandoned =
+        ClientUpdateJournal::begin(home.path(), "1.1.0", "1.2.0", &executable).unwrap();
+    abandoned.record(ClientUpdatePhase::Guarded).unwrap();
+    abandoned.record(ClientUpdatePhase::Committed).unwrap();
+    assert!(matches!(
+        super::macos::reconcile(home.path(), "1.1.0", &executable).unwrap(),
+        ClientUpdateStartup::RetryableFailure(_)
+    ));
+    assert_eq!(
+        ClientUpdateJournal::read(home.path())
+            .unwrap()
+            .unwrap()
+            .phase(),
+        ClientUpdatePhase::Failed
+    );
+}
+
+#[tokio::test]
+async fn known_terminal_install_failure_survives_startup_and_allows_explicit_manual_check() {
+    let app = app();
+    let mut updater = ClientUpdater::new("1.0.0".into());
+    updater.config.endpoint = None;
+    updater.config.public_key = None;
+    updater.reconcile_startup_result(Ok(ClientUpdateStartup::RetryableFailure(
+        "上次客户端安装失败，退出码 17，请检查或使用官方安装包恢复".into(),
+    )));
+    let startup = updater.startup_check(app.handle()).await;
+    assert_eq!(startup.status, "install_failed");
+    assert!(startup.error.unwrap().contains("退出码 17"));
+    assert!(!startup.automatic);
+    assert!(startup.show_recovery_notice);
+    assert!(!updater.acknowledge_failure_notice().show_recovery_notice);
+    assert!(!updater.status().show_recovery_notice);
+    assert_eq!(
+        updater.startup_check(app.handle()).await.status,
+        "install_failed"
+    );
+    let manual = updater.check(app.handle()).await;
+    assert_eq!(manual.status, "failed");
+    assert!(manual.error.unwrap().contains("稳定版清单地址"));
 }

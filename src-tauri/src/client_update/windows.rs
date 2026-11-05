@@ -1,5 +1,8 @@
 //! Current-user NSIS only. This module never calls the updater's exiting install shortcut.
-use super::{ClientUpdateHandoff, ClientUpdateInstaller, VerifiedClientUpdate};
+use super::{
+    ClientUpdateCommit, ClientUpdateHandoff, ClientUpdateInstaller, ClientUpdateStartup,
+    VerifiedClientUpdate,
+};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -416,7 +419,7 @@ struct WindowsHandoff {
     committed: bool,
 }
 impl ClientUpdateHandoff for WindowsHandoff {
-    fn commit(mut self: Box<Self>) -> std::result::Result<(), String> {
+    fn commit(mut self: Box<Self>) -> std::result::Result<ClientUpdateCommit, String> {
         // Once any COMMIT bytes may have reached the guardian, an uncertain pipe
         // result is pending handoff, never retryable installation failure.
         self.committed = true;
@@ -427,7 +430,7 @@ impl ClientUpdateHandoff for WindowsHandoff {
             let _ = self.reader.read_line(&mut line);
         }
         self.app.exit(0);
-        Ok(())
+        Ok(ClientUpdateCommit::Handoff)
     }
 }
 impl Drop for WindowsHandoff {
@@ -539,25 +542,25 @@ pub fn try_run_guardian() -> Option<i32> {
     }
 }
 
-pub fn reconcile_startup() -> std::result::Result<Option<String>, String> {
-    let result = (|| -> Result<Option<String>> {
+pub fn reconcile_startup() -> std::result::Result<ClientUpdateStartup, String> {
+    let result = (|| -> Result<ClientUpdateStartup> {
         let home = tokenmarket_core::config::home_dir();
         if let Some(mut journal) = ClientUpdateJournal::read(&home)? {
             if matches!(
                 journal.phase(),
                 ClientUpdatePhase::Failed | ClientUpdatePhase::Succeeded
             ) {
-                return Ok(None);
+                return Ok(ClientUpdateStartup::Clear);
             }
             // This exact compiled process is the only authority on completion.
             if journal.phase() == ClientUpdatePhase::AwaitingStartup {
                 journal
                     .acknowledge_startup(env!("CARGO_PKG_VERSION"), &std::env::current_exe()?)?;
             } else {
-                return Ok(Some("上次客户端更新交接尚未确认结束，请检查安装进程或使用官方安装包恢复；不会自动重试".into()));
+                return Ok(ClientUpdateStartup::Pending("上次客户端更新交接尚未确认结束，请检查安装进程或使用官方安装包恢复；不会自动重试".into()));
             }
         }
-        Ok(None)
+        Ok(ClientUpdateStartup::Clear)
     })();
     result.map_err(|e| e.to_string())
 }

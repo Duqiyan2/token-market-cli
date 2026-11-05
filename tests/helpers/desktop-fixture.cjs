@@ -61,6 +61,8 @@ module.exports = async function openFixture(browser, options = {}) {
           return value;
         }
         case 'download_client_update': if(options.deferClientDownload)return new Promise(resolve=>fixture.resolveClientDownload=resolve);return {status:'ready',currentVersion:'1.0.0',availableVersion:args.version,releaseNotes:'保留已有连接',error:null};
+        case 'acknowledge_client_update_failure': fixture.clientUpdateStatus.showRecoveryNotice=false;return clone(fixture.clientUpdateStatus);
+        case 'open_client_update_recovery': return null;
         case 'install_client_update': return fixture.clientInstallBusy ? {status:'ready',currentVersion:'1.0.0',availableVersion:args.version,installAvailable:true,error:'工具连接操作正在进行，请完成后重试安装客户端更新'} : {status:'handoff',currentVersion:'1.0.0',availableVersion:args.version,installAvailable:true,error:null};
         case 'defer_client_update': fixture.clientUpdateStatus.remind=false;return clone(fixture.clientUpdateStatus);
         case 'ignore_client_update_version': fixture.clientUpdateStatus.remind=false;fixture.ignoredClientUpdate=args.version;return clone(fixture.clientUpdateStatus);

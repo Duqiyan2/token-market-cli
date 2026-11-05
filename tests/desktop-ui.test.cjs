@@ -67,6 +67,68 @@ test('Client Update installation explains active work and requires an explicit r
   }finally{await f.close();}
 });
 
+test('pending Client Update startup shows recovery without claiming completion or enabling another install', async () => {
+  const f=await openFixture({signedIn:false,startupClientUpdate:{status:'handoff',currentVersion:'1.0.0',error:'尚未确认目标客户端版本启动，请使用官方安装包恢复'}});try {
+    const p=f.page;await p.locator('#login [data-desktop-settings]').click();
+    await p.locator('#client-install-error').filter({hasText:'尚未确认目标客户端版本启动'}).waitFor();
+    assert.doesNotMatch(await p.locator('#client-update-status').textContent(),/更新完成|安装完成/);
+    assert.equal(await p.locator('#check-client-update').isDisabled(),true);
+    assert.equal(await p.locator('#install-client-update').isVisible(),false);
+    assert.equal((await calls(p,'install_client_update')).length,0);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('Client Update opens only the native configured recovery route and explains missing publisher configuration', async () => {
+  for (const available of [false,true]) {
+    const f=await openFixture({signedIn:false,startupClientUpdate:{status:'handoff',currentVersion:'1.0.0',error:'尚未确认目标客户端版本启动',recoveryAvailable:available}});try {
+      const p=f.page;await p.locator('#login [data-desktop-settings]').click();
+      const button=p.getByRole('button',{name:'官方安装包与恢复说明',exact:true});
+      assert.equal(await button.isEnabled(),available);
+      if (available) {
+        await button.click();
+        const invoked=await calls(p,'open_client_update_recovery');
+        assert.equal(invoked.length,1);
+        assert.deepEqual(invoked[0].args,{});
+      } else {
+        assert.match(await p.locator('#client-recovery-help').textContent(),/联系发布方/);
+      }
+      assert.deepEqual(f.errors,[]);
+    }finally{await f.close();}
+  }
+});
+
+test('known terminal Client Update failure remains visible with explicit check and recovery actions', async () => {
+  const f=await openFixture({signedIn:false,startupClientUpdate:{status:'install_failed',currentVersion:'1.0.0',error:'上次客户端安装失败，退出码 17',automatic:false,recoveryAvailable:true}});try {
+    const p=f.page;await p.locator('#login [data-desktop-settings]').click();
+    await p.locator('#client-update-status').filter({hasText:'退出码 17'}).waitFor();
+    assert.equal(await p.getByRole('button',{name:'重试检查客户端更新',exact:true}).isEnabled(),true);
+    assert.equal(await p.getByRole('button',{name:'官方安装包与恢复说明',exact:true}).isEnabled(),true);
+    assert.equal(await p.locator('#client-update-reminder').isVisible(),false);
+    assert.equal((await calls(p,'install_client_update')).length,0);
+    await p.getByRole('button',{name:'重试检查客户端更新',exact:true}).click();
+    await p.locator('#client-update-status').filter({hasText:'没有更新的受支持稳定版本'}).waitFor();
+    assert.equal((await calls(p,'check_client_update')).length,1);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('terminal Client Update notice is nonmodal and acknowledged once for native process reloads', async () => {
+  const value={status:'install_failed',currentVersion:'1.0.0',error:'上次客户端安装失败，退出码 17',automatic:false,recoveryAvailable:true,showRecoveryNotice:true};
+  const f=await openFixture({signedIn:false,startupClientUpdate:value});try {
+    const p=f.page;
+    await p.locator('#client-update-failure-notice').filter({hasText:'退出码 17'}).waitFor({timeout:5000});
+    assert.equal(await p.locator('dialog[open]').count(),0);
+    await p.waitForFunction(()=>window.__fixture.calls.some(c=>c.command==='acknowledge_client_update_failure'));
+    assert.equal((await calls(p,'acknowledge_client_update_failure')).length,1);
+    await p.getByRole('button',{name:'知道了',exact:true}).click();
+    await p.evaluate(v=>window.__fixture.emit('desktop-client-update-status',v),value);
+    assert.equal(await p.locator('#client-update-failure-notice').isVisible(),false);
+    assert.equal((await calls(p,'acknowledge_client_update_failure')).length,1);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
 test('a late download progress event cannot erase a verified Client Update', async () => {
   const f=await openFixture({signedIn:false,clientUpdate:{status:'available',currentVersion:'1.0.0',availableVersion:'1.1.0',releaseNotes:null,error:null}});try {
     const p=f.page;await p.locator('#login [data-desktop-settings]').click();
