@@ -25,6 +25,8 @@ struct Record {
     target_version: String,
     application: PathBuf,
     phase: ClientUpdatePhase,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    execution: Option<super::guardian::ExecutionIdentity>,
 }
 
 pub struct ClientUpdateJournal {
@@ -55,6 +57,7 @@ impl ClientUpdateJournal {
                 target_version: target.into(),
                 application: application.into(),
                 phase: ClientUpdatePhase::Preparing,
+                execution: None,
             },
         };
         journal.save()?;
@@ -83,6 +86,14 @@ impl ClientUpdateJournal {
     }
     pub fn phase(&self) -> ClientUpdatePhase {
         self.record.phase
+    }
+
+    pub(super) fn execution(
+        &mut self,
+        execution: super::guardian::ExecutionIdentity,
+    ) -> Result<()> {
+        self.record.execution = Some(execution);
+        self.save()
     }
 
     /// Record only observed facts. AwaitingStartup requires known installer

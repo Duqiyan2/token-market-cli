@@ -52,8 +52,10 @@ name = "app"
 version = "1.0.0"
 dependencies = [
  "anyhow",
+ "rand 0.8.8",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-deep-link",
@@ -63,6 +65,8 @@ dependencies = [
  "tempfile",
  "tokenmarket-core",
  "tokio",
+ "windows-sys 0.61.2",
+ "winreg 0.55.0",
 ]
 
 [[package]]
