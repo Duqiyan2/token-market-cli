@@ -309,3 +309,15 @@ pub fn run() {
             }
         });
 }
+
+/// Run an isolated updater guardian before any Tauri or session initialization.
+pub fn run_client_update_helper() -> Option<i32> {
+    #[cfg(windows)]
+    {
+        return client_update::windows::try_run_guardian();
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}

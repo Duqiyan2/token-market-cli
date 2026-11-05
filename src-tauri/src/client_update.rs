@@ -9,6 +9,8 @@ use std::{
 #[cfg(target_os = "macos")]
 mod macos;
 mod reminders;
+#[cfg(windows)]
+pub mod windows;
 use reminders::Reminders;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_opener::OpenerExt;
@@ -85,7 +87,7 @@ impl UpdateConfig {
             recovery_url: option_env!("TOKEN_MARKET_UPDATER_RECOVERY_URL").map(str::to_owned),
             target: match (std::env::consts::OS, std::env::consts::ARCH) {
                 ("macos", "aarch64") => Some("darwin-aarch64".into()),
-                ("windows", "x86_64") => Some("windows-x86_64".into()),
+                ("windows", "x86_64") => Some("windows-x86_64-nsis".into()),
                 _ => None,
             },
             #[cfg(test)]
