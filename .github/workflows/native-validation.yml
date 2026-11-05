@@ -115,7 +115,7 @@ jobs:
         if: ${{ !cancelled() && runner.os == 'Windows' && steps.desktop-tests.outcome == 'failure' }}
         shell: pwsh
         run: |
-          $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUNNER = 'python "' + (Join-Path $env:GITHUB_WORKSPACE 'scripts/windows-import-probe.py') + '"'
+          $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUNNER = 'python ' + (Join-Path $env:GITHUB_WORKSPACE 'scripts/windows-import-probe.py')
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           $installation = & $vswhere -latest -products '*' -property installationPath
           $dumpbin = Get-ChildItem "$installation\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" | Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
