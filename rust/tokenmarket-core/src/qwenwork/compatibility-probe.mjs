@@ -26,6 +26,7 @@ const server=http.createServer(async(req,res)=>{
     assert.equal(body.custom_model,undefined);
     assert.equal(body.api_key,undefined);
     const round=requests++;
+    assert.equal(req.headers['session-id'],round===3?'legacy-task':'fixture');
     if(round===1)assert.equal(body.messages.at(-1).tool_call_id,'call_fixture');
     if(round===3)assert.deepEqual(body.messages,[{role:'user',content:'Old question'},{role:'assistant',content:'Old answer'},{role:'user',content:'Continue the old task'}]);
     const delta=round===0?{tool_calls:[{index:0,id:'call_fixture',type:'function',function:{name:'fixture_time',arguments:'{}'}}]}:{content:'OK'};

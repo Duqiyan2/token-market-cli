@@ -27,6 +27,26 @@ const DesktopClient=new Function('logger$dC','modelIdForLog','getDesktopOriginAt
   `${headerFunction};return class { constructor(){this.fetchImpl=fetch;} ${send} }`)(
     {info(){}},x=>x,()=>({}),(body)=>body,()=>false);
 const client=new DesktopClient();
+// Exercise the native mint response parser, base-URL normalizer and per-session
+// credential cache too: a custom base path must survive all three before send.
+const baseFunctions=between('function getEngineMaasBaseUrl(){','function getAccessKeyMintUrl(){');
+const mintBody=between('function buildDesktopSessionMintRequestBody(','const MAAS_MINT_PATH=');
+const mintSource=between('async function mintAccessKey(','async function exchangeAccessKey(');
+const mintNative=new Function('getAccessKeyMintUrl','getQwenWorkClientHeaders','resolveDevAccessToken','getAuthManagerV2','NETWORK_RUNTIME_NO_REPLAY',`
+  let serverProvidedBaseUrl,lastMintFailure;
+  const DEFAULT_MAAS_BASE_URL='https://forbidden.invalid',logger$fs={info(){},warn(){}},envValue=()=>undefined;
+  ${baseFunctions} ${mintBody} ${mintSource}
+  return mintAccessKey;
+`)(()=>({url:base+'/api/desktop-sessions',source:'fixture'}),()=>({}),()=>undefined,
+  ()=>({ensureFreshAccessToken:async()=>'official-login-secret'}),Symbol());
+const Broker=new Function(`
+  class RuntimeCredentialTransportError extends Error {}
+  ${between('const DEFAULT_SESSION_SCOPE$1=','const logger$fs=')}
+  return EngineMaasSessionCredentialBroker;
+`)();
+const broker=new Broker({mint:mintNative,exchange:async()=>({status:'unavailable'}),store:{load:()=>[],save(){},clear(){}}});
+const appendSource=between('function appendPath(','function parseJsonObject$2(');
+const nativeBuildUrl=new Function(`${appendSource};return n=>appendPath(n,'/chat/completions')`)();
 const connect=net.Socket.prototype.connect;
 net.Socket.prototype.connect=function(...args){
   let options=args[0];if(Array.isArray(options))options=options[0];
@@ -34,21 +54,23 @@ net.Socket.prototype.connect=function(...args){
   if(host!=='127.0.0.1'&&host!=='localhost')throw new Error('Remote networking is forbidden in the desktop probe');
   return connect.apply(this,args);
 };
-const minted=await fetch(`${base}/api/desktop-sessions`,{method:'POST',headers:{
-  Authorization:'Bearer official-login-secret','Content-Type':'application/json'
-},body:JSON.stringify({session_id:'fixture-session'})}).then(r=>r.json());
-assert.equal(minted.access_token,capability);
-assert.equal(minted.base_url,base);
-for(const purpose of ['prompt-suggestion','session-title','summary','auto-review','subagent']){
+async function run(session){
+const minted=await broker.resolve(session,'fixture-identity');
+assert.equal(minted.accessKey,capability);
+assert.equal(minted.baseUrl,`${base}/sessions/${Buffer.from(session).toString('base64url')}/v1`);
+await Promise.all(['prompt-suggestion','session-title','summary','auto-review','subagent'].map(async purpose=>{
   const response=await client.send({
-    queryId:'fixture',turns:[],credential:{baseUrl:minted.base_url,token:minted.access_token},
+    queryId:'fixture',turns:[],credential:{baseUrl:minted.baseUrl,token:minted.accessKey},
     route:{modelKey:'lite',modelId:'lite',apiProtocol:'openai'},
-    input:{purpose,level:'lite',sessionId:'fixture-session',billingTurnId:'fixture-turn',signal:AbortSignal.timeout(10000)},
-    strategy:{headers:{},buildUrl:url=>`${url}/v1/chat/completions`,buildRequest:()=>({
-      model:'lite',messages:[{role:'user',content:purpose}],stream:false
+    input:{purpose,level:'lite',sessionId:session,billingTurnId:'fixture-turn',signal:AbortSignal.timeout(10000)},
+    strategy:{headers:{},buildUrl:nativeBuildUrl,buildRequest:()=>({
+      model:'lite',messages:[{role:'user',content:`${session}:${purpose}`}],stream:false
     })}
   });
   assert.equal(response.status,200);
   const body=await response.json();assert.equal(body.choices[0].message.content,'OK');
+}));
 }
-console.log('PASS: installed desktop request code -> local mint -> native relay -> fixture upstream (5 purposes).');
+await Promise.all(['fixture-session','second-session'].map(run));
+await run('fixture-session');
+console.log('PASS: installed desktop request code -> scoped local mint -> native relay -> fixture upstream (5 concurrent purposes, distinct and resumed sessions).');

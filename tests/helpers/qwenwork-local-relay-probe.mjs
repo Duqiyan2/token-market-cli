@@ -16,13 +16,13 @@ async function main() {
   assert.throws(()=>sdk.assembleModel(model,{getModel:()=>undefined},
     {...policy.customModel,api_key:'fixture-invalid-marker'}), /reconnected/);
   const tools=[{type:'function',function:{name:'fixture_time',parameters:{type:'object',properties:{}}}}];
-  async function turn(history) {
+  async function turn(history, session='fixture-session') {
     const assembled=sdk.assembleModel(model,{getModel:()=>undefined},policy.customModel);
     assert.equal(assembled.customModel.url,endpoint);
     assert.equal(assembled.customModel.parameters.api_key,marker);
     const stream=await dispatch({route:{kind:'qoder',identity,source:'system'},model}, {
       model_config:assembled.modelConfig,custom_model:assembled.customModel,messages:history,tools,
-      parameters:{max_tokens:64},request_id:'fixture-request',session_id:'fixture-session'
+      parameters:{max_tokens:64},request_id:'fixture-request',session_id:session
     }, {signal:AbortSignal.timeout(10000),reason:'fixture'},1);
     const events=[];for await (const event of stream)events.push(event);
     return events;
@@ -35,6 +35,8 @@ async function main() {
       {role:'assistant',content:null,tool_calls:[{id:'call_fixture',type:'function',function:{name:'fixture_time',arguments:'{}'}}]},
       {role:'tool',tool_call_id:'call_fixture',content:'fixture result'}]);
     assert.equal(second.map(e=>e.content??'').join(''),'OK');
+    assert.equal((await turn(messages,'second-session')).map(e=>e.content??'').join(''),'OK');
+    assert.equal((await turn(messages)).map(e=>e.content??'').join(''),'OK');
     console.log('PASS: real SDK -> native local relay -> trusted upstream; streamed tool call and tool result completed.');
   } finally {
     for (const promise of globalThis.__tmLocalRelays?.values()??[]) {

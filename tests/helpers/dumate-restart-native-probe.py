@@ -32,7 +32,7 @@ class Fixture(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
-        self.calls.append({'path': self.path, 'body': body, 'auth': self.headers.get('Authorization')})
+        self.calls.append({'path': self.path, 'body': body, 'auth': self.headers.get('Authorization'), 'session_id': self.headers.get('X-Dumate-Session-Id')})
         if len(body.get('tools', [])) > 3 and Fixture.hold_next_body:
             Fixture.hold_next_body = False
             Fixture.body_started.set()

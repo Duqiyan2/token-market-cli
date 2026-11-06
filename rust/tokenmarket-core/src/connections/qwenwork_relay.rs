@@ -256,7 +256,36 @@ async fn handle(
     {
         return error(socket, 403, "Model is outside this connection").await;
     }
-    forward(socket, record, request.body, client, "/v1/chat/completions").await
+    let (name, value) =
+        if let Some(value) = header("x-session-id").filter(|value| !value.trim().is_empty()) {
+            ("X-Session-Id", Some(value))
+        } else {
+            ("session-id", header("session-id"))
+        };
+    let session = match session_id(value) {
+        Ok(session) => session.map(str::to_owned),
+        Err(_) => return error(socket, 400, "Invalid session identifier").await,
+    };
+    forward(
+        socket,
+        record,
+        request.body,
+        client,
+        "/v1/chat/completions",
+        session.as_deref().map(|value| (name, value)),
+    )
+    .await
+}
+
+// Read only an ID supplied by this request, never one cached for a worker or key.
+fn session_id(value: Option<&str>) -> Result<Option<&str>> {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    if value.len() > 256 || !value.bytes().all(|byte| (0x20..=0x7e).contains(&byte)) {
+        bail!("Invalid session identifier")
+    }
+    Ok(Some(value))
 }
 
 async fn forward(
@@ -265,6 +294,7 @@ async fn forward(
     body: Vec<u8>,
     client: &reqwest::Client,
     path: &str,
+    session: Option<(&str, &str)>,
 ) -> Result<()> {
     let endpoint = format!("{}{path}", record.gateway_url.trim_end_matches('/'));
     let mut outbound = client
@@ -273,6 +303,9 @@ async fn forward(
         .header("Content-Type", "application/json");
     if path == "/v1/messages" {
         outbound = outbound.header("anthropic-version", "2023-06-01");
+    }
+    if let Some((name, value)) = session {
+        outbound = outbound.header(name, value);
     }
     let outbound = outbound.body(body).send();
     // An aborted SDK request must also drop the upstream operation, including
@@ -379,6 +412,23 @@ mod tests {
     };
     #[derive(Default)]
     struct Vault(Mutex<Option<String>>);
+    #[test]
+    fn session_identifiers_preserve_identity_and_enforce_header_limits() {
+        assert_eq!(
+            session_id(Some(" session:restored-123 ")).unwrap(),
+            Some("session:restored-123")
+        );
+        assert_eq!(session_id(None).unwrap(), None);
+        assert_eq!(session_id(Some("  ")).unwrap(), None);
+        assert!(session_id(Some(&"s".repeat(256))).is_ok());
+        for value in [
+            "s".repeat(257),
+            "id\r\nX-Other: value".into(),
+            "会话".into(),
+        ] {
+            assert!(session_id(Some(&value)).is_err());
+        }
+    }
     impl DesktopCredentialStore for Vault {
         fn read(&self) -> Result<Option<String>> {
             Ok(self.0.lock().unwrap().clone())
@@ -645,9 +695,18 @@ mod tests {
             stopped,
         ));
         let fixture = tokio::spawn(async move {
-            for round in 0..2 {
+            for round in 0..4 {
                 let (mut stream, _) = upstream.accept().await.unwrap();
                 let received = request(&mut stream).await.unwrap();
+                let expected_session = if round == 2 {
+                    "second-session"
+                } else {
+                    "fixture-session"
+                };
+                assert!(received
+                    .headers
+                    .iter()
+                    .any(|(k, v)| k == "session-id" && v == expected_session));
                 assert_eq!(
                     received
                         .headers

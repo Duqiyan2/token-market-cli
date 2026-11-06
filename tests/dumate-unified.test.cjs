@@ -29,6 +29,18 @@ try {
  else if(process.env.SCENARIO==='empty'){const response=await make('https://official.invalid/v1/chat/completions');assert.equal(response.status,204);assert.equal(await response.text(),'');assert.equal(calls.length,1);}
  else if(process.env.SCENARIO==='upstream-error'){const response=await make('https://official.invalid/v1/chat/completions');assert.equal(response.status,500);assert.match(await response.text(),/fixture/);assert.equal(calls.length,1);}
  else if(process.env.SCENARIO==='already-aborted'){const controller=new AbortController();controller.abort();await assert.rejects(()=>fetch('https://official.invalid/v1/chat/completions',{method:'POST',body:JSON.stringify(payload),signal:controller.signal}));await new Promise(r=>setTimeout(r,30));assert.equal(calls.length,0);}
+ else if(process.env.SCENARIO==='session-isolation'){
+  const send=async(session,headers={})=>{
+   const request=new Request('https://official.invalid/v1/chat/completions',{method:'POST',headers:{'X-Dumate-Session-Id':session,...headers},body:JSON.stringify({...payload,messages:[{role:'user',content:session}]})});
+   await(await fetch(request)).text();
+  };
+  await Promise.all(['chat-a','chat-b','chat-a'].map(id=>send(id)));
+  for(const call of calls){assert.equal(call.headers['x-dumate-session-id'],call.body.messages[0].content);assert.equal(call.headers['x-session-id'],undefined);}
+  await send('native-session',{'X-Session-Id':'explicit-session'});assert.equal(calls.at(-1).headers['x-session-id'],'explicit-session');assert.equal(calls.at(-1).headers['x-dumate-session-id'],'native-session');
+  await send('native-session',{'X-Session-Id':' '});assert.equal(calls.at(-1).headers['x-session-id'],undefined);assert.equal(calls.at(-1).headers['x-dumate-session-id'],'native-session');
+  await(await make('https://official.invalid/v1/chat/completions')).text();assert.equal(calls.at(-1).headers['x-session-id'],undefined);
+  await send('s'.repeat(257));assert.equal(calls.at(-1).headers['x-dumate-session-id'].length,257);
+ }
  else if(['official-media','runtime-1-media'].includes(process.env.SCENARIO)){
   const base='http://127.0.0.1:'+official.address().port;
   for(const endpoint of ['/v1/images/generations','/v1/videos/generations'])await (await make(base+endpoint,{model:'official-media-model',prompt:'fixture'})).text();
@@ -52,7 +64,7 @@ try {
  console.log(JSON.stringify({scenario:process.env.SCENARIO,upstreamCalls:calls.length,forbiddenDestinationCalls:forbidden}));
 } finally {await new Promise(r=>upstream.close(r));await new Promise(r=>evil.close(r));await new Promise(r=>official.close(r));fs.rmSync(root,{recursive:true,force:true});}
 `;
-for(const scenario of ['forward-and-pin','runtime-1','tampered','unsupported','redirect','empty','upstream-error','already-aborted','official-media','runtime-1-media'])test(`DuMate unified adapter ${scenario}`,()=>{
+for(const scenario of ['forward-and-pin','runtime-1','tampered','unsupported','redirect','empty','upstream-error','already-aborted','session-isolation','official-media','runtime-1-media'])test(`DuMate unified adapter ${scenario}`,()=>{
  const result=spawnSync(process.execPath,['--input-type=module','-e',script],{env:{...process.env,SCENARIO:scenario,ADAPTER_SOURCE:path.resolve(__dirname,'../rust/tokenmarket-core/src/dumate/unified/plugin.js')},encoding:'utf8',timeout:20000});
  assert.equal(result.status,0,result.stderr);const report=JSON.parse(result.stdout.trim());assert.equal(report.forbiddenDestinationCalls,0);
 });

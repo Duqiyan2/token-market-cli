@@ -71,7 +71,7 @@ async function bodyText(input, init) {
   }
   throw Error('无法识别模型请求，已阻止回退到官方模型。');
 }
-function forward(provider, payload, signal) {
+function forward(provider, payload, signal, sessionHeaders) {
   const target = new URL(provider.baseURL + '/chat/completions');
   const bytes = Buffer.from(JSON.stringify(payload));
   return new Promise((resolve, reject) => {
@@ -79,6 +79,7 @@ function forward(provider, payload, signal) {
       method: 'POST', agent: false, headers: {
         'Content-Type': 'application/json', 'Accept-Encoding': 'identity',
         Authorization: 'Bearer ' + provider.apiKey, 'Content-Length': bytes.length,
+        ...sessionHeaders,
       },
     }, response => {
       if (response.statusCode >= 300 && response.statusCode < 400) {
@@ -157,7 +158,14 @@ function createAdapter() {
       payload.max_completion_tokens = Math.min(selected.outputLimit, Number.isSafeInteger(payload.max_completion_tokens) && payload.max_completion_tokens > 0 ? payload.max_completion_tokens : selected.outputLimit);
       delete payload.max_tokens;
     } else payload.max_tokens = Math.min(selected.outputLimit, Number.isSafeInteger(payload.max_tokens) && payload.max_tokens > 0 ? payload.max_tokens : selected.outputLimit);
-    return forward(selected, payload, init?.signal ?? (input instanceof Request ? input.signal : undefined));
+    // Preserve native request identity; the gateway owns alias normalization.
+    const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+    const sessionHeaders = {};
+    for (const name of ['X-Session-Id', 'X-Dumate-Session-Id']) {
+      const value = headers.get(name);
+      if (value?.trim()) sessionHeaders[name] = value;
+    }
+    return forward(selected, payload, init?.signal ?? (input instanceof Request ? input.signal : undefined), sessionHeaders);
   }
   // Scope is this DuMate engine only. The private gateway function always uses node:http(s)
   // directly; environment/system proxies and Baidu cookies never receive the platform key.

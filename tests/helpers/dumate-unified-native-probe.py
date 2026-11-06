@@ -13,7 +13,7 @@ class Fixture(fixture.Fixture):
   size=int(self.headers.get('Content-Length','0'));raw=self.rfile.read(size);original=self.rfile;self.payload=json.loads(raw or '{}');self.rfile=io.BytesIO(raw)
   try:
    if self.reject_models and 'chat/completions' in self.path:
-    self.calls.append({'path':self.path,'body':self.payload,'auth':self.headers.get('Authorization')});self.send_response(400);self.send_header('Content-Type','application/json');self.end_headers();self.wfile.write(b'{"error":{"message":"isolated upstream failure"}}');return
+    self.calls.append({'path':self.path,'body':self.payload,'auth':self.headers.get('Authorization'),'session_id':self.headers.get('X-Dumate-Session-Id')});self.send_response(400);self.send_header('Content-Type','application/json');self.end_headers();self.wfile.write(b'{"error":{"message":"isolated upstream failure"}}');return
    super().do_POST()
   finally:self.rfile=original
  def reply(self,body,mime='application/json'):
@@ -95,6 +95,9 @@ def run(root,runtime='0'):
   if unified:
    assert all(c['path']==expected_path and c['auth']=='Bearer '+expected_key for c in calls)
    assert all(c['body'].get('max_tokens',4096)<=4096 for c in calls)
+   body_calls=[c for c in calls if len(c['body'].get('tools',[]))>3]
+   assert body_calls and all(c.get('session_id') for c in body_calls),'Native model request lost its session ID'
+   if stage!='actual_subagent_tool_execution':assert all(c['session_id']==sid for c in body_calls),'Main session ID changed'
   stages.append({'stage':stage,'body_model':expected,'actual_model_calls':len(calls),'all_calls_pinned':all(c['body']['model']==expected for c in calls)})
  try:
   with launch('before',False) as (engine,_):
@@ -124,11 +127,13 @@ def run(root,runtime='0'):
     assert all(c['body']['model']=='fixture-one' for c in calls if c['path']=='/platform/v1/chat/completions')
     stages.append({'stage':mime.split('/')[0]+'_uses_native_official_route','official_model_calls':len(official),'platform_key_on_media':False})
    prompt(engine,old,'actual_subagent_tool_execution','fixture-one',True,text='TM_SPAWN_CHILD: delegate one small check to an explore subagent, then reply.')
-   sessions=request(engine,'/session');assert any(row.get('parentID')==old for row in sessions),'No actual child session was created'
+   sessions=request(engine,'/session');children=[row['id'] for row in sessions if row.get('parentID')==old];assert children,'No actual child session was created'
+   assert any(c.get('session_id') in children for c in Fixture.calls),'Child session lost its own ID'
    before=len(Fixture.calls)
    request(engine,'/session/'+old+'/summarize',{'providerID':'QianfanPersonalQuota','modelID':'glm-5'})
    summary=[c for c in Fixture.calls[before:] if 'chat/completions' in c['path']]
    assert summary and all(c['body']['model']=='fixture-one' and c['path']=='/platform/v1/chat/completions' for c in summary),'Summary bypassed the selected model'
+   assert all(c.get('session_id')==old for c in summary),'Summary lost the native session ID'
    stages.append({'stage':'explicit_summary','actual_model_calls':len(summary),'all_calls_pinned':True})
    save(selected('fixture-two'));prompt(engine,old,'saving_without_restart_keeps_active_snapshot','fixture-one',True)
    before=len(Fixture.calls);Fixture.reject_models=True

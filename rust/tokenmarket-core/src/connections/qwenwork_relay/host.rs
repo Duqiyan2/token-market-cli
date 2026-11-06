@@ -2,6 +2,7 @@
 //! credential broker a loopback capability and base URL, never a platform key.
 use super::*;
 use crate::qwenwork_runtime::HostRoute;
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 
 pub(super) async fn run(args: &[String]) -> Result<()> {
     if args.len() != 4 {
@@ -159,15 +160,30 @@ async fn handle(
     if path == "api/desktop-sessions" {
         // The app supplies its official login token here. It is deliberately
         // neither persisted nor forwarded. Only the unguessable URL grants access.
-        let session = body["session_id"]
-            .as_str()
-            .filter(|s| !s.trim().is_empty())
+        let session = match session_id(body["session_id"].as_str()) {
+            Ok(session) => session,
+            Err(_) => return error(socket, 400, "Invalid session identifier").await,
+        };
+        // The desktop captures fetch and does not send its session ID on inference.
+        // Its credential broker is scoped by session, so return a scoped URL. No
+        // mutable process-wide "current session" can mix simultaneous chats.
+        let base_url = session.map_or_else(
+            || route.base_url(),
+            |session| {
+                format!(
+                    "{}/sessions/{}",
+                    route.base_url(),
+                    URL_SAFE_NO_PAD.encode(session)
+                )
+            },
+        );
+        let response_session = session
             .map(str::to_owned)
             .unwrap_or_else(|| crate::auth::create_pkce().code_verifier);
         return json_response(
             socket,
-            json!({"access_token":route.capability,"base_url":route.base_url(),
-            "session_id":session,"expires_at_ms":0,"ttl_ms":0}),
+            json!({"access_token":route.capability,"base_url":base_url,
+            "session_id":response_session,"expires_at_ms":0,"ttl_ms":0}),
         )
         .await;
     }
@@ -177,6 +193,29 @@ async fn handle(
     ) {
         return error(socket, 403, "Desktop relay authorization failed").await;
     }
+    let scoped_session;
+    let (path, name, session) = if let Some(scoped) = path.strip_prefix("sessions/") {
+        let Some((encoded, path)) = scoped.split_once('/') else {
+            return error(socket, 400, "Invalid session route").await;
+        };
+        scoped_session = match URL_SAFE_NO_PAD
+            .decode(encoded)
+            .ok()
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+        {
+            Some(session) => session,
+            None => return error(socket, 400, "Invalid session route").await,
+        };
+        (path, "X-Session-Id", Some(scoped_session.as_str()))
+    } else if let Some(value) = header("x-session-id").filter(|value| !value.trim().is_empty()) {
+        (path, "X-Session-Id", Some(value))
+    } else {
+        (path, "session-id", header("session-id"))
+    };
+    let session = match session_id(session) {
+        Ok(session) => session,
+        Err(_) => return error(socket, 400, "Invalid session identifier").await,
+    };
     let protocol = match path {
         "v1/chat/completions" => "OPENAI_CHAT_COMPLETIONS",
         "v1/messages" => "ANTHROPIC_MESSAGES",
@@ -247,6 +286,7 @@ async fn handle(
         serde_json::to_vec(&body)?,
         client,
         &format!("/{path}"),
+        session.map(|value| (name, value)),
     )
     .await
 }
@@ -382,13 +422,27 @@ mod tests {
         let app = std::path::Path::new("/Applications/QwenWorkCN.app");
         let use_desktop = app.join("Contents/Resources/app.asar").is_file();
         let fixture = tokio::spawn(async move {
-            for _ in 0..if use_desktop { 5 } else { 2 } {
+            for _ in 0..if use_desktop { 15 } else { 2 } {
                 let (mut socket, _) = upstream.accept().await.unwrap();
                 let req = request(&mut socket).await.unwrap();
                 assert_eq!(req.path, "/v1/chat/completions");
                 assert!(req.headers.iter().any(|(k, v)| k == "authorization"
                     && v == "Bearer sk-platform-key-never-given-to-qwen"));
                 let body: Value = serde_json::from_slice(&req.body).unwrap();
+                let expected_session = if use_desktop {
+                    body["messages"][0]["content"]
+                        .as_str()
+                        .unwrap()
+                        .split(':')
+                        .next()
+                        .unwrap()
+                } else {
+                    "fixture-session"
+                };
+                assert!(req
+                    .headers
+                    .iter()
+                    .any(|(k, v)| k == "x-session-id" && v == expected_session));
                 assert_eq!(body["model"], "fixture-model");
                 assert_eq!(body["stream"], false);
                 let text = String::from_utf8(req.body).unwrap();
@@ -443,7 +497,8 @@ mod tests {
             .unwrap();
         assert_eq!(minted["session_id"], "fixture-session");
         assert_eq!(minted["access_token"], route.capability);
-        assert_eq!(minted["base_url"], base);
+        let scoped_base = minted["base_url"].as_str().unwrap();
+        assert!(scoped_base.starts_with(&format!("{base}/sessions/")));
         assert!(!minted.to_string().contains("sk-platform"));
         if use_desktop {
             let output = tokio::task::spawn_blocking({
@@ -475,7 +530,7 @@ mod tests {
             assert!(String::from_utf8_lossy(&output.stdout).contains("PASS:"));
         } else {
             for alias in ["lite", "flash"] {
-                let response = client.post(format!("{base}/v1/chat/completions")).bearer_auth(&route.capability)
+                let response = client.post(format!("{scoped_base}/v1/chat/completions")).bearer_auth(&route.capability)
                 .json(&json!({"model":alias,"messages":[{"role":"user","content":"fixture"}],"stream":false}))
                 .send().await.unwrap();
                 assert_eq!(response.status(), 200);
