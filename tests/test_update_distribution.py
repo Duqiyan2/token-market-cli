@@ -241,6 +241,33 @@ class DistributionCommand(unittest.TestCase):
                              b'final-signed-app-fixture-after-platform-signing')
         self.assertEqual({p.name for p in output.iterdir()}, {'TokenMarket.app.tar.gz', 'TokenMarket.app.tar.gz.sig', 'prepared.json'})
 
+    @unittest.skipUnless(sys.platform == 'darwin' and os.environ.get('TOKEN_MARKET_TEST_TAURI_SIGNER'),
+                         'requires macOS and the real Tauri signer')
+    def test_prepare_verifies_real_macos_certificate_and_signed_version(self):
+        # Public, inert signed fixture; no release identity or keychain is opened.
+        with tarfile.open(FIXTURES / 'macos/update.tar.gz') as archive:
+            archive.extractall(self.root)
+        evidence = self.root / 'platform-signing.json'
+        fingerprint = 'ebab968238955f3876bccc0dbebc74b3f70d08e7'
+        evidence.write_text(json.dumps(dict(profile='production', certificateSha1=fingerprint, notarized=False)))
+        signer = os.environ['TOKEN_MARKET_TEST_TAURI_SIGNER']
+        key = self.root / 'disposable.key'
+        generated = subprocess.run([signer, 'signer', 'generate', '--ci', '--password', '', '--write-keys', str(key)],
+                                   text=True, capture_output=True)
+        self.assertEqual(generated.returncode, 0, 'Disposable fixture key generation failed')
+        target = Path(os.environ.get('CARGO_TARGET_DIR', ROOT / 'src-tauri/target'))
+        output = self.root / 'prepared'
+        result = self.command('prepare', '--version', '1.1.0', '--target', 'darwin-aarch64',
+            '--app', str(self.root / 'Token Market.app'), '--output', str(output),
+            '--public-key', str(key.with_name(key.name + '.pub')), '--platform-evidence', str(evidence),
+            '--signer', signer, '--verifier', str(target / 'debug/examples/verify-update-artifacts'),
+            env={'TAURI_SIGNING_PRIVATE_KEY': key.read_text(), 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD': ''})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        receipt = json.loads((output / 'prepared.json').read_text())
+        self.assertTrue(receipt['platform_signing']['verified'])
+        self.assertEqual(receipt['platform_signing']['certificate_sha1'], fingerprint)
+        self.assertFalse(receipt['platform_signing']['notarized'])
+
     def test_unavailable_truncated_or_transformed_public_objects_never_advance_discovery(self):
         for fault in ['404', 'truncated', 'encoding', 'cache']:
             with self.subTest(fault=fault), self.served_store(fault=fault) as (store, base):

@@ -303,7 +303,8 @@ def platform_signing(args, app, artifact, temporary):
                 'Production macOS signing manifest/certificateSha1 is required')
         child(['/usr/bin/codesign', '--verify', '--deep', '--strict', app], label='Final macOS application signature verification')
         cert = Path(temporary) / 'certificate'
-        child(['/usr/bin/codesign', '-d', '--extract-certificates', cert, app], label='macOS signing identity extraction')
+        # codesign's optional prefix must be attached; a separate argv is a code path.
+        child(['/usr/bin/codesign', '-d', '--extract-certificates=' + str(cert), app], label='macOS signing identity extraction')
         certificate = cert.with_name(cert.name + '0')
         actual = hashlib.sha1(certificate.read_bytes()).hexdigest()
         require(actual.lower() == expected['certificateSha1'].lower(), 'macOS signing identity mismatch')
