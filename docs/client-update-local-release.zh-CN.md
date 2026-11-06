@@ -15,7 +15,10 @@
 - Windows：x64 当前用户 NSIS `.exe`；可在 Mac 上交叉构建，不要求有 Windows 电脑。
 - 官网入口 `/download` 自动识别 Windows/Mac；手机、iPad、Linux 显示手动选择。
 - Mac 当前只提供 Apple Silicon 包，入口会说明 Intel Mac 暂不支持。
-- 官网固定包名不含版本号；应用内更新使用不可变的版本包和签名。
+- 官网下载链接不含版本号；保存到电脑的安装包文件名带版本号，便于保留多个版本。
+  官网与归档安装器的下载文件名由 OSS `Content-Disposition` 指定，例如
+  `TokenMarket-1.1.0-mac-arm64.dmg`、`TokenMarket-1.1.0-windows-x64.exe`，由发布脚本按本次版本自动生成。
+  应用内更新使用不可变的版本包和签名。
 - 保持已上线的目录，不再为缩短在线更新路径迁移目录。
 - 不生成“官方安装包与恢复说明”网页；已有原生恢复协议属于另一个技术边界。
 
@@ -174,13 +177,15 @@ python3 scripts/release-desktop.py metadata --config "$PRIVATE_CONFIG"   --plan 
 | 对象 | Content-Type | Cache-Control |
 | --- | --- | --- |
 | `download` | `text/html; charset=utf-8`，inline | `no-cache, no-store, max-age=0, must-revalidate` |
-| 官网根目录 `.dmg` / `.exe` | `application/octet-stream`，固定下载文件名 | 同上 |
+| 官网根目录 `.dmg` / `.exe` | `application/octet-stream`，下载文件名带本次版本号 | 同上 |
 | `stable.json` | `application/json` | 同上 |
-| 版本目录 `.dmg` / `.exe` | `application/octet-stream` | `public, max-age=31536000, immutable` |
+| 版本目录 `.dmg` / `.exe` | `application/octet-stream`，下载文件名带该版本号 | `public, max-age=31536000, immutable` |
 | 版本目录 `.app.tar.gz` | `application/gzip` | 同上 |
 | `.sig` | `text/plain` | 同上 |
 
 Content-Encoding 留空，尤其不能给已签名压缩包设置 `gzip` 后再转换字节。
+只调整下载文件名时，用当前发布计划执行 `metadata`，选择官网与归档的 `.dmg` / `.exe` 四个对象；
+无需重新构建、上传安装包或改写清单。发布计划旧记录中的下载属性会按计划版本重新计算。
 当前版本与清单相等时，两平台都应显示已是最新版本；较低版本应发现目标版本。
 官网固定包替换不能代替更新 `stable.json`，清单也不能引用会被覆盖的根目录固定包。
 

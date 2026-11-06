@@ -6,6 +6,7 @@ This module owns the nine-file website + updater layout used by current releases
 from contextlib import ExitStack, contextmanager
 import configparser
 from datetime import datetime, timezone
+from email.message import Message
 import hashlib
 import importlib.util
 import json
@@ -83,12 +84,15 @@ def config_at(path, fixture=False):
     return config
 
 
-def metadata(key, manifest_key):
+def metadata(key, manifest_key, version):
     kind = ('text/html; charset=utf-8' if key == 'download' else 'application/json' if key == manifest_key
             else 'text/plain' if key.endswith('.sig') else 'application/gzip' if key.endswith('.tar.gz')
             else 'application/octet-stream')
+    filename = Path(key).name
+    if filename in (MAC, WIN):
+        filename = filename.replace('TokenMarket-', 'TokenMarket-' + version + '-', 1)
     return dict(content_type=kind, content_disposition='inline' if key in ('download', manifest_key)
-        else 'attachment; filename="' + Path(key).name + '"',
+        else 'attachment; filename="' + filename + '"',
         cache_control=IMMUTABLE if key.startswith('releases/') else DISCOVERY)
 
 
@@ -173,7 +177,7 @@ def stage(args, config):
             if file.is_file():
                 key = str(file.relative_to(public))
                 objects.append(dict(object_key=key, url=config['_origin'] + '/' + key,
-                    sha256=digest(file), size=file.stat().st_size, **metadata(key, config['_manifest_key'])))
+                    sha256=digest(file), size=file.stat().st_size, **metadata(key, config['_manifest_key'], version)))
         plan = dict(schema_version=1, fixture=fixture, version=version, source_commit=macbuild['source_commit'],
             objects=objects, signing_public_key_sha256=hashlib.sha256(Path(config['public_key_file']).read_text().strip().encode()).hexdigest(),
             windows_authenticode_signed=code_signed, macos_notarized=mac['platform_signing'].get('notarized') is True,
@@ -199,7 +203,7 @@ def load_plan(args, config):
         require(file.is_file() and not file.is_symlink() and public in file.resolve().parents, 'Public file missing or escaped staging directory: ' + key)
         require(file.stat().st_size == obj['size'] and digest(file) == obj['sha256'], 'Staged file bytes changed: ' + key)
         require(obj['url'] == config['_origin'] + '/' + key, 'Public URL mismatch: ' + key)
-        obj.update(metadata(key, manifest_key), path=str(file))
+        obj.update(metadata(key, manifest_key, version), path=str(file))
     manifest = read_json(public / manifest_key)
     require(manifest['version'] == version and set(manifest['platforms']) == set(api.TARGETS), 'Manifest version/platform mismatch')
     probes = []
@@ -242,8 +246,11 @@ def verify_remote(obj, manifest_key, *, headers=True):
         require(all(v.strip().lower() in cache for v in obj['cache_control'].split(',')), 'Public cache headers differ: ' + obj['object_key'])
         if obj['object_key'] == 'download':
             require('attachment' not in meta.get('Content-Disposition', '').lower() and meta.get('x-oss-force-download', '').lower() != 'true', 'Download page forced to attachment')
-        if obj['object_key'] in (MAC, WIN):
-            require(obj['object_key'] in meta.get('Content-Disposition', ''), 'Fixed download filename header differs')
+        if Path(obj['object_key']).name in (MAC, WIN):
+            expected = Message()
+            expected['Content-Disposition'] = obj['content_disposition']
+            require(meta.get_content_disposition() == 'attachment' and meta.get_filename() == expected.get_filename(),
+                    'Installer download filename header differs: ' + obj['object_key'])
 
 
 def credentials(config, fixture):
@@ -265,7 +272,7 @@ def put(args, config, obj, *, metadata_only=False):
         if not metadata_only:
             shutil.copyfile(obj['path'], file)
         values = read_json(store / 'metadata.json') if (store / 'metadata.json').is_file() else {}
-        values[obj['object_key']] = metadata(obj['object_key'], config['_manifest_key'])
+        values[obj['object_key']] = {field: obj[field] for field in ('content_type', 'content_disposition', 'cache_control')}
         (store / 'metadata.json').write_text(json.dumps(values), encoding='utf-8')
         with (store / 'operations.jsonl').open('a') as stream:
             stream.write(json.dumps(dict(key=obj['object_key'], metadata_only=metadata_only)) + '\n')

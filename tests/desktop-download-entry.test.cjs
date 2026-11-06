@@ -19,7 +19,7 @@ before(async () => {
     } else if (['/TokenMarket-mac-arm64.dmg', '/TokenMarket-windows-x64.exe'].includes(request.url)) {
       downloads++;
       response.setHeader('Content-Type', 'application/octet-stream');
-      response.setHeader('Content-Disposition', `attachment; filename="${request.url.slice(1)}"`);
+      response.setHeader('Content-Disposition', `attachment; filename="${request.url.slice(1).replace('TokenMarket-', 'TokenMarket-1.1.0-')}"`);
       response.end('inert-downloaded-fixture');
     } else {
       response.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -59,7 +59,7 @@ for (const scenario of scenarios) test(`website download entry handles ${scenari
       await page.getByRole('link', {name: '下载客户端', exact: true}).click();
       const download = await pending;
       assert.equal(download.url(), origin + '/' + scenario.file);
-      assert.equal(download.suggestedFilename(), scenario.file);
+      assert.equal(download.suggestedFilename(), scenario.file.replace('TokenMarket-', 'TokenMarket-1.1.0-'));
       assert.equal(fs.readFileSync(await download.path(), 'utf8'), 'inert-downloaded-fixture');
       assert.equal(downloads, 1);
       await download.delete();
@@ -71,7 +71,7 @@ for (const scenario of scenarios) test(`website download entry handles ${scenari
       if (scenario.name === 'Linux') {
         const pending = page.waitForEvent('download');
         await page.getByRole('link', {name: /下载 Windows 版/}).click();
-        assert.equal((await pending).suggestedFilename(), 'TokenMarket-windows-x64.exe');
+        assert.equal((await pending).suggestedFilename(), 'TokenMarket-1.1.0-windows-x64.exe');
       }
     }
     assert.deepEqual(errors, []);

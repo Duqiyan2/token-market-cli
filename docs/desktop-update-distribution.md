@@ -16,7 +16,10 @@ first packages, subsequent releases, retries, metadata repair and cleanup.
 | `scripts/desktop-update-release.py`, `desktop_update_local.py` | Low-level preparation/signature verification and strict native candidate/acceptance tooling |
 | `src-tauri/examples/verify-update-artifacts.rs` | Official updater 2.14.1 artifact + static manifest parser protocol; no installation |
 
-The public website uses fixed unversioned installer names. The application reads
+The public website uses fixed unversioned installer URLs. Both website aliases and
+archived installers use versioned browser-save filenames via Content-Disposition,
+such as `TokenMarket-1.1.0-mac-arm64.dmg`, generated from the release plan's version.
+The application reads
 `desktop-updates/production/stable.json`, whose URLs name immutable packages under
 `releases/VERSION/`. Earlier OSS hash paths remain compatibility links. Do not move
 an online directory merely to shorten an application-internal URL.

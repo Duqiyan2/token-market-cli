@@ -120,6 +120,28 @@ class PublishingCommand(unittest.TestCase):
         self.assertFalse((self.store / 'desktop-updates/production/stable.json').exists())
         self.assertFalse((self.store / 'TokenMarket-windows-x64.exe').exists())
 
+    def test_download_filenames_include_version_without_changing_urls_or_installer_bytes(self):
+        result = self.command('publish')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        values = json.loads((self.store / 'metadata.json').read_text())
+        for key, filename in [
+            ('TokenMarket-mac-arm64.dmg', 'TokenMarket-1.1.0-mac-arm64.dmg'),
+            ('TokenMarket-windows-x64.exe', 'TokenMarket-1.1.0-windows-x64.exe'),
+            ('releases/1.1.0/TokenMarket-mac-arm64.dmg', 'TokenMarket-1.1.0-mac-arm64.dmg'),
+            ('releases/1.1.0/TokenMarket-windows-x64.exe', 'TokenMarket-1.1.0-windows-x64.exe'),
+        ]:
+            self.assertEqual(values[key]['content_disposition'], 'attachment; filename="' + filename + '"')
+        key = 'TokenMarket-windows-x64.exe'
+        before = (self.store / key).read_bytes()
+        values[key]['content_disposition'] = 'attachment; filename="TokenMarket-windows-x64.exe"'
+        (self.store / 'metadata.json').write_text(json.dumps(values))
+        checked = self.command('check')
+        self.assertNotEqual(checked.returncode, 0)
+        self.assertIn('download filename header differs', checked.stderr)
+        repaired = self.command('metadata', '--key', key)
+        self.assertEqual(repaired.returncode, 0, repaired.stderr)
+        self.assertEqual((self.store / key).read_bytes(), before)
+
     def test_newer_stable_prevents_old_release_writes(self):
         path = self.store / 'desktop-updates/production/stable.json'
         path.parent.mkdir(parents=True)
