@@ -72,6 +72,10 @@ impl From<String> for ConnectFailure {
         }
     }
 }
+fn connection_preflight_error(tool: tokenmarket_core::ToolId, message: String) -> ConnectFailure {
+    tokenmarket_core::diagnostics::preflight_failure(tool, &anyhow::anyhow!(message.clone()));
+    message.into()
+}
 fn connection_error(
     error: anyhow::Error,
     owner: &tokenmarket_core::desktop::DesktopIdentity,
@@ -134,17 +138,22 @@ pub async fn reconnect_tool(
     recovery: Option<RecoveryTarget>,
 ) -> Result<ReconnectOutcome, ConnectFailure> {
     let tool = tokenmarket_core::tool_id(&tool).map_err(|e| e.to_string())?;
-    let (session, workspace) = current_context(&app)?;
+    let (session, workspace) =
+        current_context(&app).map_err(|message| connection_preflight_error(tool, message))?;
     if session.user.id != expected_owner_id || workspace.id != expected_workspace_id {
-        return Err("账号或当前空间已改变，请重新确认接入归属"
-            .to_string()
-            .into());
+        return Err(connection_preflight_error(
+            tool,
+            "账号或当前空间已改变，请重新确认接入归属".into(),
+        ));
     }
     let inventory = ToolInventory::current();
     let path = inventory.config_path(tool);
     if let Some(target) = recovery {
         if target.owner_id != session.user.id || target.workspace_id != workspace.id {
-            return Err("账号或空间已改变，请重新确认".to_string().into());
+            return Err(connection_preflight_error(
+                tool,
+                "账号或空间已改变，请重新确认".into(),
+            ));
         }
         return app
             .state::<ConnectionManager>()
@@ -189,15 +198,16 @@ pub async fn connect_tool(
 ) -> Result<ConnectionSummary, ConnectFailure> {
     let tool = tokenmarket_core::tool_id(&tool).map_err(|e| e.to_string())?;
     // Capture one operation context; later header changes never rebind this action.
-    let (session, workspace) = current_context(&app)?;
+    let (session, workspace) =
+        current_context(&app).map_err(|message| connection_preflight_error(tool, message))?;
     let inventory = ToolInventory::current();
-    inventory
-        .require_installed(tool)
-        .map_err(|e| e.to_string())?;
     let path = inventory.config_path(tool);
     if let Some(target) = recovery {
         if target.owner_id != session.user.id || target.workspace_id != workspace.id {
-            return Err("账号或空间已改变，请重新确认".to_string().into());
+            return Err(connection_preflight_error(
+                tool,
+                "账号或空间已改变，请重新确认".into(),
+            ));
         }
         return app
             .state::<ConnectionManager>()
@@ -297,7 +307,8 @@ pub async fn prepare_dumate_models(
     app: AppHandle,
     target: DuMateModelTarget,
 ) -> Result<tokenmarket_core::connections::ConnectionModels, ConnectFailure> {
-    let (context, owner, workspace) = dumate_context(&app, &target)?;
+    let (context, owner, workspace) = dumate_context(&app, &target)
+        .map_err(|message| connection_preflight_error(tokenmarket_core::ToolId::DuMate, message))?;
     let inventory = ToolInventory::current();
     app.state::<ConnectionManager>()
         .prepare_dumate_models(
@@ -317,7 +328,8 @@ pub async fn configure_dumate_model(
     target: DuMateModelTarget,
     model: String,
 ) -> Result<ReconnectOutcome, ConnectFailure> {
-    let (context, owner, workspace) = dumate_context(&app, &target)?;
+    let (context, owner, workspace) = dumate_context(&app, &target)
+        .map_err(|message| connection_preflight_error(tokenmarket_core::ToolId::DuMate, message))?;
     let inventory = ToolInventory::current();
     app.state::<ConnectionManager>()
         .configure_dumate_model(
@@ -347,7 +359,7 @@ pub async fn restart_dumate(
 ) -> Result<tokenmarket_core::dumate_restart::RestartOutcome, String> {
     tokenmarket_core::dumate_restart::restart_current(force)
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|error| format!("{error:#}"))
 }
 
 #[tauri::command]

@@ -177,9 +177,13 @@ pub(super) fn install_plan(
         bail!("官方安装方案不支持当前架构 {arch}")
     }
     let windows = env.platform == HostPlatform::Windows;
-    let script_first = matches!(tool, ToolId::GrokBuild | ToolId::MiniMaxCode)
-        || (!windows && matches!(tool, ToolId::ClaudeCode | ToolId::OpenCode));
-    let script_only = matches!(tool, ToolId::Hermes | ToolId::KimiCode | ToolId::OhMyPi);
+    let native_windows =
+        windows && matches!(tool, ToolId::ClaudeCode | ToolId::Codex | ToolId::GrokBuild);
+    let script_first = !native_windows
+        && (matches!(tool, ToolId::GrokBuild | ToolId::MiniMaxCode)
+            || (!windows && matches!(tool, ToolId::ClaudeCode | ToolId::OpenCode)));
+    let script_only =
+        native_windows || matches!(tool, ToolId::Hermes | ToolId::KimiCode | ToolId::OhMyPi);
     let (method, command) = if script_first {
         let installer = installer_command(tool, env)?;
         let npm = npm_command(tool, env)?;

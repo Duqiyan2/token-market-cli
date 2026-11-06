@@ -26,6 +26,7 @@ use crate::{
     ToolId,
 };
 use anyhow::{bail, Context, Result};
+pub(crate) use kimi::is_legacy_version as legacy_kimi_version;
 use serde::Serialize;
 use std::{
     collections::BTreeMap,
@@ -262,7 +263,11 @@ impl InstallExecutor for NativeInstallExecutor {
         )?;
         lines
             .into_iter()
-            .find(|line| !line.trim().is_empty())
+            .find(|line| {
+                !line.trim().is_empty()
+                    && !line.starts_with("执行命令：")
+                    && !line.starts_with("安装程序退出：")
+            })
             .context("无法读取已安装版本")
     }
     fn application_version(&self, application: &Path) -> Result<Option<String>> {
@@ -297,7 +302,11 @@ impl InstallExecutor for NativeInstallExecutor {
                 &mut |line| lines.push(line),
                 Some(Duration::from_secs(15)),
             )?;
-            Ok(lines.into_iter().find(|line| !line.trim().is_empty()))
+            Ok(lines.into_iter().find(|line| {
+                !line.trim().is_empty()
+                    && !line.starts_with("执行命令：")
+                    && !line.starts_with("安装程序退出：")
+            }))
         }
         #[cfg(not(windows))]
         {
@@ -352,6 +361,13 @@ fn run_process_observed(
     if cancelled.load(Ordering::SeqCst) {
         bail!("安装已取消")
     }
+    output(format!(
+        "执行命令：{program:?} {}",
+        args.iter()
+            .map(|arg| format!("{arg:?}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    ));
     let mut command = background_command(program);
     command
         .args(args)
@@ -370,9 +386,10 @@ fn run_process_observed(
         use std::os::unix::process::CommandExt;
         command.process_group(0);
     }
-    let mut child = command
-        .spawn()
-        .with_context(|| format!("无法启动安装程序 {program}"))?;
+    let mut child = command.spawn().map_err(|error| {
+        output(format!("无法启动安装程序 {program}：{error}"));
+        anyhow::anyhow!("无法启动安装程序 {program}：{error}")
+    })?;
     let (sender, receiver) = mpsc::channel();
     for reader in [
         child
@@ -389,12 +406,24 @@ fn run_process_observed(
     {
         let sender = sender.clone();
         std::thread::spawn(move || {
-            for line in BufReader::new(reader)
-                .lines()
-                .map_while(std::result::Result::ok)
-            {
-                if sender.send(line).is_err() {
-                    break;
+            let mut reader = BufReader::new(reader);
+            let mut bytes = Vec::new();
+            loop {
+                bytes.clear();
+                match reader.read_until(b'\n', &mut bytes) {
+                    Ok(0) => break,
+                    Ok(_) => {
+                        let line = String::from_utf8_lossy(&bytes)
+                            .trim_end_matches(['\r', '\n'])
+                            .to_owned();
+                        if sender.send(line).is_err() {
+                            break;
+                        }
+                    }
+                    Err(error) => {
+                        let _ = sender.send(format!("读取安装输出失败：{error}"));
+                        break;
+                    }
                 }
             }
         });
@@ -437,6 +466,7 @@ fn run_process_observed(
                 output(line);
             }
             observe();
+            output(format!("安装程序退出：{status}"));
             if !status.success() {
                 bail!("安装程序失败（{status}），请查看输出后重试")
             }
@@ -664,7 +694,12 @@ impl InstallationManager {
             bail!("升级入口或方案已改变，请重新检查并确认")
         }
         let operation_lock = installation_lock(&self.environment, tool)?;
-        if self.environment.command_path(tool.command()).as_ref() != Some(&target.probe) {
+        let active_path = if tool == ToolId::QwenWork {
+            ToolInventory::new(self.environment.clone()).application_path(tool)
+        } else {
+            self.environment.command_path(tool.command())
+        };
+        if active_path.as_ref() != Some(&target.probe) {
             bail!("工具安装路径已改变，请重新检查更新");
         }
         self.ensure_node_requirement(tool)?;
@@ -695,7 +730,11 @@ impl InstallationManager {
             output: vec![],
             output_sequence: 0,
             download_progress: None,
-            detail: format!("正在准备升级至官方最新版 {}", target.plan.version),
+            detail: if tool == ToolId::QwenWork {
+                "正在准备下载更新".into()
+            } else {
+                format!("正在准备升级至官方最新版 {}", target.plan.version)
+            },
             installed: true,
             version: Some(target.plan.version.clone()),
         };
@@ -717,13 +756,18 @@ impl InstallationManager {
         }
         let manager = self.clone();
         std::thread::spawn(move || {
-            let result = (|| -> Result<String> {
+            let result = (|| -> Result<Option<String>> {
                 if target.managed {
                     attempt::begin_operation(&manager.environment, &target.plan, true)?;
                 }
                 manager.execute_steps(&target.plan, &cancelled, true)?;
                 if cancelled.load(Ordering::SeqCst) {
                     bail!("升级已取消；可以重新检查更新后重试");
+                }
+                if tool == ToolId::QwenWork {
+                    // Native installation is the user's action. Release the task
+                    // just like desktop new-install downloads; no completion claim.
+                    return Ok(None);
                 }
                 manager.update(tool, |state| {
                     state.stage = InstallStage::Detecting;
@@ -742,17 +786,22 @@ impl InstallationManager {
                 if target.managed {
                     attempt::complete(&manager.environment, tool)?;
                 }
-                Ok(actual)
+                Ok(Some(actual))
             })();
             let installed = ToolInventory::new(manager.environment.clone()).is_installed(tool);
             drop(operation_lock);
             manager.update(tool, |state| {
                 state.installed = installed;
                 match result {
-                    Ok(actual) => {
+                    Ok(Some(actual)) => {
                         state.stage = InstallStage::Succeeded;
                         state.version = Some(actual);
                         state.detail = "升级完成，请重新打开工具；原有连接保持不变".into();
+                    }
+                    Ok(None) => {
+                        state.stage = InstallStage::InstallerOpened;
+                        state.version = None;
+                        state.detail = "下载完成".into();
                     }
                     Err(error) => {
                         state.stage = if cancelled.load(Ordering::SeqCst) {
@@ -1014,7 +1063,11 @@ impl InstallationManager {
             );
             if result.is_ok() && step.stage == InstallStage::WaitingForUser {
                 self.update(plan.tool, |state| {
-                    state.detail = gui::instructions(plan.tool, self.environment.platform).into();
+                    state.detail = if upgrading && plan.tool == ToolId::QwenWork {
+                        "下载完成".into()
+                    } else {
+                        gui::instructions(plan.tool, self.environment.platform).into()
+                    };
                 });
             }
             let observed = attempt::observe(&self.environment, plan.tool);
@@ -1113,4 +1166,32 @@ fn safe_output(line: &str) -> String {
         .filter(|character| !character.is_control() || *character == '\t')
         .take(2048)
         .collect()
+}
+
+#[cfg(all(test, unix))]
+mod process_output_tests {
+    use super::*;
+
+    #[test]
+    fn failed_installer_keeps_errors_after_non_utf8_output() {
+        let mut lines = Vec::new();
+        let result = run_process(
+            "/bin/sh",
+            &[
+                "-c".into(),
+                "printf '\\377\\n'; printf 'npm ERR! installation failed\\n' >&2; exit 1".into(),
+            ],
+            &[],
+            &AtomicBool::new(false),
+            &mut |line| lines.push(line),
+            Some(Duration::from_secs(5)),
+        );
+        assert!(result.is_err());
+        assert!(lines.iter().any(|line| line.starts_with("执行命令：")));
+        assert!(lines.iter().any(|line| line.contains('\u{fffd}')));
+        assert!(lines
+            .iter()
+            .any(|line| line == "npm ERR! installation failed"));
+        assert!(lines.iter().any(|line| line.starts_with("安装程序退出：")));
+    }
 }

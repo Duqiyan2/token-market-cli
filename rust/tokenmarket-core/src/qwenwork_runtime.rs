@@ -65,6 +65,46 @@ pub trait RuntimeInstaller: Send + Sync {
 }
 pub struct NativeRuntimeInstaller;
 
+/// Structural revalidation only: never provisions assets, starts a process,
+/// accesses a credential, or sends a request. Returns whether a refresh is needed.
+pub(crate) fn assess_installed_runtime(application: &Path, database: &Path) -> Result<bool> {
+    let resources = if application.is_dir() {
+        application.join("Contents/Resources")
+    } else {
+        application
+            .parent()
+            .context("千问办公安装位置无效")?
+            .join("resources")
+    };
+    require_worker_override(&resources)?;
+    let source = fs::read_to_string(
+        resources
+            .join(SDK_PATH)
+            .join("dist/_worker/qoder-worker-runtime.obf.mjs"),
+    )?;
+    let contract = Contract::recognize(&source)?;
+    contract.probe_source(&source)?;
+    crate::qwenwork::read_snapshot(database)?;
+    let dotenv = crate::qwenwork::dotenv_path(database)?;
+    let env = crate::qwenwork::parse_dotenv(Some(&fs::read(dotenv)?))?;
+    let Some(worker) = env["QW_QODER_WORKER_RUNTIME_PATH"]
+        .as_str()
+        .filter(|path| is_managed_worker(path))
+    else {
+        return Ok(true);
+    };
+    let Some(root) = Path::new(worker).ancestors().nth(3) else {
+        return Ok(true);
+    };
+    let saved = fs::read(root.join("compatibility.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+    Ok(saved
+        .as_ref()
+        .and_then(|value| value["worker_sha256"].as_str())
+        != Some(fingerprint(&source).as_str()))
+}
+
 pub(crate) fn is_managed_worker(path: &str) -> bool {
     let path = path.replace('\\', "/");
     [
@@ -215,7 +255,7 @@ fn require_worker_override(resources: &Path) -> Result<()> {
         }
         Ok(())
     };
-    check().map_err(|_| anyhow::anyhow!(ADAPTATION_REQUIRED))
+    check().map_err(|error| error.context(ADAPTATION_REQUIRED))
 }
 
 struct ProbeDirectory(PathBuf);
@@ -225,7 +265,14 @@ impl Drop for ProbeDirectory {
     }
 }
 
-fn verify_contract(application: &Path, home: &Path, source: &str, gateway: &str) -> Result<()> {
+fn verify_contract(
+    application: &Path,
+    home: &Path,
+    source: &str,
+    gateway: &str,
+    diagnostic: &mut crate::diagnostics::Operation,
+) -> Result<()> {
+    diagnostic.stage("probe_setup");
     let directory = home.join(format!(
         ".tokenmarket-probe-{}",
         crate::auth::create_pkce().code_verifier
@@ -257,6 +304,7 @@ fn verify_contract(application: &Path, home: &Path, source: &str, gateway: &str)
     };
     let output = directory.0.join("result");
     let diagnostics = directory.0.join("diagnostics");
+    diagnostic.stage("probe_spawn");
     let mut child = Command::new(program)
         .arg(&probe)
         .arg(&worker)
@@ -269,6 +317,7 @@ fn verify_contract(application: &Path, home: &Path, source: &str, gateway: &str)
         .stderr(fs::File::create(&diagnostics)?)
         .spawn()
         .context("无法启动千问办公的接入自检，请检查安装是否完整后重试")?;
+    diagnostic.stage("probe_wait");
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         if let Some(status) = child.try_wait()? {
@@ -279,22 +328,18 @@ fn verify_contract(application: &Path, home: &Path, source: &str, gateway: &str)
             {
                 return Ok(());
             }
-            #[cfg(test)]
-            {
-                for line in fs::read_to_string(&diagnostics)
-                    .unwrap_or_default()
-                    .lines()
-                    .filter(|v| v.len() < 800 && (v.contains("Error") || v.contains(" at ")))
-                    .take(15)
-                {
-                    eprintln!("probe: {line}");
-                }
-            }
+            diagnostic.stage(if status.success() {
+                "probe_success_marker_missing"
+            } else {
+                "probe_exit_failed"
+            });
+            diagnostic.probe_exit(status.code(), &diagnostics);
             bail!(ADAPTATION_REQUIRED)
         }
         if Instant::now() >= deadline {
             let _ = child.kill();
             let _ = child.wait();
+            diagnostic.stage("probe_timeout");
             bail!(ADAPTATION_REQUIRED)
         }
         std::thread::sleep(Duration::from_millis(20));
@@ -329,6 +374,31 @@ impl RuntimeInstaller for NativeRuntimeInstaller {
         database: &Path,
         gateway: &str,
     ) -> Result<RuntimeInstallation> {
+        let home = crate::qwenwork::dotenv_path(database)?;
+        let home = home.parent().context("设备目录无效")?;
+        let log_directory = home
+            .parent()
+            .context("设备目录无效")?
+            .join(".tokenmarket/desktop-connections/logs");
+        let mut diagnostic = crate::diagnostics::Operation::new(
+            log_directory,
+            "qwenwork_runtime",
+            crate::ToolId::QwenWork,
+        );
+        let result = self.prepare_runtime(application, database, gateway, &mut diagnostic);
+        diagnostic.finish(&result);
+        result
+    }
+}
+
+impl NativeRuntimeInstaller {
+    fn prepare_runtime(
+        &self,
+        application: &Path,
+        database: &Path,
+        gateway: &str,
+        diagnostic: &mut crate::diagnostics::Operation,
+    ) -> Result<RuntimeInstallation> {
         let resources = if application.join("Contents/Resources").is_dir() {
             application.join("Contents/Resources")
         } else {
@@ -338,22 +408,26 @@ impl RuntimeInstaller for NativeRuntimeInstaller {
                 .join("resources")
         };
         let sdk = resources.join(SDK_PATH);
+        diagnostic.stage("packaged_loader_contract");
         require_worker_override(&resources)?;
         let original = sdk.join("dist/_worker/qoder-worker-runtime.obf.mjs");
+        diagnostic.stage("sdk_read");
         let source = fs::read_to_string(&original).map_err(|error| {
-            if matches!(
+            let message = if matches!(
                 error.kind(),
                 std::io::ErrorKind::NotFound | std::io::ErrorKind::InvalidData
             ) {
-                anyhow::anyhow!(ADAPTATION_REQUIRED)
+                ADAPTATION_REQUIRED
             } else {
-                anyhow::anyhow!("无法读取千问办公 SDK，请检查文件访问权限后重试")
-            }
+                "无法读取千问办公 SDK，请检查文件访问权限后重试"
+            };
+            anyhow::Error::new(error).context(message)
         })?;
         let home = crate::qwenwork::dotenv_path(database)?
             .parent()
             .context("设备目录无效")?
             .to_path_buf();
+        diagnostic.stage("bridge_read");
         let executable = std::env::current_exe().context("无法定位本地代理程序")?;
         let binary = fs::read(&executable).context("无法读取本地代理程序")?;
         let binary_id = format!("{:x}", Sha256::digest(&binary));
@@ -376,8 +450,10 @@ impl RuntimeInstaller for NativeRuntimeInstaller {
         });
         let worker = root.join("dist/_worker/qoder-worker-runtime.obf.mjs");
         // Complete compatibility checks before publishing any runtime file.
+        diagnostic.stage("worker_contract");
         let patched = render_worker(&source, &bridge, gateway)?;
-        verify_contract(application, &home, &source, gateway)?;
+        verify_contract(application, &home, &source, gateway, diagnostic)?;
+        diagnostic.stage("runtime_publish");
         fs::create_dir_all(worker.parent().unwrap())?;
         #[cfg(unix)]
         {
@@ -427,6 +503,103 @@ impl RuntimeInstaller for NativeRuntimeInstaller {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn installed_sdk_revalidation_distinguishes_refresh_from_unsupported_without_mutation() {
+        let installed = Path::new("/Applications/QwenWorkCN.app").join(format!(
+            "Contents/Resources/{SDK_PATH}/dist/_worker/qoder-worker-runtime.obf.mjs"
+        ));
+        if !installed.is_file() {
+            return;
+        }
+        let source = fs::read_to_string(installed).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let app = root.path().join("QwenWorkCN.exe");
+        let resources = root.path().join("resources");
+        let worker = resources
+            .join(SDK_PATH)
+            .join("dist/_worker/qoder-worker-runtime.obf.mjs");
+        fs::create_dir_all(worker.parent().unwrap()).unwrap();
+        fs::write(&worker, &source).unwrap();
+        let main = b"QW_QODER_WORKER_RUNTIME_PATH ENGINE_MAAS_MINT_URL serverProvidedBaseUrl baseUrl:getEngineMaasApiBaseUrl()";
+        let index = serde_json::json!({"files":{"out":{"files":{"main":{"files":{"main.js":{"size":main.len(),"offset":"0"}}}}}}}).to_string();
+        let mut archive = vec![0u8; 4];
+        archive.extend_from_slice(&(8u32 + index.len() as u32).to_le_bytes());
+        archive.extend_from_slice(&0u32.to_le_bytes());
+        archive.extend_from_slice(&(index.len() as u32).to_le_bytes());
+        archive.extend_from_slice(index.as_bytes());
+        archive.extend_from_slice(main);
+        fs::write(resources.join("app.asar"), archive).unwrap();
+        let database = root
+            .path()
+            .join("Library/Application Support/QwenWorkCN/data/agents.db");
+        fs::create_dir_all(database.parent().unwrap()).unwrap();
+        rusqlite::Connection::open(&database)
+            .unwrap()
+            .execute_batch(include_str!("../tests/fixtures/qwenwork-schema.sql"))
+            .unwrap();
+        let managed = root
+            .path()
+            .join(".qwenworkcn/tokenmarket-local-sdk-v2/old/dist/_worker/worker.mjs");
+        fs::create_dir_all(managed.parent().unwrap()).unwrap();
+        let manifest = managed
+            .ancestors()
+            .nth(3)
+            .unwrap()
+            .join("compatibility.json");
+        fs::write(
+            &manifest,
+            serde_json::json!({"worker_sha256":fingerprint(&source)}).to_string(),
+        )
+        .unwrap();
+        let env = format!("QW_QODER_WORKER_RUNTIME_PATH={}\n", managed.display());
+        let dotenv = root.path().join(".qwenworkcn/.env");
+        fs::write(&dotenv, &env).unwrap();
+        let before = fs::read(&database).unwrap();
+        assert!(!assess_installed_runtime(&app, &database).unwrap());
+        fs::write(
+            &manifest,
+            serde_json::json!({"worker_sha256":fingerprint("older SDK")}).to_string(),
+        )
+        .unwrap();
+        assert!(assess_installed_runtime(&app, &database).unwrap());
+        fs::write(&worker, "unsupported SDK contract").unwrap();
+        assert!(assess_installed_runtime(&app, &database)
+            .unwrap_err()
+            .to_string()
+            .contains("尚未适配"));
+        assert_eq!(fs::read(&database).unwrap(), before);
+        assert_eq!(fs::read_to_string(dotenv).unwrap(), env);
+        assert!(!root.path().join(".tokenmarket").exists());
+    }
+
+    #[test]
+    fn missing_packaged_loader_retains_stage_and_native_error_in_diagnostics() {
+        let root = tempfile::tempdir().unwrap();
+        let database = root
+            .path()
+            .join("Library/Application Support/QwenWorkCN/data/agents.db");
+        let error = NativeRuntimeInstaller
+            .prepare(
+                &root.path().join("missing/QwenWorkCN.exe"),
+                &database,
+                "https://gateway.fixture",
+            )
+            .err()
+            .expect("missing app archive must reject the runtime");
+        assert_eq!(error.to_string(), ADAPTATION_REQUIRED);
+        let log = fs::read_to_string(
+            root.path()
+                .join(".tokenmarket/desktop-connections/logs/connections.jsonl"),
+        )
+        .unwrap();
+        let last: serde_json::Value = serde_json::from_str(log.lines().last().unwrap()).unwrap();
+        assert_eq!(last["stage"], "packaged_loader_contract");
+        assert_eq!(last["status"], "failed");
+        assert_eq!(last["error"]["io_kind"], "NotFound");
+        assert!(last["error"]["os_error"].is_number());
+        assert!(!log.contains(&root.path().display().to_string()));
+    }
+
     #[test]
     fn desktop_bootstrap_auxiliary_failure_preserves_primary_local_routing() {
         let app = Path::new("/Applications/QwenWorkCN.app");
@@ -520,6 +693,13 @@ mod tests {
                 }
             }
         }
+        if let Some(root) = std::env::var_os("TOKEN_MARKET_QWENWORK_WINDOWS_FIXTURE") {
+            let resources = PathBuf::from(root).join("resources");
+            require_worker_override(&resources).unwrap();
+            inputs.push(resources.join(format!(
+                "{SDK_PATH}/dist/_worker/qoder-worker-runtime.obf.mjs"
+            )));
+        }
         let root = tempfile::tempdir().unwrap();
         for path in inputs {
             let source = fs::read_to_string(&path).unwrap();
@@ -535,8 +715,19 @@ mod tests {
                     .unwrap(),
                 )
                 .unwrap_or_else(|error| panic!("export {}: {error}", path.display()));
-            verify_contract(application, root.path(), &source, "https://gateway.fixture")
-                .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+            let mut diagnostic = crate::diagnostics::Operation::new(
+                root.path().join("logs"),
+                "compatibility_test",
+                crate::ToolId::QwenWork,
+            );
+            verify_contract(
+                application,
+                root.path(),
+                &source,
+                "https://gateway.fixture",
+                &mut diagnostic,
+            )
+            .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
             let unrelated_change =
                 format!("/* SDK packaging metadata can change independently. */\n{source}");
             assert!(render_worker(

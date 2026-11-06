@@ -14,6 +14,18 @@ use tauri::Listener;
 const PUBLIC_KEY: &str = include_str!("../../tests/fixtures/client-update/public-key.txt");
 const SIGNATURE: &str = include_str!("../../tests/fixtures/client-update/package.txt.sig");
 
+#[test]
+fn generated_context_preserves_windows_install_eligibility() {
+    // Exercise the same generated runtime configuration used by the native
+    // installer factory, rather than a hand-built fixture configuration.
+    let context: tauri::Context<tauri::test::MockRuntime> = crate::desktop_context();
+    assert!(context.config().bundle.windows.nsis.is_none());
+    assert!(
+        super::windows_current_user_nsis_build(),
+        "the production Windows install gate disables Install and restart"
+    );
+}
+
 struct ManifestServer {
     url: String,
     requests: Arc<Mutex<Vec<String>>>,
@@ -723,12 +735,14 @@ async fn guarded_install_refuses_busy_work_retains_verified_retry_and_reports_ha
         launched: Default::default(),
     });
     assert!(!updater.status().install_available);
+    assert!(updater.status().install_unavailable_reason.is_some());
     assert!(updater
         .install(app.handle(), "1.1.0")
         .await
         .unwrap_err()
         .contains("暂不可用"));
     updater = updater.with_installer(installer.clone());
+    assert!(updater.status().install_unavailable_reason.is_none());
     assert!(
         updater.install(app.handle(), "1.1.0").await.is_err(),
         "unverified bytes are never handed off"

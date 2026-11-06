@@ -26,6 +26,7 @@ pub struct ToolUpdate {
     pub upgrade_revision: Option<String>,
     pub needs_confirmation: bool,
     pub conflict: bool,
+    pub connection_compatibility: Option<crate::connections::ConnectionCompatibility>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -120,6 +121,13 @@ impl InstallationManager {
             .collect()
     }
     pub(super) fn validate_upgrade(&self, plan: &InstallPlan) -> Result<()> {
+        if plan.tool == ToolId::QwenWork {
+            // The public download channel has no version manifest. Downloading
+            // an installer is separate from installing it or adapter readiness.
+            self.installed_version(plan.tool)?
+                .context("未检测到当前工具")?;
+            return Ok(());
+        }
         let probe = self
             .environment
             .command_path(plan.tool.command())
@@ -149,6 +157,7 @@ impl InstallationManager {
     ) -> ToolUpdate {
         self.upgrade_plans.lock().unwrap().remove(&tool.to_string());
         let mut result = ToolUpdate {
+            connection_compatibility: None,
             tool,
             current_version: None,
             target_version: None,
@@ -186,6 +195,12 @@ impl InstallationManager {
             .ok()
             .flatten()
             .filter(|v| version(v).is_some());
+        if let (Some(snapshot), Some(version)) = (
+            inventory.installation_snapshot(tool),
+            &result.current_version,
+        ) {
+            snapshot.remember_version(version);
+        }
         if result.current_version.is_none() && !result.installations.is_empty() {
             result.state = "broken".into();
             result.note = result
@@ -195,25 +210,22 @@ impl InstallationManager {
                 .unwrap_or_else(|| "已检测到安装，但无法运行".into());
             return result;
         }
-        if tool == ToolId::QwenWork {
-            result.state = "manual_update".into();
-            result.manual_upgrade = true;
-            result.note =
-                "请通过官网或客户端更新千问办公；升级、降级或重新安装后，请点击“重新接入”。如接入失败，请联系管理员"
-                    .into();
-            return result;
-        }
-        let (latest, digest) =
-            match latest.and_then(|(v, d)| Ok((upgrades::normalized_version(&v)?, d))) {
-                Ok(release) => release,
-                Err(_) => {
-                    result.state = "check_failed".into();
-                    result.note = "无法获取官方最新版，请稍后重新检查".into();
-                    return result;
-                }
-            };
+        let (latest, digest) = match latest.and_then(|(v, d)| {
+            if tool == ToolId::QwenWork && v == "latest" {
+                Ok((v, d))
+            } else {
+                Ok((upgrades::normalized_version(&v)?, d))
+            }
+        }) {
+            Ok(release) => release,
+            Err(_) => {
+                result.state = "check_failed".into();
+                result.note = "无法获取官方最新版，请稍后重新检查".into();
+                return result;
+            }
+        };
         result.target_version = Some(latest.clone());
-        result.latest_version = Some(latest.clone());
+        result.latest_version = (latest != "latest").then(|| latest.clone());
         let route = upgrades::route(
             tool,
             &latest,
@@ -268,7 +280,8 @@ impl InstallationManager {
             .current_version
             .as_deref()
             .and_then(|v| compare_versions(v, &latest));
-        if order.is_none() && !pending {
+        let download_channel = tool == ToolId::QwenWork && latest == "latest";
+        if order.is_none() && !pending && !download_channel {
             result.state = "unknown".into();
             result.note = "无法读取当前版本，请检查工具安装".into();
             return result;
@@ -296,6 +309,9 @@ impl InstallationManager {
                 if !target.anchored {
                     result.note =
                         "默认入口无法确认，将使用工具的通用更新命令；请检查多处安装".into();
+                }
+                if tool == ToolId::QwenWork {
+                    result.note = "从官网下载最新版安装包".into();
                 }
                 self.upgrade_plans
                     .lock()
@@ -356,6 +372,7 @@ impl InstallationManager {
                 tokio::task::spawn_blocking(move || manager.inspect_release(tool, latest))
                     .await
                     .unwrap_or_else(|_| ToolUpdate {
+                        connection_compatibility: None,
                         installations: vec![],
                         upgrade_path: None,
                         upgrade_command: None,
@@ -469,7 +486,17 @@ async fn fetch_release(
     arch: &str,
 ) -> Result<(String, Option<String>)> {
     if tool == ToolId::QwenWork {
-        bail!("千问办公版本请通过官网或客户端查看")
+        // Check availability of the same public channel used by new installs;
+        // do not borrow the application's login to query its private updater.
+        let plan = super::gui::plan(tool, env, arch)?;
+        let url = &plan
+            .steps
+            .iter()
+            .find_map(|step| step.download.as_ref())
+            .context("缺少千问办公下载地址")?
+            .0;
+        client.head(url).send().await?.error_for_status()?;
+        return Ok(("latest".into(), None));
     }
     let raw = if tool == ToolId::DeepSeekHarness
         && (env.command_path(tool.command()).is_some()

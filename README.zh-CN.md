@@ -180,6 +180,10 @@ macOS 使用系统钥匙串工具保持 App、CLI 和升级后的凭证访问者
 
 ## 问题反馈
 
+桌面端与 CLI 会自动将工具接入日志写入 `~/.tokenmarket/desktop-connections/logs/connections.jsonl`（Windows 为 `%USERPROFILE%\.tokenmarket\desktop-connections\logs\connections.jsonl`），无需开启调试模式。按 `operation_id` 可串起同一次接入的安装检查、凭证校验/签发/恢复、模型目录加载、配置备份与写入、回滚和最终确认；日志包含时间、阶段、耗时、HTTP 状态及安全错误分类。
+
+单个日志约 1 MiB 后轮转，保留上一份 `connections.previous.jsonl`。日志不记录 API Key、登录令牌、配置正文、账号/空间信息或服务端响应正文；日志写入失败不会阻止接入。反馈时附上出错时间附近的日志及 `operation_id`。更改需更新客户端后生效，无法补回旧版本未记录的日志。
+
 请通过 [GitHub Issues](https://github.com/FitBBC/token-market-cli/issues) 反馈问题，附上操作系统、Token Market 版本、工具名称和复现步骤。提交截图或日志前，请移除 API Key、登录凭据等敏感信息。
 
 [桌面端构建与发布流程](docs/client-update-local-release.zh-CN.md)

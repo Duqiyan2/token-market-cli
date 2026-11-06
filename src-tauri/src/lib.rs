@@ -31,9 +31,11 @@ fn desktop_tool_inventory(
 #[tauri::command]
 fn prepare_tool_connect(tool: String) -> Result<(), String> {
     let tool = tokenmarket_core::tool_id(&tool).map_err(|error| error.to_string())?;
-    tokenmarket_core::inventory::ToolInventory::current()
-        .require_installed(tool)
-        .map_err(|error| error.to_string())
+    let mut diagnostic = tokenmarket_core::diagnostics::Operation::current("prepare_connect", tool);
+    diagnostic.stage("installation_detection");
+    let result = tokenmarket_core::inventory::ToolInventory::current().require_installed(tool);
+    diagnostic.finish(&result);
+    result.map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -222,6 +224,10 @@ fn accept_desktop_callback(app: AppHandle, callback: String) {
     });
 }
 
+fn desktop_context<R: tauri::Runtime>() -> tauri::Context<R> {
+    tauri::generate_context!()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -319,7 +325,7 @@ pub fn run() {
             client_update::defer_client_update,
             client_update::ignore_client_update_version,
         ])
-        .build(tauri::generate_context!())
+        .build(desktop_context())
         .expect("error while building tauri application")
         .run(|_app, _event| {
             if matches!(_event, tauri::RunEvent::Resumed) {

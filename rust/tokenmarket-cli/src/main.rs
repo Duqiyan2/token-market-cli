@@ -347,12 +347,18 @@ async fn connect(
     confirm_rebind: bool,
 ) -> Result<()> {
     let tool = tool_id(tool)?;
-    let session = require_session().await?;
+    let session = require_session()
+        .await
+        .inspect_err(|error| tokenmarket_core::diagnostics::preflight_failure(tool, error))?;
     let api = workspace_client(&session);
     let snapshot = if let Some(id) = workspace {
-        api.switch(&session, &id).await?
+        api.switch(&session, &id)
+            .await
+            .inspect_err(|error| tokenmarket_core::diagnostics::preflight_failure(tool, error))?
     } else {
-        api.load(&session).await?
+        api.load(&session)
+            .await
+            .inspect_err(|error| tokenmarket_core::diagnostics::preflight_failure(tool, error))?
     };
     let inventory = ToolInventory::current();
     let manager = ConnectionManager::current();

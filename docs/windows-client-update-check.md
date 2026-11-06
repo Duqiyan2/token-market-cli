@@ -6,6 +6,16 @@ installation policy marker also require one manual installation of the new NSIS
 build before they become eligible. No installer ownership is migrated by the
 updater.
 
+The NSIS install-mode/template gate is compiled from the effective Tauri build
+configuration, including target-specific files and `TAURI_CONFIG` overrides.
+Do not read `app.config().bundle.windows.nsis` for this gate: Tauri omits NSIS
+packaging settings from its generated runtime configuration. That check in
+1.1.0 incorrectly disabled installation even for eligible NSIS clients.
+Those clients need one manual installation of a fixed build before subsequent
+in-app updates can use Install and restart. Installation rejections now expose
+the native Windows reason in Settings. The removed “官方安装包与恢复说明” button
+and its unavailable-route helper are no longer part of that interface.
+
 ## Automated native fixture
 
 On a disposable Windows x64 runner with Rust installed:

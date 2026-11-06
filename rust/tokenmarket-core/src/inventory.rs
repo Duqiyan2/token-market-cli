@@ -116,6 +116,7 @@ impl InstallationEnvironment {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionProjection {
+    pub connection_id: String,
     pub state: &'static str,
     pub owner: Option<serde_json::Value>,
     pub bound_workspace: Option<serde_json::Value>,
@@ -161,6 +162,8 @@ pub(crate) struct ConfigurationLocation {
     follows_process_home: bool,
     #[serde(default)]
     dumate_profile: Option<String>,
+    #[serde(default)]
+    pub(crate) installation: Option<crate::installation_snapshot::InstallationSnapshot>,
 }
 impl ConfigurationLocation {
     pub(crate) fn dumate_test_guard(&self) -> Result<crate::installation::InstallationGuard> {
@@ -229,6 +232,27 @@ pub struct ToolInventory {
     environment: InstallationEnvironment,
 }
 impl ToolInventory {
+    pub(crate) fn installation_snapshot(
+        &self,
+        tool: ToolId,
+    ) -> Option<crate::installation_snapshot::InstallationSnapshot> {
+        let application_only = matches!(
+            tool,
+            ToolId::DuMate | ToolId::DuMateEnterprise | ToolId::QwenWork
+        );
+        let path = if application_only {
+            self.application_path(tool)
+        } else {
+            self.environment
+                .command_path(tool.command())
+                .or_else(|| self.application_path(tool))
+        }?;
+        crate::installation_snapshot::InstallationSnapshot::capture(&path)
+    }
+
+    pub(crate) fn platform(&self) -> HostPlatform {
+        self.environment.platform
+    }
     pub fn new(environment: InstallationEnvironment) -> Self {
         Self { environment }
     }
@@ -248,6 +272,7 @@ impl ToolInventory {
             } else {
                 None
             },
+            installation: self.installation_snapshot(tool),
         })
     }
     pub fn list(&self) -> Result<Vec<ToolInventoryEntry>> {
@@ -300,6 +325,7 @@ impl ToolInventory {
                     installations,
                     connection: desktop.iter().find(|(tool, _)| *tool == adapter.id).map(
                         |(_, r)| ConnectionProjection {
+                            connection_id: r.connection_id.clone(),
                             state: r.state,
                             owner: Some(r.owner.clone()),
                             bound_workspace: Some(r.bound_workspace.clone()),

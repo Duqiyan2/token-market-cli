@@ -1,6 +1,7 @@
 pub mod adapters;
 pub mod auth;
 pub mod config;
+pub mod diagnostics;
 mod model_catalog;
 mod model_projection;
 pub mod models;
@@ -16,6 +17,7 @@ pub mod desktop;
 
 pub mod desktop_workspace;
 pub mod installation;
+mod installation_snapshot;
 pub mod inventory;
 pub mod usage;
 

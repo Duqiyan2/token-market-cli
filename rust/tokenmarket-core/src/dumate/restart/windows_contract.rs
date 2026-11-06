@@ -30,6 +30,22 @@ pub(super) fn within(path: &str, directory: &str) -> bool {
         .to_lowercase();
     path.starts_with(&(directory + "\\"))
 }
+
+/// Capture order is arbitrary. These indices identify the batch whose exit
+/// must be confirmed before any remaining service is shut down.
+pub(super) fn shutdown_hosts(processes: &[(u32, u32, bool)]) -> Vec<usize> {
+    processes
+        .iter()
+        .enumerate()
+        .filter_map(|(index, (_, parent, is_app))| {
+            (*is_app
+                && !processes
+                    .iter()
+                    .any(|(pid, _, is_parent_app)| *pid == *parent && *is_parent_app))
+            .then_some(index)
+        })
+        .collect()
+}
 pub(super) fn validate_app(app: &Path) -> Result<()> {
     if !app
         .file_name()
@@ -91,6 +107,46 @@ pub(super) fn validate_app(app: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn restarting_does_not_leave_a_live_host_reporting_backend_exit() {
+        // Snapshot order: backend, renderer, Electron main process.
+        let processes = [(30, 10, false), (20, 10, true), (10, 1, true)];
+        let hosts = shutdown_hosts(&processes);
+        let mut host_alive = true;
+        let mut backend_error = false;
+        // A Windows shutdown batch does not promise main-before-service order.
+        for index in hosts
+            .iter()
+            .copied()
+            .chain((0..3).filter(|i| !hosts.contains(i)))
+        {
+            if index == 0 && host_alive {
+                backend_error = true;
+            }
+            if index == 2 {
+                host_alive = false;
+            }
+        }
+        assert!(
+            !backend_error,
+            "Backend exited while the previous DuMate host was still alive (0x10000001)"
+        );
+    }
+
+    #[test]
+    fn host_shutdown_handles_multiple_roots_and_background_only_instances() {
+        assert_eq!(
+            shutdown_hosts(&[
+                (20, 10, true),
+                (10, 1, true),
+                (40, 2, true),
+                (30, 10, false)
+            ]),
+            [1, 2]
+        );
+        assert!(shutdown_hosts(&[(30, 10, false)]).is_empty());
+        assert!(shutdown_hosts(&[]).is_empty());
+    }
     #[test]
     fn windows_package_and_process_paths_cannot_expand_to_other_installations() {
         assert!(same_path(

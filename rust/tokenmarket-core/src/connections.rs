@@ -1,5 +1,7 @@
 //! Desktop tool connections: public summaries exclude credentials and private receipts.
+mod compatibility;
 mod configuration;
+pub use compatibility::ConnectionCompatibility;
 mod configuration_io;
 mod issuance;
 mod qwenwork;
@@ -123,6 +125,7 @@ pub struct ConnectionRecord {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionSummary {
+    pub connection_id: String,
     pub state: &'static str,
     pub owner: Value,
     pub bound_workspace: Value,
@@ -134,6 +137,7 @@ pub struct ConnectionSummary {
 impl ConnectionRecord {
     pub fn summary(&self) -> ConnectionSummary {
         ConnectionSummary {
+            connection_id: self.connection_id.clone(),
             state: "configured_untested",
             owner: json!(self.owner),
             bound_workspace: json!(self.bound_workspace),
@@ -554,6 +558,44 @@ impl ConnectionManager {
         confirmed_lost_key: Option<&str>,
         selection: ModelSelection<'_>,
     ) -> Result<EstablishResult> {
+        let mut diagnostic = crate::diagnostics::Operation::new(
+            self.directory.join("logs"),
+            match &selection {
+                ModelSelection::Preview(_) => "prepare_models",
+                ModelSelection::Selected(_, _) => "configure_model",
+                _ if confirmed_lost_key.is_some() => "recover",
+                _ if replacement.is_some() => "reconnect",
+                _ => "connect",
+            },
+            tool,
+        );
+        let result = self
+            .establish_diagnosed(
+                context,
+                tool,
+                inventory,
+                path,
+                replacement,
+                confirmed_lost_key,
+                selection,
+                &mut diagnostic,
+            )
+            .await;
+        diagnostic.finish(&result);
+        result
+    }
+    async fn establish_diagnosed(
+        &self,
+        context: ConnectContext,
+        tool: ToolId,
+        inventory: &ToolInventory,
+        path: PathBuf,
+        replacement: Option<&str>,
+        confirmed_lost_key: Option<&str>,
+        selection: ModelSelection<'_>,
+        diagnostic: &mut crate::diagnostics::Operation,
+    ) -> Result<EstablishResult> {
+        diagnostic.stage("operation_lock");
         let _guard = self
             .gate
             .try_lock()
@@ -568,7 +610,9 @@ impl ConnectionManager {
         } else {
             None
         };
+        diagnostic.stage("installation_detection");
         inventory.require_installed(tool)?;
+        diagnostic.stage("tool_readiness");
         let _installation_guard = if tool == ToolId::DuMate {
             inventory.dumate_model_change_guard()?
         } else {
@@ -601,6 +645,7 @@ impl ConnectionManager {
         ) {
             bail!("此工具的桌面接入尚未开放")
         }
+        diagnostic.stage("validate_context");
         if context.session_token.is_empty()
             || context.workspace_id.is_empty()
             || context.owner_id.is_empty()
@@ -623,6 +668,7 @@ impl ConnectionManager {
         if fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
             bail!("工具配置是符号链接，请先确认实际配置路径");
         }
+        diagnostic.stage("configuration_read");
         let configuration_location = inventory.configuration_location(tool)?;
         configuration_location.authorize(tool).await?;
         let before = configuration_io::read(&path)?;
@@ -638,9 +684,11 @@ impl ConnectionManager {
             let app = inventory
                 .application_path(tool)
                 .context("无法确认千问办公安装位置")?;
+            diagnostic.stage("qwenwork_runtime");
             let runtime = self.qwen_runtime.prepare(&app, &path, &self.gateway_url)?;
             config.set_qwenwork_runtime(runtime);
         }
+        diagnostic.stage("connection_store");
         let mut records = self.list()?;
         self.migrate_records(&records)?;
         let previous = records
@@ -669,6 +717,7 @@ impl ConnectionManager {
             (Some(_), _) => bail!("连接已改变，请刷新后重试"),
             _ => {}
         }
+        diagnostic.stage("saved_credentials");
         let device_id = self.device_id()?;
         // Import existing credentials before replacing the active connection. Old releases
         // did not record the console URL; only import those matching this gateway.
@@ -712,6 +761,7 @@ impl ConnectionManager {
         } else {
             None
         };
+        diagnostic.stage("platform_key");
         let (key, key_reused) = if selection.preserves_binding() {
             let record = previous.as_ref().context("请先接入百度搭子后切换模型")?;
             // Changing a model must never migrate, issue or recover a different key.
@@ -725,7 +775,7 @@ impl ConnectionManager {
                     owner: record.owner.clone(),
                     bound_workspace: record.bound_workspace.clone(),
                 });
-            self.validate_for_apply(&context, tool, &device_id, &key)
+            self.validate_for_apply(&context, tool, &device_id, &key, diagnostic)
                 .await?;
             (key, true)
         } else {
@@ -736,10 +786,15 @@ impl ConnectionManager {
                 cached,
                 recovered,
                 confirmed_lost_key,
+                diagnostic,
             )
             .await?
         };
-        let available = self.load_models(tool, &key.api_key).await?;
+        diagnostic.credential_reused(key_reused);
+        diagnostic.stage("model_catalogue");
+        let available = self.load_models(tool, &key.api_key, diagnostic).await?;
+        diagnostic.model_count(available.len());
+        diagnostic.stage("model_selection");
         if matches!(selection, ModelSelection::Preview(_)) {
             let models = dumate::eligible(&available)?;
             let selected = config.select_models(&models)?;
@@ -761,6 +816,7 @@ impl ConnectionManager {
             }
             _ => config.select_models(&available)?,
         };
+        diagnostic.stage("configuration_apply");
         let result = self
             .apply(
                 &context,
@@ -774,17 +830,24 @@ impl ConnectionManager {
                 previous.as_ref(),
                 configuration_location,
                 models,
+                diagnostic,
             )
             .await;
         let connection = result?;
-        self.confirm_key(&context, tool, &device_id, &key, true)
+        diagnostic.stage("key_confirmation");
+        self.confirm_key(&context, tool, &device_id, &key, true, diagnostic)
             .await?;
         Ok(EstablishResult::Connected(ReconnectOutcome {
             connection,
             key_reused,
         }))
     }
-    async fn load_models(&self, tool: ToolId, api_key: &str) -> Result<Vec<Value>> {
+    async fn load_models(
+        &self,
+        tool: ToolId,
+        api_key: &str,
+        diagnostic: &mut crate::diagnostics::Operation,
+    ) -> Result<Vec<Value>> {
         let response = self
             .http
             .get(format!(
@@ -796,6 +859,7 @@ impl ConnectionManager {
             .send()
             .await
             .context("无法获取模型目录，原配置已保留")?;
+        diagnostic.http_response(response.status().as_u16());
         if !response.status().is_success() {
             bail!("无法获取模型目录，原配置已保留")
         }
@@ -818,6 +882,7 @@ impl ConnectionManager {
         previous: Option<&ConnectionRecord>,
         configuration_location: crate::inventory::ConfigurationLocation,
         models: Vec<Value>,
+        diagnostic: &mut crate::diagnostics::Operation,
     ) -> Result<ConnectionSummary> {
         if key.bound_workspace.id != context.workspace_id
             || key.owner.id != context.owner_id
@@ -853,6 +918,7 @@ impl ConnectionManager {
             restore::retire_removed_fields(previous, &mut files, &self.private)?;
         }
         // Detect external edits during network I/O before staging any configuration mutation.
+        diagnostic.stage("validate_before_write");
         let _session_fence = self
             .client_login
             .as_ref()
@@ -870,12 +936,14 @@ impl ConnectionManager {
                 Ok(guard)
             })
             .transpose()?;
-        self.validate_for_apply(context, tool, device_id, key)
+        self.validate_for_apply(context, tool, device_id, key, diagnostic)
             .await?;
+        diagnostic.stage("authorize_before_write");
         configuration_location.authorize(tool).await?;
         if tool == ToolId::DuMateEnterprise {
             crate::dumate::require_stopped(path)?;
         }
+        diagnostic.stage("backup_configuration");
         let mut receipts = vec![];
         for file in &files {
             let current = configuration_io::read(&file.path)?;
@@ -960,20 +1028,25 @@ impl ConnectionManager {
         let serialized = self
             .private
             .encode(&store, &serde_json::to_vec_pretty(records)?)?;
+        diagnostic.stage("write_configuration");
         let mut applied = 0;
         let transaction = (|| -> Result<()> {
             for file in &files {
                 configuration_io::write(&file.path, &file.before, &Some(file.bytes.clone()))?;
                 applied += 1;
             }
+            diagnostic.stage("save_connection_record");
             atomic_write(&store, &serialized)
         })();
-        if transaction.is_err() {
+        if let Err(error) = &transaction {
+            diagnostic.failure(error);
+            diagnostic.stage("rollback_configuration");
             for file in files[..applied].iter().rev() {
                 let rollback =
                     configuration_io::write(&file.path, &Some(file.bytes.clone()), &file.before);
                 rollback.context("接入保存失败，且配置回滚失败；请使用备份恢复")?;
             }
+            diagnostic.stage("rollback_completed");
             bail!("接入保存失败，原配置已恢复")
         }
         Ok(record.summary())

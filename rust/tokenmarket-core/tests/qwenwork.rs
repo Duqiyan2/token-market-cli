@@ -484,12 +484,14 @@ fn qwenwork_discovers_only_official_app_and_keeps_platform_config_paths() {
     let update =
         installer.inspect_update(ToolId::QwenWork, Err(anyhow::anyhow!("no verified feed")));
     assert_eq!(update.current_version.as_deref(), Some("1.5.0"));
-    assert_eq!(update.state, "manual_update");
+    assert_eq!(update.state, "check_failed");
     assert!(!update.can_upgrade);
-    assert!(update.manual_upgrade);
-    assert!(update.note.contains("升级、降级或重新安装"));
-    assert!(update.note.contains("重新接入"));
-    assert!(update.note.contains("如接入失败，请联系管理员"));
+    assert!(!update.manual_upgrade);
+    let update = installer.inspect_update(ToolId::QwenWork, Ok("latest".into()));
+    assert!(update.can_upgrade);
+    assert_eq!(update.target_version.as_deref(), Some("latest"));
+    assert!(update.latest_version.is_none());
+    assert!(!update.note.contains("重新接入"));
     assert!(!update.note.contains("修复配置"));
     assert!(!update.note.contains("1.5.0"));
 
@@ -847,6 +849,50 @@ async fn qwenwork_model_edits_block_traffic_and_require_explicit_restore_choice(
         .unwrap();
     assert_eq!(result.state, "disconnected");
     assert_eq!(model_count(&path), 1);
+}
+
+#[tokio::test]
+async fn qwenwork_failed_connect_records_stage_without_credentials() {
+    let root = tempfile::tempdir().unwrap();
+    let (inventory, path, _) = fixture(root.path());
+    std::fs::remove_file(root.path().join(".qwenworkcn/.status.json")).unwrap();
+    let state = root.path().join("state");
+    let manager = qwen_manager(
+        state.clone(),
+        "http://127.0.0.1:1".into(),
+        "http://127.0.0.1:1".into(),
+    );
+    let error = manager
+        .connect(context(), ToolId::QwenWork, &inventory, path)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("登录"));
+    let log = std::fs::read_to_string(state.join("logs/connections.jsonl"))
+        .expect("failed connection must leave a persistent diagnostic");
+    let events: Vec<Value> = log
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let failed = events
+        .iter()
+        .find(|event| event["status"] == "failed")
+        .unwrap();
+    assert_eq!(failed["tool"], "qwenwork");
+    assert_eq!(failed["stage"], "tool_readiness");
+    assert_eq!(failed["error"]["reason"], "login_required");
+    assert_eq!(failed["error"]["io_kind"], "NotFound");
+    for secret in [
+        "desktop-secret",
+        "user-encrypted-secret",
+        "\"u1\"",
+        "Research",
+    ] {
+        assert!(
+            !log.contains(secret),
+            "diagnostics leaked a credential or identity"
+        );
+    }
+    assert!(manager.list().unwrap().is_empty());
 }
 
 #[tokio::test]

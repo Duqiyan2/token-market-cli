@@ -45,6 +45,7 @@ impl Drop for Handle {
 struct Process {
     handle: Handle,
     pid: u32,
+    parent_pid: u32,
     created: FILETIME,
     image: PathBuf,
 }
@@ -116,6 +117,7 @@ impl Process {
         Ok(Self {
             handle,
             pid,
+            parent_pid: 0,
             created,
             image,
         })
@@ -163,17 +165,22 @@ fn snapshot() -> Result<Vec<(u32, u32, String)>> {
     Ok(entries)
 }
 
-fn capture(app: &Path) -> Result<Vec<Process>> {
+fn capture(app: &Path) -> Result<Vec<Arc<Process>>> {
     let root = app.parent().context(UNKNOWN)?.join("resources");
     let mut found = Vec::new();
-    for (pid, _, name) in snapshot()? {
-        let process = match Process::open(pid) {
+    for (pid, parent_pid, name) in snapshot()? {
+        let mut process = match Process::open(pid) {
             Ok(process) => process,
             Err(_) => {
                 if name.eq_ignore_ascii_case("DuMate.exe")
                     || name.to_ascii_lowercase().starts_with("dumate-")
                 {
-                    bail!(UNKNOWN);
+                    // A known child can exit between the snapshot and handle
+                    // capture while shutdown/startup is in progress. A vanished
+                    // PID is not an identity failure; a still-present PID is.
+                    if snapshot()?.iter().any(|(current, _, _)| *current == pid) {
+                        bail!(UNKNOWN);
+                    }
                 }
                 continue;
             }
@@ -182,7 +189,8 @@ fn capture(app: &Path) -> Result<Vec<Process>> {
             || contract::within(&process.image.to_string_lossy(), &root.to_string_lossy()))
             && !process.stopped()?
         {
-            found.push(process);
+            process.parent_pid = parent_pid;
+            found.push(Arc::new(process));
         }
     }
     if found.len() > 128 {
@@ -192,7 +200,8 @@ fn capture(app: &Path) -> Result<Vec<Process>> {
 }
 pub(super) struct WindowsDriver {
     app: PathBuf,
-    closing: Vec<Process>,
+    closing: Vec<Arc<Process>>,
+    expect_backend: bool,
 }
 impl WindowsDriver {
     pub(super) fn new(app: PathBuf) -> Result<Self> {
@@ -200,6 +209,7 @@ impl WindowsDriver {
         Ok(Self {
             app,
             closing: Vec::new(),
+            expect_backend: false,
         })
     }
 }
@@ -207,32 +217,57 @@ impl Driver for WindowsDriver {
     async fn running(&mut self) -> Result<bool> {
         let app = self.app.clone();
         self.closing = tokio::task::spawn_blocking(move || capture(&app)).await??;
+        self.expect_backend = self
+            .closing
+            .iter()
+            .any(|process| is_backend(&process.image));
         Ok(!self.closing.is_empty())
     }
     async fn quit(&mut self) -> Result<()> {
         if self
             .closing
             .iter()
-            .map(Process::stopped)
+            .map(|process| process.stopped())
             .collect::<Result<Vec<_>>>()?
             .iter()
             .all(|v| *v)
         {
             return Ok(());
         }
-        let session = Arc::new(RestartSession::new(&self.closing)?);
-        let worker = session.clone();
-        let shutdown = tokio::task::spawn_blocking(move || worker.shutdown());
-        match tokio::time::timeout(Duration::from_secs(25), shutdown).await {
-            Ok(result) => result??,
-            Err(_) => {
-                unsafe {
-                    RmCancelCurrentTask(session.0);
-                };
-                bail!("搭子进程结束超时，请手动退出后重新打开");
-            }
+        let identities = self
+            .closing
+            .iter()
+            .map(|process| {
+                (
+                    process.pid,
+                    process.parent_pid,
+                    equal_path(&process.image, &self.app),
+                )
+            })
+            .collect::<Vec<_>>();
+        let hosts = contract::shutdown_hosts(&identities)
+            .into_iter()
+            .map(|index| self.closing[index].clone())
+            .collect::<Vec<_>>();
+        if hosts.is_empty() && identities.iter().any(|(_, _, is_app)| *is_app) {
+            bail!(UNKNOWN);
         }
-        Ok(())
+        shutdown_group(hosts).await?;
+        // The host cannot respawn a service after this point. Capture again to
+        // include children created while the host was shutting down.
+        let app = self.app.clone();
+        let remaining = tokio::task::spawn_blocking(move || capture(&app)).await??;
+        if remaining.iter().any(|process| {
+            equal_path(&process.image, &self.app)
+                && !self
+                    .closing
+                    .iter()
+                    .any(|old| old.pid == process.pid && time(old.created) == time(process.created))
+        }) {
+            bail!("搭子实例已变化，未结束新启动的实例，请确认后重试");
+        }
+        self.closing.extend(remaining.iter().cloned());
+        shutdown_group(remaining).await
     }
     async fn wait_stopped(&mut self) -> Result<()> {
         for _ in 0..75 {
@@ -240,7 +275,7 @@ impl Driver for WindowsDriver {
             if self
                 .closing
                 .iter()
-                .map(Process::stopped)
+                .map(|process| process.stopped())
                 .collect::<Result<Vec<_>>>()?
                 .iter()
                 .all(|v| *v)
@@ -263,7 +298,7 @@ impl Driver for WindowsDriver {
         {
             bail!("搭子仍在运行，未重复打开");
         }
-        Command::new(&self.app)
+        let mut child = Command::new(&self.app)
             .current_dir(self.app.parent().context(UNKNOWN)?)
             .creation_flags(CREATE_NO_WINDOW)
             .stdin(Stdio::null())
@@ -271,19 +306,78 @@ impl Driver for WindowsDriver {
             .stderr(Stdio::null())
             .spawn()
             .context("无法重新打开搭子，请手动打开")?;
-        Ok(())
+        let application = self.app.clone();
+        let launched_pid = child.id();
+        super::windows_startup::confirm(self.expect_backend, || {
+            let status = child.try_wait();
+            let app = application.clone();
+            async move {
+                let launch_error = status?
+                    .filter(|status| !status.success())
+                    .map(|status| status.to_string());
+                let scan = app.clone();
+                let processes = tokio::task::spawn_blocking(move || capture(&scan)).await??;
+                Ok(super::windows_startup::Snapshot {
+                    host: processes.iter().any(|process| {
+                        process.pid == launched_pid && equal_path(&process.image, &app)
+                    }),
+                    backend: processes.iter().any(|process| is_backend(&process.image)),
+                    launch_error,
+                })
+            }
+        })
+        .await
     }
 }
+
+fn is_backend(image: &Path) -> bool {
+    image.file_name().is_some_and(|name| {
+        name.to_string_lossy()
+            .eq_ignore_ascii_case("dumate-main-server.exe")
+    })
+}
+
+async fn shutdown_group(processes: Vec<Arc<Process>>) -> Result<()> {
+    let active = processes
+        .into_iter()
+        .filter_map(|process| match process.stopped() {
+            Ok(true) => None,
+            Ok(false) => Some(Ok(process)),
+            Err(error) => Some(Err(error)),
+        })
+        .collect::<Result<Vec<_>>>()?;
+    if active.is_empty() {
+        return Ok(());
+    }
+    let session = Arc::new(RestartSession::new(&active)?);
+    let worker = session.clone();
+    let shutdown = tokio::task::spawn_blocking(move || {
+        worker.shutdown()?;
+        // RmShutdown's return is not sufficient evidence for starting the next
+        // group. Confirm the captured native handles have actually exited.
+        for process in active {
+            if unsafe { WaitForSingleObject(process.handle.0, 15_000) } != WAIT_OBJECT_0 {
+                bail!("搭子进程尚未完全退出，未继续重启，请手动退出后重新打开");
+            }
+        }
+        Ok(())
+    });
+    super::windows_shutdown::finish(async { shutdown.await? }, || unsafe {
+        RmCancelCurrentTask(session.0);
+    })
+    .await
+}
+
 struct RestartSession(u32);
 impl RestartSession {
-    fn new(processes: &[Process]) -> Result<Self> {
+    fn new(processes: &[Arc<Process>]) -> Result<Self> {
         let mut handle = 0;
         let mut key = [0u16; 33];
         if unsafe { RmStartSession(&mut handle, 0, key.as_mut_ptr()) } != 0 {
             bail!("无法准备搭子重启，请手动重启")
         }
         let session = Self(handle);
-        let identities: Vec<_> = processes.iter().map(Process::unique).collect();
+        let identities: Vec<_> = processes.iter().map(|process| process.unique()).collect();
         if identities.is_empty()
             || identities.len() > 128
             || unsafe {
@@ -337,8 +431,9 @@ impl RestartSession {
     }
     fn shutdown(&self) -> Result<()> {
         // Explicit confirmation authorizes forced shutdown of this exact PID/birth set.
-        if unsafe { RmShutdown(self.0, RmForceShutdown as u32, None) } != 0 {
-            bail!("搭子未能完全退出，请手动退出后重新打开")
+        let status = unsafe { RmShutdown(self.0, RmForceShutdown as u32, None) };
+        if status != 0 {
+            bail!("搭子未能完全退出，请手动退出后重新打开（Windows 错误码 {status}）")
         }
         Ok(())
     }
@@ -375,7 +470,7 @@ mod tests {
         ));
         assert!(!process.stopped().unwrap());
         // Register this test process, inspect membership, and close the session. Never shut it down.
-        let _session = RestartSession::new(&[process]).unwrap();
+        let _session = RestartSession::new(&[Arc::new(process)]).unwrap();
     }
     #[test]
     #[ignore = "Windows desktop opt-in; gracefully closes only its own temporary window fixture"]
@@ -406,7 +501,7 @@ mod tests {
         }
         assert!(dir.path().join("ready").exists());
         let process = Process::open(child.0.id()).unwrap();
-        let session = RestartSession::new(&[process]).unwrap();
+        let session = RestartSession::new(&[Arc::new(process)]).unwrap();
         session.shutdown().unwrap();
         for _ in 0..100 {
             if child.0.try_wait().unwrap().is_some() {

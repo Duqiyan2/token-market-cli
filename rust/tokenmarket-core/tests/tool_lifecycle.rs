@@ -67,12 +67,8 @@ fn done(m: &InstallationManager, t: ToolId) -> tokenmarket_core::installation::I
     }
 }
 #[test]
-fn install_policy_matches_ccswitch_instead_of_runtime_or_pins() {
-    for platform in [
-        HostPlatform::MacOs,
-        HostPlatform::Unix,
-        HostPlatform::Windows,
-    ] {
+fn posix_install_policy_keeps_existing_channels() {
+    for platform in [HostPlatform::MacOs, HostPlatform::Unix] {
         let root = tempfile::tempdir().unwrap();
         let e = env(root.path(), platform);
         for tool in [
@@ -123,6 +119,50 @@ fn install_policy_matches_ccswitch_instead_of_runtime_or_pins() {
         }
     }
 }
+#[test]
+fn windows_prefers_official_native_distributions_even_with_npm_available() {
+    use tokenmarket_core::installation::InstallMethod;
+    let root = tempfile::tempdir().unwrap();
+    let e = env(root.path(), HostPlatform::Windows);
+    executable(&root.path().join("bin/npm.cmd"), "fixture npm");
+    for (tool, method) in [
+        (ToolId::KimiCode, InstallMethod::Standalone),
+        (ToolId::Pi, InstallMethod::Standalone),
+        (ToolId::OhMyPi, InstallMethod::Standalone),
+        (ToolId::ClaudeCode, InstallMethod::Script),
+        (ToolId::Codex, InstallMethod::Script),
+        (ToolId::GrokBuild, InstallMethod::Script),
+    ] {
+        let p = recipes::plan(tool, &e, "x86_64").unwrap();
+        assert_eq!(p.method, method, "{tool}");
+        let commands = p
+            .steps
+            .iter()
+            .flat_map(|s| &s.args)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(!commands.contains("npm"), "{tool}: {commands}");
+    }
+    let kimi = recipes::plan(ToolId::KimiCode, &e, "x86_64").unwrap();
+    assert!(kimi.steps.iter().any(|s| s
+        .download
+        .as_ref()
+        .is_some_and(|(url, _)| url.ends_with("win32-x64.zip"))));
+    let opencode = recipes::plan(ToolId::OpenCode, &e, "x86_64").unwrap();
+    assert!(opencode.steps.iter().any(|s| s
+        .download
+        .as_ref()
+        .is_some_and(|(url, _)| url.ends_with(".zip"))));
+    let harness = recipes::plan(ToolId::DeepSeekHarness, &e, "x86_64").unwrap();
+    assert!(harness.steps.iter().any(|s| s
+        .download
+        .as_ref()
+        .is_some_and(|(url, _)| url.ends_with(".exe"))));
+    let npm = recipes::plan(ToolId::OpenClaw, &e, "x86_64").unwrap();
+    assert_eq!(npm.method, InstallMethod::Npm);
+}
+
 #[cfg(unix)]
 fn npm_install(home: &Path, tool: ToolId, package: &str) -> PathBuf {
     use std::os::unix::fs::symlink;

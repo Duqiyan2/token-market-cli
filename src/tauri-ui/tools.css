@@ -119,9 +119,9 @@
 .tool-version-copy .tool-version-empty { white-space: nowrap; }
 .tool-install-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .install-column .tool-install-actions { flex-direction: column; align-items: flex-end; }
-.install-column button.tool-install, .install-column button.tool-upgrade, .install-column button.tool-upgrade-guide { display: inline-flex; justify-content: center; align-items: center; gap: 6px; min-height: 34px; min-width: 0; margin: 0; padding: 6px 8px; font-size: 12px; line-height: 1.5; color: var(--ink); border: 1px solid var(--line); background: var(--surface); }
-.install-column button:hover { background: var(--hover); }
-.install-column button:disabled { color: var(--muted); background: var(--disabled); }
+.tool-install-actions button.tool-install, .install-column button.tool-upgrade, .install-column button.tool-upgrade-guide { display: inline-flex; justify-content: center; align-items: center; gap: 6px; min-height: 34px; min-width: 0; margin: 0; padding: 6px 8px; font-size: 12px; line-height: 1.5; color: var(--ink); border: 1px solid var(--line); background: var(--surface); }
+.tool-install-actions button.tool-install:hover, .install-column button:hover { background: var(--hover); }
+.tool-install-actions button.tool-install:disabled, .install-column button:disabled { color: var(--muted); background: var(--disabled); }
 .install-column .tool-install-unavailable { grid-column: 1 / -1; max-width: none; font-size: 11px; }
 .install-column .tool-download { padding: 2px; font-size: 11px; min-height: 28px; }
 .tool-action-icon { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }

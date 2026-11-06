@@ -10,16 +10,6 @@
   progress.innerHTML = '<progress max="100" aria-label="客户端更新下载进度"></progress><p class="tool-download-summary"></p>';
   el('client-update-status').after(progress);
   const check = el('check-client-update');
-  const recovery = el('client-update-recovery');
-  recovery.onclick = async () => {
-    recovery.disabled = true;
-    try { await invoke('open_client_update_recovery'); }
-    catch (error) {
-      el('client-recovery-help').textContent = String(error);
-      el('client-recovery-help').hidden = false;
-    }
-    finally { recovery.disabled = !latest?.recoveryAvailable; }
-  };
   let checking = false;
   let currentVersion = '未知';
   let latest = null;
@@ -78,8 +68,6 @@
     }
     latest = value;
     window.TokenMarketDownloadProgress.render(progress, value.status === 'downloading', value.downloadProgress);
-    recovery.disabled = !value.recoveryAvailable;
-    el('client-recovery-help').hidden = Boolean(value.recoveryAvailable);
     currentVersion = value.currentVersion;
     el('client-current-version').textContent = `当前版本 ${value.currentVersion}`;
     el('client-update-status').textContent = value.status === 'available'
@@ -102,6 +90,7 @@
     install.hidden = !['ready','installing'].includes(value.status);
     install.disabled = installing || value.status !== 'ready' || !value.installAvailable;
     el('client-install-unavailable').hidden = value.status !== 'ready' || Boolean(value.installAvailable);
+    el('client-install-unavailable').textContent = value.installUnavailableReason || '安装并重启暂不可用，请重新安装官网最新版客户端；已有工具连接保留。';
     el('client-install-error').textContent = ['ready','handoff'].includes(value.status) ? value.error || '' : '';
     el('client-install-error').hidden = !el('client-install-error').textContent;
     el('client-update-notes').textContent = value.releaseNotes || '';

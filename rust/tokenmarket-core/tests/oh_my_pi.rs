@@ -286,7 +286,11 @@ fn oh_my_pi_uses_the_official_installer_without_requiring_bun() {
         assert!(manager.availability(tool).supported);
         assert_eq!(
             manager.availability(tool).version.as_deref(),
-            Some("latest")
+            Some(if platform == HostPlatform::Windows {
+                "18.15.0"
+            } else {
+                "latest"
+            })
         );
         manager.start(tool).unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
@@ -301,10 +305,17 @@ fn oh_my_pi_uses_the_official_installer_without_requiring_bun() {
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         let steps = executor.steps.lock().unwrap();
-        assert_eq!(steps.len(), 1);
-        let command = steps[0].args.join(" ");
-        assert!(command.contains("https://omp.sh/install"));
-        assert!(steps[0].download.is_none());
+        if platform == HostPlatform::Windows {
+            assert!(steps.iter().any(|step| step
+                .download
+                .as_ref()
+                .is_some_and(|(url, _)| url.contains(_asset))));
+            assert!(steps.iter().any(|step| step.args.join(" ").contains(_sha)));
+        } else {
+            assert_eq!(steps.len(), 1);
+            assert!(steps[0].args.join(" ").contains("https://omp.sh/install"));
+            assert!(steps[0].download.is_none());
+        }
         assert!(!root
             .path()
             .join(".tokenmarket/desktop-connections")

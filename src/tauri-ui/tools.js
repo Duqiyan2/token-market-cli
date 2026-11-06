@@ -151,17 +151,24 @@
     if (className) element.className = className;
     return element;
   }
+  function connectionCompatibility(entry) {
+    const assessment=updates.get(entry.id)?.connectionCompatibility;
+    if (!assessment || assessment.state==='unknown' || !entry.connection || entry.connection.state==='environment_mismatch' || entry.connection.state==='configuration_changed' && assessment.state!=='unsupported') return null;
+    return assessment.keyId===entry.connection.keyId && assessment.connectionId===entry.connection.connectionId ? assessment : null;
+  }
   function connectionLabel(entry) {
     if (!entry.connection) return '未接入';
+    const compatibility=connectionCompatibility(entry);
+    if (compatibility && compatibility.state!=='compatible') return ({reconnect_required:'需要重新接入',unsupported:'当前版本暂不支持'})[compatibility.state] || '接入兼容性待确认';
     return ({environment_mismatch:'已接入其他环境', configuration_changed:'配置已改变或不可用', configured_untested:'已配置，未测试', test_passed:'接口文本测试通过', test_failed:'接口文本测试失败'})[entry.connection.state] || '已配置，未测试';
   }
   const currentConnection = entry => Boolean(entry.connection) && entry.connection.state !== 'environment_mismatch';
-  const testBlocked = entry => ['configuration_changed','environment_mismatch'].includes(entry.connection?.state);
+  const testBlocked = entry => ['configuration_changed','environment_mismatch'].includes(entry.connection?.state) || ['reconnect_required','unsupported'].includes(connectionCompatibility(entry)?.state);
   function stateBadge(entry) {
     if (!entry.installed && !entry.connection) {
       const state = text('span', '—', 'tool-state not-applicable'); state.title = '安装后可接入'; state.setAttribute('aria-label', '尚无连接，安装后可接入'); return state;
     }
-    return text('span', connectionLabel(entry), `tool-state ${entry.connection?.state || 'unconnected'}`);
+    return text('span', connectionLabel(entry), `tool-state ${connectionCompatibility(entry)?.state==='unsupported' ? 'test_failed' : testBlocked(entry) ? 'configuration_changed' : entry.connection?.state || 'unconnected'}`);
   }
   function toolIcon(entry) {
     const icon = text('div', '', 'tool-icon'); const image = document.createElement('img');
@@ -220,22 +227,26 @@
     const row = text('div', '', 'info-row tool-path-row'); row.append(text('span',label),text('code',path || '暂未获取','tool-path-value')); return row;
   }
   function installationDetails(entry) {
-    const sheet = text('section', '', 'sheet tool-files-sheet'); sheet.append(text('h2','安装与配置'));
+    const sheet = text('section', '', 'sheet tool-files-sheet'); sheet.append(text('h2','安装信息'));
     const source = selectedLocation(entry);
     sheet.append(detailRow(entry.installed ? '安装方式' : '安装方案', entry.installed ? sourceLabel(source?.method) || '来源未确认' : entry.installationMethod || '暂未获取'));
     if (source) {
       sheet.append(pathRow('当前入口',source.path));
-      if (source.resolvedPath && source.resolvedPath !== source.path) sheet.append(pathRow('实际文件',source.resolvedPath));
     }
-    sheet.append(pathRow('配置目录',entry.configDirectory),pathRow('接入配置文件',entry.configPath));
-    if (entry.configExists === false) sheet.append(text('p','此配置文件尚未生成，可在工具初始化或接入后创建。','tool-installation-note'));
     if (locations(entry).length>1) {sheet.append(text('h3','检测到的安装'),installationPanel(entry));}
     return sheet;
   }
-  function versionDisplay(value) { return value?.match(/\b\d+\.\d+\.\d+(?:\.\d+)*(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?/)?.[0] || value || '版本未知'; }
+  function versionDisplay(value) { if(value==='latest')return '官方最新版'; return value?.match(/\b\d+\.\d+\.\d+(?:\.\d+)*(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?/)?.[0] || value || '版本未知'; }
+  function installationButton(entry, locked, job = null) {
+    const running = Boolean(job?.running), upgrade = Boolean(job?.upgrade);
+    const button = actionButton(upgrade ? '升级' : entry.id === 'qwenwork' ? '下载安装' : '安装', `tool-install${running ? ' tool-operation-running' : ''}`, () => install(entry, upgrade), locked || running);
+    if (!running) withIcon(button, upgrade ? 'up' : 'down');
+    button.setAttribute('aria-busy', String(running));
+    return button;
+  }
   function installationActions(entry, locked) {
     const group = text('div', '', 'tool-install-actions');
-    const button = withIcon(actionButton(entry.id === 'qwenwork' ? '下载安装' : '安装', 'tool-install', () => install(entry), locked || !entry.installation?.supported), 'down');
+    const button = installationButton(entry, locked || !entry.installation?.supported, installationJobs.get(entry.id));
     if (!entry.installation?.supported) button.title = entry.installation?.reason || '暂无兼容安装方案';
     group.append(button);
     if (!entry.installation?.supported) group.append(actionButton('官方安装说明', 'quiet tool-download', async () => {
@@ -256,10 +267,11 @@
         const inline = text('small',summary.includes('%') ? summary.split(' · ')[0] : summary,'tool-download-inline');
         inline.title = summary; progress.append(inline);
       }
-      const button = actionButton(job.upgrade ? '升级' : entry.id === 'qwenwork' ? '下载安装' : '安装', `tool-install${job.running ? ' tool-operation-running' : ''}`, () => install(entry,job.upgrade), job.running);
-      button.setAttribute('aria-busy', String(job.running));
+      const button = installationButton(entry, locked, job);
       button.title = job.state.detail || '';
-      cell.append(progress,button);
+      const group = text('div', '', 'tool-install-actions');
+      group.append(button);
+      cell.append(progress,group);
       return cell;
     }
     const copy = text('div', '', 'tool-version-copy'), update = updates.get(entry.id);
@@ -278,15 +290,15 @@
       return cell;
     }
     const current = text('span', update ? versionDisplay(update.currentVersion) : checking ? '读取中…' : '已安装', 'tool-version'); current.title = update?.currentVersion || '正在读取版本'; copy.append(current);
-    if ((update?.canUpgrade || update?.manualUpgrade) && (update.latestVersion || update.targetVersion)) copy.append(text('small', `新版本 ${versionDisplay(update.latestVersion || update.targetVersion)}`, 'tool-version-target'));
+    if ((update?.canUpgrade || update?.manualUpgrade) && (update.latestVersion || update.targetVersion)) copy.append(text('small', update.targetVersion==='latest' ? '官方最新下载' : `新版本 ${versionDisplay(update.latestVersion || update.targetVersion)}`, 'tool-version-target'));
     else if (update?.state === 'unsupported_update') {copy.append(text('small', `新版本 ${versionDisplay(update.latestVersion)}`, 'tool-version-target'),text('small', '接入适配需更新', 'tool-update-badge'));}
     else if (update?.state === 'check_failed' || update?.state === 'unknown') copy.append(text('small', '版本检查未完成', 'tool-update-badge'));
     else if (update?.state === 'node_required') copy.append(text('small', update.note, 'tool-location-error'));
     if (update?.note) copy.title = update.note;
     cell.append(copy);
     if (update?.canUpgrade) {
-      const button = withIcon(actionButton(entry.installed ? '升级' : '继续升级', 'tool-upgrade', () => confirmUpgrade(entry), locked));
-      button.title = `升级至官方最新版 ${update.targetVersion}`; cell.append(button);
+      const button = withIcon(actionButton(entry.id==='qwenwork' ? '更新' : entry.installed ? '升级' : '继续升级', 'tool-upgrade', () => confirmUpgrade(entry), locked));
+      button.title = update.targetVersion==='latest' ? '下载官方最新版' : `升级至官方最新版 ${update.targetVersion}`; cell.append(button);
     } else if (update?.manualUpgrade) {
       const button = withIcon(actionButton('手动更新', 'tool-upgrade-guide', () => showManualUpdate(entry), locked), 'external'); button.title = '通过原安装渠道更新至官方最新版'; cell.append(button);
     }
@@ -357,9 +369,9 @@
     try {
       const state = await runInstaller(entry, upgrade, current, update, () => false, confirmedUpdate);
       operationSucceeded = state?.stage === 'succeeded';
-      if (state?.stage === 'installer_opened') pendingNativeInstallations.add(entry.id);
+      if (state?.stage === 'installer_opened' && !upgrade) pendingNativeInstallations.add(entry.id);
       if (upgrade && operationSucceeded) updates.delete(entry.id);
-    } catch (error) { if (authenticated && current === generation) update({stage:'failed',detail:String(error),output:[]}); }
+    } catch (error) { if (authenticated && current === generation) update({...job.state,stage:'failed',detail:String(error)}); }
     finally {
       job.running = false;
       if (authenticated && current === generation) await refresh(true);
@@ -469,7 +481,7 @@
         group.append(test);
         const menu = text('details', '', 'tool-menu'); menu.dataset.liveKey = 'connection-menu'; menu.append(text('summary', '管理连接'));
         const options = text('div', '', 'tool-menu-options');
-        options.append(actionButton('重新接入', 'tool-connect', event => { event.currentTarget.closest('details').open = false; void connect(entry); }, !entry.canConnect || locked));
+        options.append(actionButton('重新接入', 'tool-connect', event => { event.currentTarget.closest('details').open = false; void connect(entry); }, !entry.canConnect || locked || connectionCompatibility(entry)?.state==='unsupported'));
         options.append(actionButton('取消接入', 'tool-disconnect', event => { event.currentTarget.closest('details').open = false; confirmDisconnectStart(entry); }, locked));
         menu.append(options); group.append(menu);
       }
@@ -482,8 +494,8 @@
     }
     const update = updates.get(entry.id);
     if (detailed && update?.canUpgrade) {
-      const button = actionButton(entry.installed ? '升级' : '继续升级', 'tool-upgrade', () => confirmUpgrade(entry), locked);
-      button.title = `升级至官方最新版 ${update.targetVersion}`; group.append(button);
+      const button = actionButton(entry.id==='qwenwork' ? '更新' : entry.installed ? '升级' : '继续升级', 'tool-upgrade', () => confirmUpgrade(entry), locked);
+      button.title = update.targetVersion==='latest' ? '下载官方最新版' : `升级至官方最新版 ${update.targetVersion}`; group.append(button);
     }
     if (entry.installed || locations(entry).length) {
       const menu = text('details','','tool-lifecycle-menu'); menu.dataset.liveKey = 'lifecycle-menu'; menu.append(text('summary','更多'));
@@ -511,7 +523,8 @@
     if (connection) {
       const notice = text('div', '', `notice ${testBlocked(entry) ? 'warning' : connection.state === 'test_failed' ? 'error' : connection.state === 'test_passed' ? 'success' : ''}`);
       notice.append(text('h3', connectionLabel(entry)));
-      const note = connection.state === 'environment_mismatch' ? '当前工具使用其他环境的连接，尚未接入当前环境，测试已停用。请通过“管理连接 → 重新接入”切换到当前环境。' : connection.state === 'configuration_changed' ? '当前配置与接入记录不一致，测试已停用。请检查配置或重新接入。' : connection.state === 'test_passed' ? window.TokenMarketConnectionTests.scope : connection.state === 'test_failed' ? `未通过接口文本测试。请检查权限、余额与模型可用性后重试。${window.TokenMarketConnectionTests.scope}` : '配置已保存，尚未发起模型测试。可以先打开工具；需要时再确认费用并测试。';
+      const compatibility=connectionCompatibility(entry);
+      const note = compatibility && compatibility.state!=='compatible' ? compatibility.message : connection.state === 'environment_mismatch' ? '当前工具使用其他环境的连接，尚未接入当前环境，测试已停用。请通过“管理连接 → 重新接入”切换到当前环境。' : connection.state === 'configuration_changed' ? '当前配置与接入记录不一致，测试已停用。请检查配置或重新接入。' : connection.state === 'test_passed' ? window.TokenMarketConnectionTests.scope : connection.state === 'test_failed' ? `未通过接口文本测试。请检查权限、余额与模型可用性后重试。${window.TokenMarketConnectionTests.scope}` : '配置已保存，尚未发起模型测试。可以先打开工具；需要时再确认费用并测试。';
       notice.append(text('p', note)); nextDetail.append(notice);
     } else nextDetail.append(text('p', entry.id === 'dumate-enterprise' ? '企业管理员需开放自定义模型与模型选择权限。先在 DuMate 登录企业版并完全退出，再接入；将使用当前企业登录态查询权限。导入后在此选择一个模型并确认费用测试，通过后重新打开 DuMate 并在会话中选择。' : entry.id === 'dumate' ? 'DuMate 个人版一次配置一个模型。接入、重新接入、切换模型或取消接入后，都需要完全退出并重新打开搭子后生效。' : entry.installed ? '工具已安装，接入后即可使用 Token Market 模型。' : '先安装工具，再返回检查更新和接入。', 'notice'));
     nextDetail.append(actions(entry, true));
@@ -521,7 +534,7 @@
       const version = text('section', '', `sheet tool-version-sheet${update.manualUpgrade ? ' tool-manual-update' : ''}`);
       const target = update.latestVersion || update.targetVersion;
       const updateNote = update.manualUpgrade ? `${update.note}${target ? `。目标版本 ${versionDisplay(target)}` : ''}${entry.id === 'qwenwork' ? '。' : '，完成后返回点击“检查更新”。'}` : update.note;
-      version.append(text('h2', update.manualUpgrade ? '手动更新' : '版本与更新'), detailRow('当前版本', versionDisplay(update.currentVersion)), detailRow('官方最新版本', update.latestVersion || (update.manualUpgrade && !target ? '请在原安装渠道查看' : '检查未完成')), text('p', updateNote));
+      version.append(text('h2', update.manualUpgrade ? '手动更新' : '版本与更新'), detailRow('当前版本', versionDisplay(update.currentVersion)), detailRow('官方最新版本', update.latestVersion || (target==='latest' ? '官方最新下载' : update.manualUpgrade && !target ? '请在原安装渠道查看' : '检查未完成')), text('p', updateNote));
       if (['check_failed','unknown','manual_update','unsupported_update'].includes(update.state) || !update.canUpgrade && update.currentVersion !== update.targetVersion) version.append(actionButton(update.manualUpgrade ? '打开官方更新指引' : '官方更新说明', 'quiet tool-download', async () => { try { await invoke('download_tool', {tool:entry.id}); } catch (error) { showResult('无法打开说明', String(error)); } }));
       nextDetail.append(version);
     }
@@ -939,12 +952,13 @@
   document.body.append(upgradeConfirm);
   function confirmUpgrade(entry) {
     const update = updates.get(entry.id); if (!update?.canUpgrade || installing || batching || checking) return;
-    upgradeConfirm.replaceChildren(text('h3', `升级 ${entry.name}`), text('p', `${update.currentVersion} → ${update.targetVersion}`, 'upgrade-version'), text('p', '将升级到当前检查到的官方最新版。请先完全退出该工具；升级后重新打开，已有连接无需重新接入。'));
+    const download=entry.id==='qwenwork';
+    upgradeConfirm.replaceChildren(text('h3', `${download ? '更新' : '升级'} ${entry.name}`), text('p', `${versionDisplay(update.currentVersion)} → ${versionDisplay(update.targetVersion)}`, 'upgrade-version'), text('p', download ? '从官网下载最新版安装包，并按现有流程打开安装程序。' : '将升级到当前检查到的官方最新版。请先完全退出该工具；升级后重新打开，将重新检查接入兼容性。'));
     if (locations(entry).length > 1) upgradeConfirm.append(installationPanel(entry));
     if (update.upgradePath) upgradeConfirm.append(pathRow('本次升级入口',update.upgradePath));
     if (update.upgradeCommand) upgradeConfirm.append(text('pre',update.upgradeCommand,'tool-upgrade-command'));
     const buttons = text('div', '', 'tool-actions');
-    buttons.append(actionButton('取消', '', () => upgradeConfirm.close()), actionButton('确认升级', 'primary', () => { upgradeConfirm.close(); void install(entry, true, update); }));
+    buttons.append(actionButton('取消', '', () => upgradeConfirm.close()), actionButton(download ? '确认更新' : '确认升级', 'primary', () => { upgradeConfirm.close(); void install(entry, true, update); }));
     upgradeConfirm.append(buttons); upgradeConfirm.showModal();
   }
   const batchDialog = document.createElement('dialog'); batchDialog.className = 'tool-batch-upgrade-dialog'; document.body.append(batchDialog);
@@ -953,7 +967,7 @@
     const seen = new Set();
     return entries.filter(entry => {
       const installation = entry.id === 'dumate-enterprise' ? 'dumate' : entry.id;
-      if (!entry.installed || !updates.get(entry.id)?.canUpgrade || seen.has(installation)) return false;
+      if (!entry.installed || !updates.get(entry.id)?.canUpgrade || updates.get(entry.id)?.targetVersion==='latest' || seen.has(installation)) return false;
       seen.add(installation); return true;
     });
   }
@@ -980,7 +994,7 @@
     const current = generation; batching = true; batchStop = false; render();
     const stop = actionButton('停止全部升级', 'batch-upgrade-stop', () => {batchStop = true; stop.disabled = true; summary.textContent = '正在停止当前操作，剩余工具将不再升级；原生安装器需在其窗口中取消。';});
     controls.replaceChildren(stop);
-    let succeeded = 0, failed = 0, skipped = 0;
+    let succeeded = 0, downloaded = 0, failed = 0, skipped = 0;
     try {
       for (const [index,job] of jobs.entries()) {
         if (!authenticated || current !== generation || batchStop) { skipped = jobs.length-index; break; }
@@ -991,6 +1005,7 @@
           }, () => batchStop, job.update);
           if (!state) { skipped = jobs.length-index-1; break; }
           if (state.stage === 'succeeded') { succeeded++; updates.delete(job.entry.id); }
+          else if(state.stage==='installer_opened') { downloaded++; job.status.textContent='下载完成'; }
           else { failed++; job.status.textContent = state.stage === 'cancelled' ? '已停止' : `升级失败：${state.detail || '请单独重试'}`; }
         } catch(error) { failed++; skipped = jobs.length-index-1; job.status.textContent = `升级状态未确认：${String(error)}`; job.status.title = String(error); break; }
       }
@@ -998,7 +1013,7 @@
       batching = false;
       if (authenticated && current === generation) {
         jobs.filter(job=>job.status.textContent==='等待升级').forEach(job=>{job.status.textContent='未执行';});
-        summary.textContent = `已升级 ${succeeded} 个 · 未完成 ${failed} 个${skipped ? ` · 未执行 ${skipped} 个` : ''}`;
+        summary.textContent = `已升级 ${succeeded} 个${downloaded ? ` · 已下载 ${downloaded} 个` : ''} · 未完成 ${failed} 个${skipped ? ` · 未执行 ${skipped} 个` : ''}`;
         controls.replaceChildren(actionButton('完成', 'primary batch-upgrade-close', () => batchDialog.close()));
         await refresh(true); void checkUpdates();
       } else if (authenticated) { render(); void checkUpdates(); }
@@ -1025,11 +1040,12 @@
         if (!authenticated || current !== generation) return;
         updates = new Map(result.map(update => [update.tool, update]));
         const installed = result.filter(update => update.state !== 'not_installed');
-        const available = installed.filter(update => update.canUpgrade).length;
+        const available = installed.filter(update => update.canUpgrade && update.targetVersion!=='latest').length;
+        const downloadable = installed.filter(update => update.canUpgrade && update.targetVersion==='latest').length;
         const manual = installed.filter(update => update.manualUpgrade).length;
         const restricted = installed.filter(update => update.state === 'unsupported_update').length;
         const failed = installed.filter(update => ['check_failed','unknown','busy','broken','node_required'].includes(update.state)).length;
-        updateStatus.textContent = `已检查 ${installed.length} 个已安装工具 · ${available} 个可升级${manual ? ` · ${manual} 个需手动更新` : ''}${restricted ? ` · ${restricted} 个接入适配需更新` : ''}${failed ? ` · ${failed} 个检查未完成，可重试` : ''} · ${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`;
+        updateStatus.textContent = `已检查 ${installed.length} 个已安装工具 · ${available} 个可升级${downloadable ? ` · ${downloadable} 个可下载更新` : ''}${manual ? ` · ${manual} 个需手动更新` : ''}${restricted ? ` · ${restricted} 个接入适配需更新` : ''}${failed ? ` · ${failed} 个检查未完成，可重试` : ''} · ${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`;
       } catch (error) {
         if (!silent && authenticated && current === generation) { updates.clear(); updateStatus.textContent = `检查未完成：${String(error)}`; }
       } finally {

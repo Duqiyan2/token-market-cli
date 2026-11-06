@@ -48,6 +48,26 @@ async fn malformed_config_is_preserved_before_any_key_is_requested() {
     assert!(result.unwrap_err().to_string().contains("配置"));
     assert_eq!(std::fs::read_to_string(config).unwrap(), "{broken");
     assert!(manager.list().unwrap().is_empty());
+    let log = std::fs::read_to_string(
+        root.path()
+            .join(".tokenmarket/desktop-connections/logs/connections.jsonl"),
+    )
+    .expect("failed connections must leave a diagnostic log");
+    let events: Vec<serde_json::Value> = log
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(events.first().unwrap()["status"], "started");
+    let failed = events.last().unwrap();
+    assert_eq!(failed["status"], "failed");
+    assert_eq!(failed["stage"], "configuration_read");
+    assert_eq!(failed["operation"], "connect");
+    assert_eq!(failed["tool"], "claude-code");
+    assert!(events
+        .iter()
+        .all(|event| event["operation_id"] == failed["operation_id"]));
+    assert!(!log.contains("private"));
+    assert!(!log.contains("{broken"));
 }
 
 async fn platform(
@@ -143,6 +163,37 @@ fn context() -> ConnectContext {
     }
 }
 #[tokio::test]
+async fn transport_failure_leaves_safe_network_diagnostics() {
+    let root = tempdir().unwrap();
+    let inventory = inventory(root.path());
+    let directory = root.path().join("state");
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    drop(listener);
+    let manager = tokenmarket_core::connections::ConnectionManager::with_credentials(
+        directory.clone(),
+        url.clone(),
+        url,
+        support::credentials(&directory),
+    );
+    assert!(manager
+        .connect(
+            context(),
+            ToolId::ClaudeCode,
+            &inventory,
+            root.path().join("settings.json")
+        )
+        .await
+        .is_err());
+    let log = std::fs::read_to_string(directory.join("logs/connections.jsonl")).unwrap();
+    let event: serde_json::Value = serde_json::from_str(log.lines().last().unwrap()).unwrap();
+    assert_eq!(event["status"], "failed");
+    assert_eq!(event["stage"], "key_inspect");
+    assert_eq!(event["error"]["connect_error"], true);
+    assert!(!log.contains("desktop-secret"));
+    assert!(!log.contains("http://"));
+}
+#[tokio::test]
 async fn connect_uses_desktop_key_and_visible_model_without_generation_and_records_restore_receipts(
 ) {
     let root = tempdir().unwrap();
@@ -166,6 +217,46 @@ async fn connect_uses_desktop_key_and_visible_model_without_generation_and_recor
         .await
         .unwrap();
     assert_eq!(summary.state, "configured_untested");
+    let log = std::fs::read_to_string(
+        root.path()
+            .join(".tokenmarket/desktop-connections/logs/connections.jsonl"),
+    )
+    .unwrap();
+    let events: Vec<serde_json::Value> = log
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(events.last().unwrap()["status"], "succeeded");
+    for stage in [
+        "key_inspect",
+        "key_issue",
+        "model_catalogue",
+        "backup_configuration",
+        "write_configuration",
+        "save_connection_record",
+    ] {
+        assert!(
+            events.iter().any(|event| event["stage"] == stage),
+            "missing stage: {stage}"
+        );
+    }
+    assert!(events
+        .iter()
+        .any(|event| event["status"] == "http_response" && event["error"]["http_status"] == 200));
+    assert!(events.iter().any(
+        |event| event["status"] == "credential_ready" && event["error"]["key_reused"] == false
+    ));
+    for private in [
+        "desktop-secret",
+        "sk-fixture",
+        "old-provider",
+        "old-bearer",
+        "OTHER_PROVIDER_KEY",
+        "Research",
+        "Ada",
+    ] {
+        assert!(!log.contains(private), "diagnostics leaked private data");
+    }
     assert_eq!(
         inventory.list_with_connections(&manager).unwrap()[0]
             .connection
@@ -274,6 +365,20 @@ async fn key_issuance_failure_and_missing_installation_leave_existing_files_and_
     );
     assert!(manager.list().unwrap().is_empty());
     assert_eq!(server.await.unwrap().len(), 1);
+    let log = std::fs::read_to_string(
+        root.path()
+            .join(".tokenmarket/desktop-connections/logs/connections.jsonl"),
+    )
+    .unwrap();
+    let events: Vec<serde_json::Value> = log
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(events.last().unwrap()["status"], "failed");
+    assert_eq!(events.last().unwrap()["stage"], "key_issue");
+    assert!(events
+        .iter()
+        .any(|event| event["status"] == "service_rejected"));
     std::fs::remove_file(root.path().join("bin/claude")).unwrap();
     assert!(manager
         .connect(context(), ToolId::ClaudeCode, &inventory, config.clone())

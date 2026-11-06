@@ -587,7 +587,15 @@ async fn malformed_or_ambiguous_native_shapes_fail_before_key_issuance() {
             !error.contains("无法取得接入 Key"),
             "shape not preflighted: {original}: {error}"
         );
-        assert!(!root.path().join("state").exists());
+        let entries: Vec<_> = std::fs::read_dir(root.path().join("state"))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(
+            entries,
+            vec![std::ffi::OsString::from("logs")],
+            "invalid configuration may write diagnostics but no connection state"
+        );
         assert_eq!(std::fs::read_to_string(path).unwrap(), original);
     }
 }

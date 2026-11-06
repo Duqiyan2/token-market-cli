@@ -67,6 +67,39 @@ test('Client Update installation explains active work and requires an explicit r
   }finally{await f.close();}
 });
 
+test('Windows Client Update enables installation after a verified download and hands off only after confirmation', async () => {
+  const f=await openFixture({signedIn:false,deferClientDownload:true,clientUpdate:{status:'available',currentVersion:'1.0.0',availableVersion:'1.1.0',installAvailable:true}});try {
+    const p=f.page;await p.locator('#login [data-desktop-settings]').click();
+    await p.locator('#check-client-update').click();
+    await p.getByRole('button',{name:'下载客户端更新',exact:true}).click();
+    await p.getByRole('button',{name:'确认下载',exact:true}).click();
+    await p.waitForFunction(()=>Boolean(window.__fixture.resolveClientDownload));
+    assert.equal(await p.locator('#install-client-update').isVisible(),false);
+    await p.evaluate(()=>window.__fixture.resolveClientDownload({status:'ready',currentVersion:'1.0.0',availableVersion:'1.1.0',installAvailable:true}));
+    const install=p.getByRole('button',{name:'安装并重启',exact:true});
+    await install.waitFor();assert.equal(await install.isEnabled(),true);
+    assert.equal(await p.locator('#client-install-unavailable').isVisible(),false);
+    await install.click();
+    assert.equal((await calls(p,'install_client_update')).length,0);
+    await p.getByRole('button',{name:'确认安装并重启',exact:true}).click();
+    await p.locator('#client-update-status').filter({hasText:'安装交接已启动'}).waitFor();
+    assert.deepEqual((await calls(p,'install_client_update')).map(c=>c.args),[{version:'1.1.0'}]);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('Windows Client Update displays its native installation rejection without macOS guidance', async () => {
+  const reason='安装并重启暂不可用：无法确认当前用户 NSIS 安装来源，请先使用官方安装包手动更新';
+  const f=await openFixture({signedIn:false,startupClientUpdate:{status:'ready',currentVersion:'1.0.0',availableVersion:'1.1.0',installAvailable:false,installUnavailableReason:reason}});try {
+    const p=f.page;await p.locator('#login [data-desktop-settings]').click();
+    assert.equal(await p.locator('#install-client-update').isDisabled(),true);
+    assert.equal(await p.locator('#client-install-unavailable').innerText(),reason);
+    assert.doesNotMatch(await p.locator('#client-install-unavailable').innerText(),/macOS|Apple Silicon|应用程序/);
+    assert.equal((await calls(p,'install_client_update')).length,0);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
 test('pending Client Update startup shows recovery without claiming completion or enabling another install', async () => {
   const pending={status:'handoff',currentVersion:'1.0.0',error:'尚未确认目标客户端版本启动，请使用官方安装包恢复'};
   const f=await openFixture({signedIn:false,startupClientUpdate:pending,clientUpdate:pending});try {
@@ -145,31 +178,24 @@ test('a rejected current Client Update install restores retry despite old handof
   }finally{await f.close();}
 });
 
-test('Client Update opens only the native configured recovery route and explains missing publisher configuration', async () => {
+test('Client Update omits the removed recovery entry regardless of native recovery configuration', async () => {
   for (const available of [false,true]) {
     const f=await openFixture({signedIn:false,startupClientUpdate:{status:'handoff',currentVersion:'1.0.0',error:'尚未确认目标客户端版本启动',recoveryAvailable:available}});try {
       const p=f.page;await p.locator('#login [data-desktop-settings]').click();
-      const button=p.getByRole('button',{name:'官方安装包与恢复说明',exact:true});
-      assert.equal(await button.isEnabled(),available);
-      if (available) {
-        await button.click();
-        const invoked=await calls(p,'open_client_update_recovery');
-        assert.equal(invoked.length,1);
-        assert.deepEqual(invoked[0].args,{});
-      } else {
-        assert.match(await p.locator('#client-recovery-help').textContent(),/联系发布方/);
-      }
+      assert.equal(await p.getByRole('button',{name:'官方安装包与恢复说明',exact:true}).count(),0);
+      assert.equal(await p.locator('#client-recovery-help').count(),0);
+      assert.equal((await calls(p,'open_client_update_recovery')).length,0);
       assert.deepEqual(f.errors,[]);
     }finally{await f.close();}
   }
 });
 
-test('known terminal Client Update failure remains visible with explicit check and recovery actions', async () => {
+test('known terminal Client Update failure remains visible with an explicit retry action', async () => {
   const f=await openFixture({signedIn:false,startupClientUpdate:{status:'install_failed',currentVersion:'1.0.0',error:'上次客户端安装失败，退出码 17',automatic:false,recoveryAvailable:true}});try {
     const p=f.page;await p.locator('#login [data-desktop-settings]').click();
     await p.locator('#client-update-status').filter({hasText:'退出码 17'}).waitFor();
     assert.equal(await p.getByRole('button',{name:'重试检查客户端更新',exact:true}).isEnabled(),true);
-    assert.equal(await p.getByRole('button',{name:'官方安装包与恢复说明',exact:true}).isEnabled(),true);
+    assert.equal(await p.getByRole('button',{name:'官方安装包与恢复说明',exact:true}).count(),0);
     assert.equal(await p.locator('#client-update-reminder').isVisible(),false);
     assert.equal((await calls(p,'install_client_update')).length,0);
     await p.getByRole('button',{name:'重试检查客户端更新',exact:true}).click();
@@ -790,6 +816,60 @@ test('QwenWork downloads from its enabled action and connects only after actual 
   }finally{await f.close();}
 });
 
+test('QwenWork online updates reuse the background download flow without completion or reconnect popups', async () => {
+  const f=await openFixture({installedTools:['qwenwork'],qwenworkOnlineUpdate:true});try {
+    const p=f.page,row=p.locator('[data-tool="qwenwork"]');
+    await row.locator('.tool-upgrade').waitFor();
+    assert.match(await p.locator('#upgrade-all-tools').innerText(),/（0）/);
+    await row.locator('.tool-upgrade').click();
+    const confirmation=p.locator('.tool-upgrade-confirm[open]');
+    assert.match(await confirmation.innerText(),/官方最新版/);
+    assert.doesNotMatch(await confirmation.innerText(),/新版本 latest|重新接入|暂不支持/);
+    await confirmation.getByRole('button',{name:'确认更新',exact:true}).click();
+    await p.waitForFunction(()=>window.__fixture.installation?.stage==='installer_opened');
+    await row.locator('.tool-upgrade:enabled').waitFor();
+    assert.equal(await p.locator('dialog[open]').count(),0);
+    assert.doesNotMatch(await row.innerText(),/安装器已打开|已升级|重新接入|安装完成/);
+    assert.equal((await calls(p,'start_tool_upgrade')).length,1);
+    for(const command of ['connect_tool','reconnect_tool','test_tool_connection']) assert.equal((await calls(p,command)).length,0);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+for(const [state,label,message] of [
+  ['reconnect_required','需要重新接入','工具安装已变化，请重新接入以更新适配'],
+  ['unsupported','当前版本暂不支持','当前版本暂不支持接入，请联系管理员'],
+]) test(`external tool version changes show ${state} on the existing connection`, async () => {
+  const f=await openFixture({multi:true,connectionCompatibilities:{workbuddy:{state,message,keyId:'receipt-workbuddy',connectionId:'connection-workbuddy'}}});try {
+    const p=f.page,row=p.locator('[data-tool="workbuddy"]');
+    await row.locator('.tool-state').filter({hasText:label}).waitFor();
+    assert.equal(await p.locator('dialog[open]').count(),0);
+    await detail(p,'workbuddy');
+    assert.match(await p.locator('#tool-detail-region').innerText(),new RegExp(message));
+    assert.equal(await p.locator('#tool-detail-region .tool-test').isDisabled(),true);
+    assert.equal((await calls(p,'reconnect_tool')).length,0);
+    assert.equal((await calls(p,'start_tool_upgrade')).length,0);
+    await p.evaluate(()=>{window.__fixture.entries.find(e=>e.id==='workbuddy').connection.connectionId='new-connection';window.dispatchEvent(new Event('focus'));});
+    await p.locator('#tool-detail-region .tool-test:enabled').waitFor();
+    assert.doesNotMatch(await p.locator('#tool-detail-region').innerText(),new RegExp(message));
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('unknown compatibility preserves the existing connection and actions', async () => {
+  const f=await openFixture({multi:true,connectionCompatibilities:{workbuddy:{state:'unknown',message:'接入兼容性暂无法确认，请联系管理员',keyId:'receipt-workbuddy',connectionId:'connection-workbuddy'}}});try {
+    const p=f.page,row=p.locator('[data-tool="workbuddy"]');
+    await p.locator('.tools-updates-status').filter({hasText:'已检查'}).waitFor();
+    assert.doesNotMatch(await row.innerText(),/兼容性待确认|需要重新接入|当前版本暂不支持/);
+    await detail(p,'workbuddy');
+    await p.locator('#tool-detail-region .tool-test:enabled').waitFor();
+    assert.doesNotMatch(await p.locator('#tool-detail-region').innerText(),/兼容性暂无法确认|联系管理员/);
+    assert.equal(await p.locator('dialog[open]').count(),0);
+    for(const command of ['connect_tool','reconnect_tool','test_tool_connection','start_tool_upgrade']) assert.equal((await calls(p,command)).length,0);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
 test('OpenCode installation uses the shared flow and leaves connection as a separate action', async () => {
   const f=await openFixture(); try {
     const p=f.page;
@@ -1340,16 +1420,19 @@ test('installed tools show their method and selected path and expand additional 
     assert.deepEqual(f.errors,[]);
   }finally{await f.close();}
 });
-test('uninstalled tools describe the real installer and details distinguish program, config directory and config file', async () => {
-  const f=await openFixture({configPaths:{codex:'/Users/fixture/custom config/codex/config.toml'}});try {
+test('installation details show the entry and omit resolved files and configuration paths', async () => {
+  const resolvedPath='/Users/fixture/.npm-global/lib/node_modules/@openai/codex/bin/codex.js';
+  const f=await openFixture({configPaths:{codex:'/Users/fixture/custom config/codex/config.toml'},installations:{codex:[{path:'/Users/fixture/.npm-global/bin/codex',resolvedPath,method:'npm',selected:true}]}});try {
     const p=f.page;
     assert.match(await p.locator('[data-tool="openclaw"] .tool-planned-method').textContent(),/npm/);
     assert.match(await p.locator('[data-tool="pi"] .tool-planned-method').textContent(),/npm/);
     await detail(p,'codex');const info=p.locator('.tool-files-sheet');
     assert.match(await info.textContent(),/安装方式npm/);assert.match(await info.textContent(),/当前入口\/Users\/fixture\/\.npm-global\/bin\/codex/);
-    assert.equal(await info.locator('.tool-path-row').filter({hasText:'配置目录'}).locator('code').textContent(),'/Users/fixture/custom config/codex');
-    assert.equal(await info.locator('.tool-path-row').filter({hasText:'接入配置文件'}).locator('code').textContent(),'/Users/fixture/custom config/codex/config.toml');
-    assert.match(await info.textContent(),/尚未生成/);assert.deepEqual(f.errors,[]);
+    assert.equal(await info.getByRole('heading',{name:'安装信息',exact:true}).count(),1);
+    assert.equal(await info.locator('.tool-path-row').count(),1);
+    const content=await info.textContent();
+    assert.doesNotMatch(content,/实际文件|配置目录|接入配置文件|尚未生成|custom config/);
+    assert.equal(content.includes(resolvedPath),false);assert.deepEqual(f.errors,[]);
   }finally{await f.close();}
 });
 test('uninstalled applications retain the planned installation caption in list and details', async () => {

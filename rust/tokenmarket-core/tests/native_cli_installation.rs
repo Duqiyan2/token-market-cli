@@ -142,7 +142,10 @@ fn claude_and_codex_follow_upstream_install_routes_and_preserve_configuration() 
             let steps = installer.steps.lock().unwrap();
             assert_eq!(steps.len(), 1);
             let command = steps[0].args.join(" ");
-            if tool == ToolId::ClaudeCode && platform != HostPlatform::Windows {
+            if platform == HostPlatform::Windows {
+                assert!(command.contains("install.ps1"));
+                assert!(!command.contains("@latest"));
+            } else if tool == ToolId::ClaudeCode {
                 assert!(command.contains("https://claude.ai/install.sh"));
             } else {
                 assert!(command.contains("@latest"));

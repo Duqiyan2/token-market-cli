@@ -27,6 +27,7 @@ pub struct ClientUpdateStatus {
     pub automatic: bool,
     pub remind: bool,
     pub install_available: bool,
+    pub install_unavailable_reason: Option<String>,
     pub recovery_available: bool,
     pub show_recovery_notice: bool,
     pub download_progress: Option<tokenmarket_core::installation::DownloadProgress>,
@@ -186,6 +187,11 @@ impl ClientUpdater {
                     automatic: false,
                     remind: false,
                     install_available: false,
+                    install_unavailable_reason: Some(match std::env::consts::OS {
+                        "macos" => "安装并重启暂不可用。请从“应用程序”中的 Apple Silicon 客户端更新；已有工具连接保留。",
+                        "windows" => "安装并重启暂不可用。请使用当前用户安装的 Windows x64 NSIS 客户端更新；已有工具连接保留。",
+                        _ => "当前系统暂不支持安装客户端更新。",
+                    }.into()),
                     recovery_available: false,
                     show_recovery_notice: false,
                 },
@@ -199,11 +205,11 @@ impl ClientUpdater {
     /// Native platform registration only; renderer cannot select an executor.
     pub fn with_installer(mut self, installer: Arc<dyn ClientUpdateInstaller>) -> Self {
         self.installer = Some(installer);
-        self.state
-            .lock()
-            .expect("client update state")
-            .status
-            .install_available = true;
+        {
+            let mut state = self.state.lock().expect("client update state");
+            state.status.install_available = true;
+            state.status.install_unavailable_reason = None;
+        }
         self
     }
 
@@ -590,8 +596,16 @@ pub fn setup(app: &AppHandle) {
     #[cfg(windows)]
     let updater = {
         let updater = match windows::installer(app) {
-            Some(installer) => updater.with_installer(installer),
-            None => updater,
+            Ok(installer) => updater.with_installer(installer),
+            Err(reason) => {
+                updater
+                    .state
+                    .lock()
+                    .expect("client update state")
+                    .status
+                    .install_unavailable_reason = Some(reason);
+                updater
+            }
         };
         updater.with_startup_reconciliation(windows::reconcile_startup)
     };
@@ -601,6 +615,11 @@ pub fn setup(app: &AppHandle) {
         let status = handle.state::<ClientUpdater>().startup_check(&handle).await;
         let _ = handle.emit("desktop-client-update-status", status);
     });
+}
+
+#[cfg(any(windows, test))]
+fn windows_current_user_nsis_build() -> bool {
+    env!("TOKEN_MARKET_CURRENT_USER_NSIS") == "true"
 }
 
 #[tauri::command]

@@ -56,6 +56,7 @@ impl ConnectionManager {
         tool: ToolId,
         device: &str,
         key: &IssuedKey,
+        diagnostic: &mut crate::diagnostics::Operation,
     ) -> Result<()> {
         let reply = self
             .key_operation(
@@ -64,6 +65,7 @@ impl ConnectionManager {
                 device,
                 "inspect",
                 json!({"key_id":key.key_id,"fingerprint":fingerprint(&key.api_key)}),
+                diagnostic,
             )
             .await?;
         if !matches!(reply.status.as_str(), "VALID" | "SAVED" | "APPLIED")
@@ -84,7 +86,16 @@ impl ConnectionManager {
         device: &str,
         action: &str,
         extra: Value,
+        diagnostic: &mut crate::diagnostics::Operation,
     ) -> Result<Reply> {
+        diagnostic.stage(match action {
+            "inspect" => "key_inspect",
+            "issue" => "key_issue",
+            "recover" => "key_recover",
+            "confirm" => "key_confirm_saved",
+            "applied" => "key_confirm_applied",
+            _ => "key_operation",
+        });
         let mut body = json!({"workspace_id":context.workspace_id,"device_id":device,"tool":tool,"naming_version":1});
         body.as_object_mut()
             .unwrap()
@@ -102,11 +113,13 @@ impl ConnectionManager {
             .send()
             .await
             .context("连接服务暂时不可用，已保存的信息未清除，请重试")?;
+        diagnostic.http_response(response.status().as_u16());
         if !response.status().is_success() {
             bail!("连接校验失败，请检查登录和访问权限后重试")
         }
         let payload: Value = response.json().await.context("连接服务响应无效")?;
         if payload["success"] == false {
+            diagnostic.service_rejected();
             // Older platforms reject newly registered tools before any Key operation.
             // Only classify known scope errors; arbitrary backend text can contain
             // private details and must never be echoed into the desktop UI.
@@ -130,6 +143,7 @@ impl ConnectionManager {
         }
         let reply: Reply = serde_json::from_value(payload.get("data").cloned().unwrap_or(payload))
             .context("连接服务响应不完整")?;
+        diagnostic.credential_state(&reply.status);
         if !matches!(reply.naming_version, Some(0 | 1))
             || reply.status == "MIGRATION_REQUIRED" && reply.naming_version != Some(0)
             || reply.naming_version == Some(0)
@@ -193,11 +207,12 @@ impl ConnectionManager {
         cached: Option<IssuedKey>,
         recovered: Option<String>,
         loss_confirmation: Option<&str>,
+        diagnostic: &mut crate::diagnostics::Operation,
     ) -> Result<(IssuedKey, bool)> {
         let raw = cached.as_ref().map(|key| key.api_key.clone()).or(recovered);
         let inspect = self.key_operation(context, tool, device, "inspect", json!({
             "key_id":cached.as_ref().map(|key| &key.key_id),"fingerprint":raw.as_deref().map(fingerprint)
-        })).await?;
+        }), diagnostic).await?;
         let reusable = matches!(
             inspect.status.as_str(),
             "VALID" | "SAVED" | "PENDING" | "APPLIED"
@@ -210,8 +225,10 @@ impl ConnectionManager {
             && raw.is_some()
         {
             let key = self.key_from_reply(inspect, raw.unwrap())?;
+            diagnostic.stage("persist_credentials");
             self.remember_key(context, tool, device, &key)?;
-            self.confirm_key(context, tool, device, &key, false).await?;
+            self.confirm_key(context, tool, device, &key, false, diagnostic)
+                .await?;
             return Ok((key, true));
         }
         let lost = matches!(
@@ -251,14 +268,14 @@ impl ConnectionManager {
             Err(_) => bail!("无法读取未完成的接入"),
         };
         let mut issued = if inspect.status == "PENDING" {
-            self.key_operation(context, tool, device, "recover", json!({"key_id":inspect.key_id,"request_id":inspect.request_id,"generation":inspect.generation})).await?
+            self.key_operation(context, tool, device, "recover", json!({"key_id":inspect.key_id,"request_id":inspect.request_id,"generation":inspect.generation}), diagnostic).await?
         } else {
             self.key_operation(context, tool, device, "issue", json!({
                 "key_id":inspect.key_id,"fingerprint":raw.as_deref().map(fingerprint),"request_id":pending.request_id,"replace_lost":lost
-            })).await?
+            }), diagnostic).await?
         };
         if issued.status == "PENDING" {
-            issued = self.key_operation(context, tool, device, "recover", json!({"key_id":issued.key_id,"request_id":issued.request_id,"generation":issued.generation})).await?;
+            issued = self.key_operation(context, tool, device, "recover", json!({"key_id":issued.key_id,"request_id":issued.request_id,"generation":issued.generation}), diagnostic).await?;
         }
         if issued.status != "ISSUED" {
             if matches!(
@@ -279,9 +296,11 @@ impl ConnectionManager {
             .context("接入服务未返回新的连接凭证")?;
         let key = self.key_from_reply(issued, raw)?;
         // Preserve the pending operation on failure. Never start another issuance silently.
+        diagnostic.stage("persist_credentials");
         self.remember_key(context, tool, device, &key)
             .context("无法保存连接信息，原连接未改变，请检查本地存储后重试")?;
-        self.confirm_key(context, tool, device, &key, false).await?;
+        self.confirm_key(context, tool, device, &key, false, diagnostic)
+            .await?;
         Ok((key, false))
     }
 
@@ -312,6 +331,7 @@ impl ConnectionManager {
         device: &str,
         key: &IssuedKey,
         applied: bool,
+        diagnostic: &mut crate::diagnostics::Operation,
     ) -> Result<()> {
         let Some(receipt) = &key.issuance else {
             return Ok(());
@@ -321,7 +341,7 @@ impl ConnectionManager {
         }
         let reply = self.key_operation(context, tool, device, if applied { "applied" } else { "confirm" }, json!({
             "key_id":key.key_id,"request_id":receipt.request_id,"generation":receipt.generation,"fingerprint":fingerprint(&key.api_key)
-        })).await?;
+        }), diagnostic).await?;
         if !matches!(reply.status.as_str(), "SAVED" | "APPLIED")
             || applied && reply.status != "APPLIED"
             || reply.key_id.as_deref() != Some(key.key_id.as_str())

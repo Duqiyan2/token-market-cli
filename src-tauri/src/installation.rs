@@ -32,7 +32,20 @@ pub async fn check_tool_updates(
     app: AppHandle,
 ) -> Result<Vec<tokenmarket_core::installation::updates::ToolUpdate>, String> {
     let manager = app.state::<InstallationManager>().inner().clone();
-    Ok(manager.check_updates().await)
+    let mut updates = manager.check_updates().await;
+    // Recheck local adapter support even if a remote release check failed.
+    // Includes updates performed outside Token Market.
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<tokenmarket_core::connections::ConnectionManager>()
+            .assess_tool_updates(
+                &tokenmarket_core::inventory::ToolInventory::current(),
+                &mut updates,
+            )?;
+        Ok::<_, anyhow::Error>(updates)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())
 }
 
 #[tauri::command]

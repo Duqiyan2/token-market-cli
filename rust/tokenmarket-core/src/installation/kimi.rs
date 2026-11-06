@@ -153,7 +153,7 @@ chmod u+x "$3/kimi"
 }
 
 /// Recognize a positive old-product identity, never incidental runtime versions.
-pub(super) fn is_legacy_version(output: &str) -> bool {
+pub(crate) fn is_legacy_version(output: &str) -> bool {
     let output = output.trim();
     let parts: Vec<_> = output.split_whitespace().collect();
     let lower = output.to_ascii_lowercase();

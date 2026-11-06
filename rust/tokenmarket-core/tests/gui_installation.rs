@@ -160,6 +160,60 @@ fn qwenwork_application(home: &Path, version: &str) {
 }
 
 #[test]
+fn qwenwork_online_update_only_downloads_and_hands_off_without_login_or_reconnection() {
+    for platform in [HostPlatform::MacOs, HostPlatform::Windows] {
+        let root = tempfile::tempdir().unwrap();
+        if platform == HostPlatform::MacOs {
+            qwenwork_application(root.path(), "1.5.0");
+        } else {
+            let app = root.path().join("Applications/QwenWorkCN/QwenWorkCN.exe");
+            std::fs::create_dir_all(app.parent().unwrap()).unwrap();
+            std::fs::write(app, "inert executable fixture").unwrap();
+        }
+        let executor = Arc::new(GuiInstaller::default());
+        let manager = InstallationManager::new(
+            environment(root.path(), platform),
+            "x86_64".into(),
+            executor.clone(),
+        );
+        let update = manager.inspect_update(ToolId::QwenWork, Ok("latest".into()));
+        assert!(update.can_upgrade, "{update:?}");
+        assert!(!update.manual_upgrade);
+        assert!(update.latest_version.is_none());
+        assert!(manager
+            .start_upgrade_confirmed(ToolId::QwenWork, "latest", "stale-plan")
+            .is_err());
+        manager
+            .start_upgrade_confirmed(
+                ToolId::QwenWork,
+                "latest",
+                update.upgrade_revision.as_deref().unwrap(),
+            )
+            .unwrap();
+        let done = until(&manager, ToolId::QwenWork, |state| {
+            state.stage.is_terminal()
+        });
+        assert_eq!(done.stage, InstallStage::InstallerOpened, "{}", done.detail);
+        assert_eq!(done.detail, "下载完成");
+        assert!(done.version.is_none());
+        assert_eq!(executor.steps.lock().unwrap().len(), 2);
+        assert!(executor.steps.lock().unwrap()[0]
+            .download
+            .as_ref()
+            .unwrap()
+            .0
+            .starts_with("https://assets.qwenwork.cn/release/latest/"));
+        assert!(!root.path().join(".qwenworkcn").exists());
+        assert!(!root
+            .path()
+            .join(".tokenmarket/desktop-connections")
+            .exists());
+        let retry = manager.inspect_update(ToolId::QwenWork, Ok("latest".into()));
+        assert!(retry.can_upgrade);
+    }
+}
+
+#[test]
 fn qwenwork_native_download_can_retry_and_reuses_a_later_installed_version() {
     let root = tempfile::tempdir().unwrap();
     let executor = Arc::new(GuiInstaller::default());

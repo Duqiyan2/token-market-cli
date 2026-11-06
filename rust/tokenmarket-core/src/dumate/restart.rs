@@ -16,6 +16,10 @@ mod macos;
 mod windows;
 #[cfg(any(windows, test))]
 mod windows_contract;
+#[cfg(any(windows, test))]
+mod windows_shutdown;
+#[cfg(any(windows, test))]
+mod windows_startup;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

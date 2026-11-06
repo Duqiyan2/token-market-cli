@@ -45,7 +45,7 @@
     document.dispatchEvent(new CustomEvent('client-update-status', {detail:value}));
     if (value.status === 'install_failed' && value.showRecoveryNotice && !failureAnnounced) {
       failureAnnounced = true;
-      el('client-update-failure-message').textContent = value.error || '上次客户端安装未完成，请查看更新与恢复说明。';
+      el('client-update-failure-message').textContent = value.error || '上次客户端安装未完成，请重新检查更新。';
       failureNotice.hidden = false;
       // Native acknowledgement persists for this application process, so a
       // renderer reload does not repeat an already displayed notice.

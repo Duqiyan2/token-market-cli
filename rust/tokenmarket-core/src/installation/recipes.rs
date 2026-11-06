@@ -138,6 +138,20 @@ pub fn plan(
     environment: &InstallationEnvironment,
     architecture: &str,
 ) -> Result<InstallPlan> {
+    if environment.platform == HostPlatform::Windows {
+        match tool {
+            ToolId::DeepSeekHarness if architecture == "x86_64" => {
+                return super::gui::plan(tool, environment, architecture);
+            }
+            ToolId::KimiCode | ToolId::Pi | ToolId::OhMyPi => {
+                return fallback_plan(tool, environment, architecture);
+            }
+            ToolId::OpenCode if architecture == "x86_64" => {
+                return super::opencode::plan(environment, architecture);
+            }
+            _ => {}
+        }
+    }
     if !super::policy::is_desktop(tool) {
         return super::policy::install_plan(tool, environment, architecture);
     }

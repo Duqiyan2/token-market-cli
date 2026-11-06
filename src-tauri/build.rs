@@ -18,4 +18,25 @@ fn main() {
         println!("cargo:rustc-link-arg=/MANIFESTINPUT:{}", manifest.display());
     }
     tauri_build::try_build(attributes).expect("failed to run tauri-build");
+
+    // Tauri's generated runtime Config deliberately omits bundle.windows.nsis.
+    // Read the same target config and CLI merge used by tauri-build instead of
+    // treating the missing runtime field as an unsupported installation.
+    let target = tauri_utils::platform::Target::from_triple(&std::env::var("TARGET").unwrap());
+    let (mut config, _) =
+        tauri_utils::config::parse::read_from(target, &std::env::current_dir().unwrap())
+            .expect("failed to read update installation policy");
+    if let Ok(overrides) = std::env::var("TAURI_CONFIG") {
+        json_patch::merge(
+            &mut config,
+            &serde_json::from_str(&overrides).expect("invalid TAURI_CONFIG"),
+        );
+    }
+    let config: tauri_utils::config::Config =
+        serde_json::from_value(config).expect("invalid update installation policy");
+    let current_user_nsis = config.bundle.windows.nsis.as_ref().is_some_and(|nsis| {
+        nsis.install_mode == tauri_utils::config::NSISInstallerMode::CurrentUser
+            && nsis.template.is_none()
+    });
+    println!("cargo:rustc-env=TOKEN_MARKET_CURRENT_USER_NSIS={current_user_nsis}");
 }

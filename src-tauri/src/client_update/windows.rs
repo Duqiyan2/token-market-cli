@@ -220,7 +220,7 @@ struct InstallationSource {
 }
 impl InstallationSource {
     fn native<R: Runtime>(app: &AppHandle<R>) -> Result<Self> {
-        use tauri::utils::config::{BundleType, NSISInstallerMode};
+        use tauri::utils::config::BundleType;
         let user = RegistryScope {
             machine_hive: false,
             system_owner: false,
@@ -237,9 +237,7 @@ impl InstallationSource {
                 .unwrap_or("Token Market")
                 .into(),
             nsis_bundle: tauri::utils::platform::bundle_type() == Some(BundleType::Nsis),
-            current_user_config: app.config().bundle.windows.nsis.as_ref().is_some_and(|n| {
-                n.install_mode == NSISInstallerMode::CurrentUser && n.template.is_none()
-            }),
+            current_user_config: super::windows_current_user_nsis_build(),
             scopes: vec![
                 user.clone(),
                 RegistryScope {
@@ -321,13 +319,14 @@ pub struct WindowsInstaller<R: Runtime> {
 }
 /// Validated by the hosted Windows subprocess suite (run 41964120322).
 /// Bundle, scope and ownership checks still run for every native registration.
-pub fn installer(app: &AppHandle) -> Option<Arc<dyn ClientUpdateInstaller>> {
+pub fn installer(app: &AppHandle) -> Result<Arc<dyn ClientUpdateInstaller>, String> {
     if !cfg!(target_arch = "x86_64") {
-        return None;
+        return Err("安装并重启仅支持 Windows x64 客户端".into());
     }
-    let source = InstallationSource::native(app).ok()?;
-    installed_application(&source).ok()?;
-    Some(Arc::new(WindowsInstaller {
+    let source = InstallationSource::native(app)
+        .map_err(|error| format!("无法读取客户端安装来源：{error:#}"))?;
+    installed_application(&source).map_err(|error| format!("安装并重启暂不可用：{error:#}"))?;
+    Ok(Arc::new(WindowsInstaller {
         app: app.clone(),
         source,
     }))

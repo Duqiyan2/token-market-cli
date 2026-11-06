@@ -209,9 +209,14 @@ async fn codex_invalid_toml_or_conflicting_auth_fails_before_issuance_or_local_w
             .to_string();
         assert!(error.contains("Codex CLI"), "{error}");
         assert_eq!(std::fs::read_to_string(path).unwrap(), original);
-        assert!(
-            !directory.exists(),
-            "preflight must precede any device/key/backup write"
+        let entries: Vec<_> = std::fs::read_dir(&directory)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(
+            entries,
+            vec![std::ffi::OsString::from("logs")],
+            "preflight must precede any device/key/backup write; only diagnostics are allowed"
         );
     }
 }

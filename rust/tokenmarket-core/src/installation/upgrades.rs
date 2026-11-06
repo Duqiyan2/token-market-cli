@@ -136,6 +136,22 @@ pub(super) fn route(
     digest: Option<&str>,
     current_version: Option<&str>,
 ) -> Result<Route> {
+    if tool == ToolId::QwenWork {
+        if latest != "latest" {
+            normalized_version(latest)?;
+        }
+        let probe = crate::inventory::ToolInventory::new(env.clone())
+            .application_path(tool)
+            .ok_or_else(|| anyhow::anyhow!("未检测到千问办公安装"))?;
+        let mut plan = super::gui::plan(tool, env, arch)?;
+        plan.version = latest.into();
+        return Ok(Route::Automatic(UpgradePlan {
+            plan,
+            probe,
+            managed: false,
+            anchored: true,
+        }));
+    }
     let latest = normalized_version(latest)?;
     let _ = (arch, digest);
     super::policy::upgrade(tool, &latest, env, current_version)
