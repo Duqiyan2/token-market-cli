@@ -532,8 +532,8 @@ test('DuMate personal installs separately, configures one model, and tests only 
     const p=f.page; const row=p.locator('[data-tool="dumate"]');
     await row.locator('img').evaluate(image=>image.decode());
     await row.locator('.tool-install').click();
-    await p.locator('.tool-install-status').filter({hasText:'安装完成'}).waitFor();
-    await p.locator('.tool-install-close').click();
+    await p.waitForFunction(()=>window.__fixture.installation?.stage==='succeeded');
+
     assert.equal((await calls(p,'connect_tool')).length,0);
     await detail(p,'dumate');
     assert.match(await p.locator('#tool-detail-region').innerText(),/一次配置一个模型/);
@@ -561,8 +561,8 @@ test('Kimi Code installs and connects separately with its own tool identity', as
     await row.locator('img').evaluate(image => image.decode());
     assert.equal(await row.locator('img').evaluate(image => image.naturalWidth > 0),true);
     await row.locator('.tool-install').click();
-    await p.locator('.tool-install-status').filter({hasText:'安装完成'}).waitFor();
-    await p.locator('.tool-install-close').click();
+    await p.waitForFunction(()=>window.__fixture.installation?.stage==='succeeded');
+
     assert.equal((await calls(p,'connect_tool')).length,0);
     assert.equal((await calls(p,'test_tool_connection')).length,0);
     await row.locator('.tool-connect').click();
@@ -582,7 +582,7 @@ test('Hermes installation and connection use its own identity without hidden pai
   const f=await openFixture();try {
     const p=f.page;const row=p.locator('[data-tool="hermes"]');assert.equal(await row.count(),1);
     await row.locator('img').evaluate(image=>image.decode());
-    await row.locator('.tool-install').click();await p.locator('.tool-install-status').filter({hasText:'安装完成'}).waitFor();await p.locator('.tool-install-close').click();
+    await row.locator('.tool-install').click();await p.waitForFunction(()=>window.__fixture.installation?.stage==='succeeded');
     assert.equal((await calls(p,'connect_tool')).length,0);assert.equal((await calls(p,'test_tool_connection')).length,0);
     await row.locator('.tool-connect').click();await p.locator('.connect-confirm-dialog[open]').waitFor();await p.locator('.connect-confirm').click();await p.getByRole('heading',{name:'Hermes 已接入'}).waitFor();assert.deepEqual((await calls(p,'connect_tool'))[0].args,{tool:'hermes',recovery:null});await p.locator('dialog[open] .close').click();await detail(p,'hermes');assert.match(await p.locator('#tool-detail-region').innerText(),/Hermes/);assert.equal((await calls(p,'test_tool_connection')).length,0);assert.deepEqual(f.errors,[]);
   }finally{await f.close();}
@@ -596,8 +596,8 @@ test('MiniMax Code installs and connects separately with its own tool identity',
     await row.locator('img').evaluate(image => image.decode());
     assert.equal(await row.locator('img').evaluate(image => image.naturalWidth > 0),true);
     await row.locator('.tool-install').click();
-    await p.locator('.tool-install-status').filter({hasText:'安装完成'}).waitFor();
-    await p.locator('.tool-install-close').click();
+    await p.waitForFunction(()=>window.__fixture.installation?.stage==='succeeded');
+
     assert.equal((await calls(p,'connect_tool')).length,0);
     assert.equal((await calls(p,'test_tool_connection')).length,0);
     await row.locator('.tool-connect').click();
@@ -631,8 +631,8 @@ test('Oh My Pi installs and connects separately with its own tool identity', asy
     await row.locator('img').evaluate(image => image.decode());
     assert.equal(await row.locator('img').evaluate(image => image.naturalWidth > 0),true);
     await row.locator('.tool-install').click();
-    await p.locator('.tool-install-status').filter({hasText:'安装完成'}).waitFor();
-    await p.locator('.tool-install-close').click();
+    await p.waitForFunction(()=>window.__fixture.installation?.stage==='succeeded');
+
     assert.equal((await calls(p,'connect_tool')).length,0);
     assert.equal((await calls(p,'test_tool_connection')).length,0);
     await row.locator('.tool-connect').click();
@@ -655,8 +655,8 @@ test('Pi installs and connects separately with its own tool identity', async () 
     await row.locator('img').evaluate(image => image.decode());
     assert.equal(await row.locator('img').evaluate(image => image.naturalWidth > 0),true);
     await row.locator('.tool-install').click();
-    await p.locator('.tool-install-status').filter({hasText:'安装完成'}).waitFor();
-    await p.locator('.tool-install-close').click();
+    await p.waitForFunction(()=>window.__fixture.installation?.stage==='succeeded');
+
     assert.equal((await calls(p,'connect_tool')).length,0);
     assert.equal((await calls(p,'test_tool_connection')).length,0);
     await row.locator('.tool-connect').click();
@@ -679,8 +679,8 @@ test('Grok Build installs and connects separately with its own tool identity', a
     await row.locator('img').evaluate(image => image.decode());
     assert.equal(await row.locator('img').evaluate(image => image.naturalWidth > 0),true);
     await row.locator('.tool-install').click();
-    await p.locator('.tool-install-status').filter({hasText:'安装完成'}).waitFor();
-    await p.locator('.tool-install-close').click();
+    await p.waitForFunction(()=>window.__fixture.installation?.stage==='succeeded');
+
     assert.equal((await calls(p,'connect_tool')).length,0);
     assert.equal((await calls(p,'test_tool_connection')).length,0);
     await row.locator('.tool-connect').click();
@@ -700,13 +700,12 @@ test('OpenClaw installs with progress and refreshes without implicitly connectin
   const f=await openFixture(); try {
     const p=f.page;
     await p.locator('[data-tool="openclaw"] .tool-install').click();
-    await p.locator('.tool-install-dialog[open]').waitFor();
-    await p.locator('.tool-install-status').filter({hasText:'安装完成'}).waitFor();
-    assert.match(await p.locator('.tool-install-output').innerText(),/运行依赖/);
+    assert.equal(await p.locator('.tool-install-dialog[open]').count(),0);
+    await p.waitForFunction(()=>window.__fixture.installation?.stage==='succeeded');
     assert.equal((await calls(p,'start_tool_installation')).length,1);
     assert.equal((await calls(p,'connect_tool')).length,0);
     assert.equal((await calls(p,'test_tool_connection')).length,0);
-    await p.locator('.tool-install-close').click();
+
     await p.locator('[data-tool="openclaw"] .tool-connect').waitFor();
     assert.deepEqual(f.errors,[]);
   } finally { await f.close(); }
@@ -719,8 +718,8 @@ test('Claude Code and Codex install through shared actions without automatic con
       const install = p.locator(`[data-tool="${tool}"] .tool-install`);
       assert.equal(await install.isDisabled(),false);
       await install.click();
-      await p.locator('.tool-install-status').filter({hasText:'安装完成'}).waitFor();
-      await p.locator('.tool-install-close').click();
+      await p.waitForFunction(()=>window.__fixture.installation?.stage==='succeeded');
+
       await p.locator(`[data-tool="${tool}"] .tool-connect`).waitFor();
     }
     assert.deepEqual((await calls(p,'start_tool_installation')).map(call=>call.args.tool),['claude-code','codex']);
@@ -737,6 +736,8 @@ test('installation can be cancelled and unsupported installs explain their disab
     assert.equal(await unsupported.isDisabled(),true);
     assert.match(await unsupported.getAttribute('title'),/兼容安装方案/);
     await p.locator('[data-tool="openclaw"] .tool-install').click();
+    await detail(p,'openclaw');
+    await p.locator('#tool-detail-region .tool-install-view').click();
     await p.locator('.tool-install-status').filter({hasText:'运行依赖'}).waitFor();
     await p.locator('.tool-install-cancel').click();
     await p.locator('.tool-install-status').filter({hasText:'安装已取消'}).waitFor();
@@ -748,25 +749,41 @@ test('installation can be cancelled and unsupported installs explain their disab
   } finally { await f.close(); }
 });
 
-test('GUI installation waits for native completion and can stop waiting without cancelling the native installer', async () => {
+test('GUI download opens the installer and restores Install until actual discovery succeeds', async () => {
   const f=await openFixture({missingGui:true,guiInstall:true});try {
-    const p=f.page;
-    await p.locator('[data-tool="workbuddy"] .tool-install').click();
-    await p.locator('.tool-install-status').filter({hasText:'原生安装器'}).waitFor();
-    assert.equal((await p.locator('.tool-install-status').innerText()).split('请完成原生安装器中的步骤').length,2);
-    assert.equal(await p.locator('.tool-install-cancel').isVisible(),false);
-    assert.equal(await p.locator('.tool-install-stop-wait').isVisible(),true);
-    await p.locator('.tool-install-stop-wait').click();
-    await p.locator('.tool-install-status').filter({hasText:'已停止等待'}).waitFor();
-    assert.match(await p.locator('.tool-install-status').innerText(),/请在原生安装器中取消/);
-    assert.equal(await p.locator('.tool-install-retry').isVisible(),true);
-    await p.locator('.tool-install-close').click();
-    await p.locator('[data-tool="deepseek-harness"] .tool-install').click();
-    await p.locator('.tool-install-status').filter({hasText:'原生安装器'}).waitFor();
-    await p.locator('.tool-install-close').click();
-    await p.evaluate(()=>{window.__fixture.nativeInstalled=true;});
-    await p.locator('[data-tool="deepseek-harness"] .tool-connect').waitFor();
-    assert.equal((await calls(p,'cancel_tool_installation')).length,1);
+    const p=f.page,row=p.locator('[data-tool="workbuddy"]');
+    await row.locator('.tool-install').click();
+    await p.waitForFunction(()=>window.__fixture.calls.some(c=>c.command==='start_tool_installation'));
+    await row.locator('.tool-install:enabled').waitFor();
+    assert.equal(await p.locator('dialog[open]').count(),0);
+    assert.equal(await row.locator('.tool-connect').count(),0);
+    await row.locator('.tool-install').click();
+    await p.waitForFunction(()=>window.__fixture.calls.filter(c=>c.command==='start_tool_installation').length===2);
+    await p.evaluate(()=>{const e=window.__fixture.entries.find(e=>e.id==='workbuddy');e.installed=true;e.canConnect=true;window.dispatchEvent(new Event('focus'));});
+    await row.locator('.tool-connect').waitFor();
+    assert.equal((await calls(p,'cancel_tool_installation')).length,0);
+    assert.equal((await calls(p,'connect_tool')).length,0);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('QwenWork downloads from its enabled action and connects only after actual installation', async () => {
+  const f=await openFixture({guiInstall:true});try {
+    const p=f.page,row=p.locator('[data-tool="qwenwork"]');
+    const button=row.getByRole('button',{name:'下载安装',exact:true});
+    assert.equal(await button.isEnabled(),true);
+    assert.doesNotMatch(await row.innerText(),/暂无安装方案|官网手动安装/);
+    await button.click();
+    await p.waitForFunction(()=>window.__fixture.calls.some(c=>c.command==='start_tool_installation'));
+    await row.locator('.tool-install:enabled').waitFor();
+    assert.deepEqual((await calls(p,'start_tool_installation'))[0].args,{tool:'qwenwork'});
+    assert.equal(await row.locator('.tool-connect').count(),0);
+    assert.equal(await p.locator('dialog[open]').count(),0);
+    await button.click();
+    await p.waitForFunction(()=>window.__fixture.calls.filter(c=>c.command==='start_tool_installation').length===2);
+    await p.evaluate(()=>{const e=window.__fixture.entries.find(e=>e.id==='qwenwork');e.installed=true;e.canConnect=true;window.dispatchEvent(new Event('focus'));});
+    await row.locator('.tool-connect').waitFor();
+    assert.equal((await calls(p,'download_tool')).length,0);
     assert.equal((await calls(p,'connect_tool')).length,0);
     assert.equal((await calls(p,'test_tool_connection')).length,0);
     assert.deepEqual(f.errors,[]);
@@ -777,11 +794,11 @@ test('OpenCode installation uses the shared flow and leaves connection as a sepa
   const f=await openFixture(); try {
     const p=f.page;
     await p.locator('[data-tool="opencode"] .tool-install').click();
-    await p.locator('.tool-install-status').filter({hasText:'安装完成'}).waitFor();
+    await p.waitForFunction(()=>window.__fixture.installation?.stage==='succeeded');
     assert.deepEqual((await calls(p,'start_tool_installation'))[0].args,{tool:'opencode'});
     assert.equal((await calls(p,'connect_tool')).length,0);
     assert.equal((await calls(p,'test_tool_connection')).length,0);
-    await p.locator('.tool-install-close').click();
+
     await p.locator('[data-tool="opencode"] .tool-connect').waitFor();
     assert.deepEqual(f.errors,[]);
   } finally { await f.close(); }
@@ -791,6 +808,8 @@ test('installation failure preserves the error and offers a retry', async () => 
   const f=await openFixture({installFail:true}); try {
     const p=f.page;
     await p.locator('[data-tool="openclaw"] .tool-install').click();
+    await detail(p,'openclaw');
+    await p.locator('#tool-detail-region .tool-install-view').click();
     await p.locator('.tool-install-status').filter({hasText:'依赖下载失败'}).waitFor();
     assert.match(await p.locator('.tool-install-output').innerText(),/运行依赖/);
     await p.getByRole('button',{name:'查看其他安装方式',exact:true}).click();
@@ -1148,7 +1167,7 @@ test('latest release upgrade has current and target versions, explicit confirmat
     await row.locator('.tool-upgrade').click();
     await f.page.locator('.tool-upgrade-confirm').getByRole('button',{name:'确认升级'}).click();
     await f.page.waitForFunction(()=>window.__fixture.installation?.stage==='succeeded');
-    await f.page.locator('.tool-install-close').click();
+    assert.equal(await f.page.locator('.tool-install-dialog[open]').count(),0);
     await f.page.waitForFunction(()=>window.__fixture.calls.filter(c=>c.command==='check_tool_updates').length===2);
     assert.equal((await calls(f.page,'start_tool_upgrade')).length,1);
     for(const command of ['start_tool_installation','connect_tool','reconnect_tool','disconnect_tool','test_tool_connection'])assert.equal((await calls(f.page,command)).length,0);
@@ -1177,6 +1196,7 @@ test('pending checks are coalesced and late update results cannot restore logged
 test('upgrade can be cancelled and retried through the shared progress dialog', async () => {
   const f=await openFixture({upgradeTool:'codex',updateVersions:{codex:'0.150.0'},installPending:true});try {
     await f.page.locator('[data-tool="codex"] .tool-upgrade').click();await f.page.getByRole('button',{name:'确认升级'}).click();
+    await detail(f.page,'codex');await f.page.locator('#tool-detail-region .tool-install-view').click();
     await f.page.getByRole('button',{name:'取消升级'}).click();await f.page.getByRole('button',{name:'重试升级'}).waitFor();
     await f.page.getByRole('button',{name:'重试升级'}).click();await f.page.waitForFunction(()=>window.__fixture.calls.filter(c=>c.command==='start_tool_upgrade').length===2);
     assert.equal((await calls(f.page,'start_tool_installation')).length,0);assert.deepEqual(f.errors,[]);
@@ -1297,7 +1317,7 @@ test('current-to-latest upgrade passes the exact official target and removes fix
     await row.locator('.tool-upgrade').click();assert.match(await p.locator('.tool-upgrade-confirm').textContent(),/2\.1\.311 → 2\.1\.318/);
     await p.getByRole('button',{name:'确认升级',exact:true}).click();await p.waitForFunction(()=>window.__fixture.installation?.stage==='succeeded');
     assert.deepEqual((await calls(p,'start_tool_upgrade'))[0].args,{tool:'claude-code',targetVersion:'2.1.318',planRevision:'fixture-upgrade-claude-code'});
-    await p.locator('.tool-install-close').click();await detail(p,'claude-code');
+    assert.equal(await p.locator('.tool-install-dialog[open]').count(),0);await detail(p,'claude-code');
     assert.doesNotMatch(await p.locator('.tool-version-sheet').textContent(),/已验证兼容版|内置安装版本|待验证/);
     assert.equal((await calls(p,'test_tool_connection')).length,0);assert.deepEqual(f.errors,[]);
   }finally{await f.close();}

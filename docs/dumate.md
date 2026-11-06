@@ -18,13 +18,13 @@
 
 ## 独立重启的范围
 
-本机已安装适配版本时，可用隔离子进程回归生产目录条件下的选择、接入、切换、重新接入和取消流程：
+本机已安装兼容引擎时，可用隔离子进程回归生产目录条件下的选择、接入、切换、重新接入和取消流程：
 
 ```bash
 cargo test --manifest-path rust/tokenmarket-core/Cargo.toml --test dumate live_runtime_identity_does_not_block_saved_model_configuration -- --ignored --exact --nocapture
 ```
 
-该测试只读取已安装引擎的兼容性摘要，使用临时账号目录、合成运行中 PID 和本机模拟平台，不启动或退出真实搭子，不调用付费模型。
+该测试只读取已安装引擎的接入能力，使用临时账号目录、合成运行中 PID 和本机模拟平台，不启动或退出真实搭子，不调用付费模型。
 
 重启不再读取任务状态、进程环境或本机鉴权凭据，不调用任务查询和引擎关闭接口。`OPENCODE_NEW_RUNTIME=0/1` 不再作为重启条件；保存配置仍与重启独立。
 
@@ -67,17 +67,14 @@ Windows 使用当前用户、可执行路径、PID 与启动时间登记进程�
 
 ## 兼容性与验证范围
 
-统一接管保存前核对官方引擎 SHA256；已运行时还只读核对进程身份、账号及运行模式，
-不检查任务忙碌状态。当前只支持官方 `1.0.89.447` 个人版本地引擎：
+接入、重新接入、加载模型和切换模型均按当前安装的引擎能力检查，不要求版本号、build 或引擎 SHA256 与安装器一致。Windows 的 `1.0.89.0`、用户升级或降级不会仅因版本不同被拒绝，也不会触发自动升降级。
 
-| 平台 | 引擎 SHA256 |
-| --- | --- |
-| macOS arm64 | `e5f9eee34333afa45a2cdafcd634b7c1a583334f55e018f5126eb8387f7b6763` |
-| Windows x64 | `4cf28953c1f38f56451f43eff55707eb7593e43aed6cb49a43d3384c44cc343d` |
+保存前只读扫描引擎内嵌代码，确认账号级扩展加载、配置/消息/参数钩子、个人文本与原生媒体来源、固定模型选择、任务路由和请求拦截入口。缺少入口时列出未检测到的能力，在申请平台 Key 和修改配置前停止。该检查是结构预检，不能证明任意版本的完整运行语义。
 
-启动扩展另查已验证版本与个人模式，支持 `OPENCODE_NEW_RUNTIME` 未设置、`0` 和 `1`；校验文本策略指纹，并确认原生全局自定义覆盖已停用。当前 `1.0.89.447` 的新模式 `1` 使用同一引擎插件、请求拦截和文本策略，已补齐原生隔离验证；未知模式仍在模型调用前明确失败。
-升级后的引擎需要重新核验；重装保留账号数据时扩展仍可保留，清除账号数据则需重新接入。
-这些保护无法保证任意未来版本仍加载同一扩展入口，因此不得承诺“一劳永逸”。
+扩展启动时不再限定 `DUMATE_APP_VER` 或 `OPENCODE_NEW_RUNTIME` 数值，而是验证实际个人版提供方、`glm-5` → `model-text` 映射、原生模型入口、文本策略指纹和已停用的原生全局覆盖。实际接口不兼容时明确报错，模型请求不回退到官方文本模型。仍保留个人版/企业版边界。
+
+macOS 和 Windows 的官方 `1.0.89.447` 引擎已进行只读能力扫描；升级、降级以及四段版本号由隔离回归覆盖。完整原生路由验收仍仅覆盖下述已测试安装，不代表所有新旧版本均已完成真机验收。重装保留账号数据时扩展可保留，清除账号数据则需重新接入。Windows 重启只核对应用身份和所属进程，不再绑定固定版本或 build。
+
 其他第三方引擎扩展暂拒绝混用，防止后加载的代码改变模型出口。
 
 隔离原生验收：
@@ -225,3 +222,17 @@ Base URL/API Key 的注册合同。这条 API 与本任务要求的模型调用�
 [更新智能体配置](https://cloud.baidu.com/doc/Dumate/s/Imtim8eog)的请求参数提供
 提示词、技能、文件、MCP 和工具配置，没有公开外部模型供应商配置。
 响应中的 `model.name` 也不构成写入外部模型的证据。
+
+版本兼容性回归：
+
+```sh
+cargo test --manifest-path rust/tokenmarket-core/Cargo.toml --test dumate --test dumate_compatibility
+cargo test --manifest-path rust/tokenmarket-core/Cargo.toml --lib dumate::unified
+node --test tests/dumate-unified.test.cjs
+```
+
+引擎可用以下只读检查验证；不执行目标引擎、不访问账号或模型：
+
+```sh
+TOKEN_MARKET_DUMATE_ENGINE="<引擎可执行文件路径>" cargo test --manifest-path rust/tokenmarket-core/Cargo.toml --lib dumate::unified::tests::installed_engine_capabilities -- --ignored --exact
+```

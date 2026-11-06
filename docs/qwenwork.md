@@ -1,6 +1,10 @@
 # 千问办公（QwenWorkCN）
 
-工具 ID 为 `qwenwork`。桌面端“一键接入”和 CLI 共用外置 worker 与本地代理方案：
+工具 ID 为 `qwenwork`。未安装时，桌面端“下载安装”会从[千问官方下载页](https://qwenwork.cn/download)的官方最新通道下载当前系统的安装包，并打开原生安装界面。支持 macOS 14+ 的 Apple 芯片和 Intel 客户端，以及 Windows 10+ x64 客户端。下载复用客户端的进度、取消和重试流程；打开安装器不等于安装成功，返回客户端后会重新检测实际应用。先完成安装并登录，再单独接入；已安装应用不因点击安装而自动升级或降级。更新仍通过官网或千问客户端进行，更新后需要重新接入。
+
+Windows 安装检测兼容平铺目录和官方 Launcher 布局：后者读取安装根目录 `updater.cfg` 的 `currentVersion`，定位该版本目录中的 `QwenWorkCN.exe`，接入时使用同目录的 `resources`。不把 `Launcher.exe` 单独视为安装完成，不选择尚未激活的新版本目录；注册表识别包含 `QwenWorkCN` 和“千问办公”，用于发现自定义安装位置。相关离线回归覆盖版本切换、残留启动器和无效配置，不代表 Windows 真机接入验收完成。
+
+桌面端“一键接入”和 CLI 共用外置 worker 与本地代理方案：
 
 ```sh
 tokenmarket connect qwenwork

@@ -7,6 +7,7 @@ license = "UNLICENSED"
 [dependencies]
 plist = "1"
 anyhow = "1"
+memchr = "2"
 base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 rand = "0.8"
@@ -20,10 +21,8 @@ sha2 = "0.10"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time", "sync", "io-util"] }
 toml_edit = { version = "0.23", features = ["serde"] }
 url = "2"
-jsonc-parser = { version = "0.34", features = ["cst", "serde_json"] }
-
-[dev-dependencies]
 tempfile = "3"
+jsonc-parser = { version = "0.34", features = ["cst", "serde_json"] }
 
 [lib]
 name = "tokenmarket_core"

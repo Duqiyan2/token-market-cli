@@ -38,6 +38,12 @@ fn auth(home: &Path, user: &str, mode: &str) {
         &json!({"activeProviderType":mode,"activeProfileId":"active","accountProfiles":[{"profileId":"active","loginType":mode,"bceUserId":user}],"cookies":"never displayed"}),
     );
 }
+fn compatible_engine(path: &Path) {
+    if !path.exists() {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, br#"{plugin,plugins}/*.{ts,js} config?.( "chat.message" "chat.params" QianfanPersonalQuota qianfan-multimodal modelSelection modelSettings ROUTING_DECIDE_API_URL XDG_CONFIG_HOME globalThis.fetch"#).unwrap();
+    }
+}
 fn fixture(home: &Path) -> ToolInventory {
     let bundle = home.join("Applications/DuMate.app/Contents");
     std::fs::create_dir_all(bundle.join("MacOS")).unwrap();
@@ -49,6 +55,7 @@ fn fixture(home: &Path) -> ToolInventory {
         std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
     std::fs::write(bundle.join("Info.plist"),r#"<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleExecutable</key><string>DuMate</string><key>CFBundleIdentifier</key><string>com.baidu.qianfan.desktop</string><key>CFBundleShortVersionString</key><string>1.0.89</string></dict></plist>"#).unwrap();
+    compatible_engine(&bundle.join("Resources/extra-resource/opencode/bin/dumate-opencode"));
     auth(home, "personal-user", "bce");
     ToolInventory::new(InstallationEnvironment {
         platform: HostPlatform::MacOs,
@@ -340,7 +347,7 @@ async fn known_model_metadata_uses_offline_fallback_while_unknown_models_still_r
 }
 
 #[tokio::test]
-async fn wrong_account_version_or_malformed_preferences_fail_before_key_issuance() {
+async fn wrong_account_or_malformed_preferences_fail_before_key_issuance() {
     let root = tempfile::tempdir().unwrap();
     let inventory = fixture(root.path());
     let path = inventory.config_path(ToolId::DuMate);
@@ -365,20 +372,6 @@ async fn wrong_account_version_or_malformed_preferences_fail_before_key_issuance
         .unwrap_err()
         .to_string()
         .contains("对象"));
-    assert!(!root.path().join("state/keys.json").exists());
-    let plist = root
-        .path()
-        .join("Applications/DuMate.app/Contents/Info.plist");
-    let text = std::fs::read_to_string(&plist)
-        .unwrap()
-        .replace("1.0.89", "2.0.0");
-    std::fs::write(plist, text).unwrap();
-    assert!(manager
-        .connect(context(), ToolId::DuMate, &inventory, path.clone())
-        .await
-        .unwrap_err()
-        .to_string()
-        .contains("1.0.89"));
     assert!(!root.path().join("state/keys.json").exists());
 }
 
@@ -1121,7 +1114,7 @@ async fn model_choices_and_switching_preserve_key_billing_and_original_preferenc
 }
 
 /// Exercise the production-home guard in a child with an isolated home. The installed
-/// engine is only read for its on-disk compatibility hash; no real DuMate is started.
+/// engine is only read for its on-disk adapter capabilities; no real DuMate is started.
 #[cfg(target_os = "macos")]
 #[tokio::test]
 #[ignore = "requires the supported official macOS DuMate installation"]
@@ -1133,6 +1126,7 @@ async fn live_runtime_identity_does_not_block_saved_model_configuration() {
         fixture(root.path());
         let engine = root.path().join("Applications/DuMate.app/Contents/Resources/extra-resource/opencode/bin/dumate-opencode");
         std::fs::create_dir_all(engine.parent().unwrap()).unwrap();
+        std::fs::remove_file(&engine).unwrap();
         std::os::unix::fs::symlink(
             "/Applications/DuMate.app/Contents/Resources/extra-resource/opencode/bin/dumate-opencode",
             engine,
@@ -1436,6 +1430,95 @@ async fn amended_unified_adapter_is_not_overwritten_and_is_backed_up_disabled_on
     assert_eq!(
         serde_json::from_slice::<Value>(&std::fs::read(path).unwrap()).unwrap(),
         json!({"theme":"keep"})
+    );
+    task.abort();
+}
+
+#[tokio::test]
+async fn windows_personal_checks_adapter_capabilities_before_issuing_a_key() {
+    let root = tempfile::tempdir().unwrap();
+    let app = root.path().join("Programs/DuMate/DuMate.exe");
+    std::fs::create_dir_all(app.parent().unwrap()).unwrap();
+    std::fs::write(&app, b"Windows fixture; never execute").unwrap();
+    let inventory = ToolInventory::new(InstallationEnvironment {
+        platform: HostPlatform::Windows,
+        home: root.path().into(),
+        command_directories: vec![],
+        application_directories: vec![root.path().join("Programs")],
+        executable_extensions: vec![".EXE".into()],
+    });
+    write(
+        &root
+            .path()
+            .join("AppData/Roaming/qianfan-desktop-app/auth.json"),
+        &json!({"activeProviderType":"bce","activeProfileId":"active","accountProfiles":[{"profileId":"active","loginType":"bce","bceUserId":"windows-user"}]}),
+    );
+    let path = inventory.config_path(ToolId::DuMate);
+    let original = json!({"theme":"keep", "customLLMProvider":null});
+    write(&path, &original);
+    let (url, requests, task) = server(catalogue()).await;
+    let manager = support::manager(root.path().join("state"), url.clone(), url);
+    let engine = app
+        .parent()
+        .unwrap()
+        .join("resources/extra-resource/opencode/bin/dumate-opencode.exe");
+    std::fs::create_dir_all(engine.parent().unwrap()).unwrap();
+    std::fs::write(&engine, b"incompatible engine").unwrap();
+    let error = manager
+        .prepare_dumate_models(context(), &inventory, path.clone(), None, None, false)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("所需能力"));
+    assert!(
+        requests.lock().unwrap().is_empty(),
+        "preflight must precede key issuance"
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(&std::fs::read(&path).unwrap()).unwrap(),
+        original
+    );
+    std::fs::remove_file(&engine).unwrap();
+    compatible_engine(&engine);
+    let connection = manager
+        .connect(context(), ToolId::DuMate, &inventory, path.clone())
+        .await
+        .unwrap();
+    // A changed build remains usable when the adapter contract is retained.
+    use std::io::Write;
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&engine)
+        .unwrap()
+        .write_all(b"newer build; same interfaces")
+        .unwrap();
+    manager
+        .reconnect(
+            context(),
+            ToolId::DuMate,
+            &connection.key_id,
+            &inventory,
+            path.clone(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(managed_provider(&path)["model"], "glm-5.3");
+    assert_eq!(
+        requests.lock().unwrap().len(),
+        3,
+        "key issuance and catalogues only, no implicit model test"
+    );
+    manager
+        .disconnect(
+            ToolId::DuMate,
+            &connection.key_id,
+            None,
+            DisconnectRequest::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::from_slice::<Value>(&std::fs::read(path).unwrap()).unwrap(),
+        original
     );
     task.abort();
 }

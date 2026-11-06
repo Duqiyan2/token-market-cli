@@ -309,6 +309,13 @@ async fn confirmed_download_verifies_signed_bytes_without_installing_or_exposing
     );
     let result = updater.download(app.handle(), "1.1.0").await.unwrap();
     assert_eq!(result.status, "ready", "{result:?}");
+    let progress = result
+        .download_progress
+        .as_ref()
+        .expect("download progress");
+    let size = include_bytes!("../../tests/fixtures/client-update/package.txt").len() as u64;
+    assert_eq!(progress.downloaded_bytes, size);
+    assert_eq!(progress.total_bytes, Some(size));
     assert_eq!(result.available_version.as_deref(), Some("1.1.0"));
     let public = serde_json::to_string(&result).unwrap();
     assert!(!public.contains("http") && !public.contains(SIGNATURE.trim()));

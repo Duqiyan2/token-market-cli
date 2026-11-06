@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="tools.css">
 <link rel="stylesheet" href="settings.css">
 <link rel="stylesheet" href="usage.css">
+<link rel="stylesheet" href="notifications.css">
 </head>
 <body>
 <aside id="client-update-failure-notice" class="notice error client-update-failure-notice" role="status" aria-live="polite" hidden>
@@ -133,7 +134,7 @@
           </div>
         </section>
         <div class="settings-savebar">
-          <div><p class="settings-hint">设置仅保存在本机，退出登录后仍然保留。</p><p id="desktop-preferences-feedback" class="settings-feedback" role="status" aria-live="polite"></p><button id="desktop-preferences-retry" class="quiet" hidden>重新读取设置</button></div>
+          <div><p class="settings-hint">设置仅保存在本机，退出登录后仍然保留。</p><div id="desktop-preferences-notice"><p id="desktop-preferences-feedback" class="settings-feedback" role="status" aria-live="polite"></p><button id="desktop-preferences-retry" class="quiet" hidden>重新读取设置</button></div></div>
           <div class="inline-actions"><button id="desktop-preferences-cancel">取消更改</button><button id="desktop-preferences-save" class="primary">保存更改</button></div>
         </div>
         <section class="settings-section settings-session">
@@ -187,9 +188,11 @@
   <p id="desktop-close-feedback" class="error" role="status" aria-live="polite"></p>
   <div class="inline-actions"><button id="desktop-close-cancel">取消</button><button id="desktop-close-confirm" class="primary">知道了，后台运行</button></div>
 </dialog>
+<script src="notifications.js"></script>
 <script src="live-ui.js"></script>
 <script src="shell.js"></script>
 <script src="workspace.js"></script>
+<script src="download-progress.js"></script>
 <script src="tools.js"></script>
 <script src="connection-test.js"></script>
 <script src="usage-date-picker.js"></script>

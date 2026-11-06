@@ -4,6 +4,8 @@ The desktop frontend in `src/tauri-ui` now uses the approved lightweight desktop
 
 Agent details show configured models, connection ownership, test results and usage guidance. Configuration contents and the former protocol-only access-information block are omitted. Credentials and restoration receipts remain on the native side.
 
+Page-level feedback must never shift application content when it appears, wraps or clears. `notifications.css` keeps feedback outside document flow; `notifications.js` stacks visible messages within the viewport while retaining each live region in its owning view. Settings retry actions belong to the same floating notice. Opening a tool is silent on success; launch failures retain their error dialog.
+
 New connections and disconnections require explicit confirmation. Paid tests retain their separate fee confirmation and multi-model selection. Existing native receipt IDs, owner/workspace guards, configuration-conflict choices, permission-gated account links are preserved. The frontend contains no demo state controls or mock IPC.
 
 ## UI regression checks
@@ -11,7 +13,7 @@ New connections and disconnections require explicit confirmation. Paid tests ret
 With Node and Playwright available:
 
 ```sh
-node --test tests/desktop-ui.test.cjs tests/desktop-usage.test.cjs
+node --test tests/desktop-ui.test.cjs tests/desktop-usage.test.cjs tests/desktop-notifications.test.cjs
 ```
 
 Set `TOKEN_MARKET_TEST_BROWSER_CHANNEL=chrome` to use an installed Google Chrome. If Playwright is provided by an external dependency runtime, point `NODE_PATH` at its node_modules directory. Tests use a fresh browser context and an isolated native-IPC fixture. They do not access real credentials, edit Agent configuration, launch tools or send model requests.

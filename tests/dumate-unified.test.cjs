@@ -17,10 +17,12 @@ const provider={baseURL:'http://127.0.0.1:'+upstream.address().port+'/v1',apiKey
 fs.mkdirSync(path.join(root,'desktop-main'),{recursive:true});fs.mkdirSync(path.join(root,'opencode'),{recursive:true});fs.writeFileSync(path.join(root,'desktop-main/dumate-app.json'),JSON.stringify({customLLMProvider:null}));
 const fingerprint=createHash('sha256').update(JSON.stringify(['baseURL','apiKey','model','contextLimit','outputLimit'].map(k=>provider[k]))).digest('hex');
 fs.writeFileSync(path.join(root,'opencode/tokenmarket-unified.json'),JSON.stringify({unified:{protocol:3,owner:'cn.tokenmarket',provider,baseURL:provider.baseURL,model:provider.model,providerFingerprint:process.env.SCENARIO==='tampered'?'0'.repeat(64):fingerprint}}));
-process.env.XDG_CONFIG_HOME=root;process.env.DUMATE_APP_VER='1.0.89.447';process.env.OPENCODE_NEW_RUNTIME=process.env.SCENARIO==='unsupported'?'2':process.env.SCENARIO.startsWith('runtime-1')?'1':'0';process.env.DUMATE_LOGIN_MODE='personal';delete process.env['X-Dumate-Prd-Source'];
+process.env.XDG_CONFIG_HOME=root;process.env.DUMATE_APP_VER=({'windows-version':'1.0.89.0','downgraded-version':'1.0.88.400','upgraded-version':'2.0.0.500'})[process.env.SCENARIO] ?? '1.0.89.447';process.env.OPENCODE_NEW_RUNTIME=process.env.SCENARIO==='new-runtime'?'2':process.env.SCENARIO.startsWith('runtime-1')?'1':'0';process.env.DUMATE_LOGIN_MODE='personal';delete process.env['X-Dumate-Prd-Source'];
 const modulePath=path.join(root,'adapter.mjs');fs.copyFileSync(process.env.ADAPTER_SOURCE,modulePath);const adapter=await (await import(pathToFileURL(modulePath))).default();
-const config={provider:{QianfanPersonalQuota:{options:{baseURL:'http://127.0.0.1:'+official.address().port+'/v1',apiKey:'official-fixture-secret'},models:{fixture:{limit:{}}}}}};
-const invalid=['tampered','unsupported'].includes(process.env.SCENARIO);if(invalid)assert.throws(()=>adapter.config(config));else adapter.config(config);
+const config={provider:{QianfanPersonalQuota:{options:{baseURL:'http://127.0.0.1:'+official.address().port+'/v1',apiKey:'official-fixture-secret'},models:{'glm-5':{id:'model-text',limit:{}}}}}};
+if(process.env.SCENARIO==='incompatible-provider')delete config.provider.QianfanPersonalQuota;
+if(process.env.SCENARIO==='incompatible-model')config.provider.QianfanPersonalQuota.models['glm-5'].id='changed-text-model';
+const invalid=['tampered','incompatible-provider','incompatible-model'].includes(process.env.SCENARIO);if(invalid)assert.throws(()=>adapter.config(config));else adapter.config(config);
 const payload={model:'official-hardcoded-model',messages:[{role:'user',content:'fixture'}],max_tokens:100000};
 const make=(url,body=payload)=>fetch(url,{method:'POST',headers:{Authorization:'Bearer baidu-fake-secret',Cookie:'baidu=fake', 'X-Dumate-Inapp-Key':'fake-inapp'},body:JSON.stringify(body)});
 try {
@@ -64,7 +66,7 @@ try {
  console.log(JSON.stringify({scenario:process.env.SCENARIO,upstreamCalls:calls.length,forbiddenDestinationCalls:forbidden}));
 } finally {await new Promise(r=>upstream.close(r));await new Promise(r=>evil.close(r));await new Promise(r=>official.close(r));fs.rmSync(root,{recursive:true,force:true});}
 `;
-for(const scenario of ['forward-and-pin','runtime-1','tampered','unsupported','redirect','empty','upstream-error','already-aborted','session-isolation','official-media','runtime-1-media'])test(`DuMate unified adapter ${scenario}`,()=>{
+for(const scenario of ['forward-and-pin','windows-version','downgraded-version','upgraded-version','runtime-1','tampered','new-runtime','incompatible-provider','incompatible-model','redirect','empty','upstream-error','already-aborted','session-isolation','official-media','runtime-1-media'])test(`DuMate unified adapter ${scenario}`,()=>{
  const result=spawnSync(process.execPath,['--input-type=module','-e',script],{env:{...process.env,SCENARIO:scenario,ADAPTER_SOURCE:path.resolve(__dirname,'../rust/tokenmarket-core/src/dumate/unified/plugin.js')},encoding:'utf8',timeout:20000});
  assert.equal(result.status,0,result.stderr);const report=JSON.parse(result.stdout.trim());assert.equal(report.forbiddenDestinationCalls,0);
 });

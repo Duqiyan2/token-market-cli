@@ -12,6 +12,8 @@
   let pendingRecovery = null;
   let generation = 0;
   let installing = false, batching = false, batchStop = false;
+  const installationJobs = new Map();
+  const pendingNativeInstallations = new Set();
   let checking = false, updatePending = null, checkRequested = false, checkExplicitRequested = false;
   let updates = new Map();
   let entries = [];
@@ -233,7 +235,7 @@
   function versionDisplay(value) { return value?.match(/\b\d+\.\d+\.\d+(?:\.\d+)*(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?/)?.[0] || value || '版本未知'; }
   function installationActions(entry, locked) {
     const group = text('div', '', 'tool-install-actions');
-    const button = withIcon(actionButton('安装', 'tool-install', () => install(entry), locked || !entry.installation?.supported), 'down');
+    const button = withIcon(actionButton(entry.id === 'qwenwork' ? '下载安装' : '安装', 'tool-install', () => install(entry), locked || !entry.installation?.supported), 'down');
     if (!entry.installation?.supported) button.title = entry.installation?.reason || '暂无兼容安装方案';
     group.append(button);
     if (!entry.installation?.supported) group.append(actionButton('官方安装说明', 'quiet tool-download', async () => {
@@ -243,12 +245,35 @@
   }
   function versionCell(entry, locked) {
     const cell = text('div', '', `tool-install-state install-column${entry.installed ? ' installed' : ''}`);
+    if (entry.installed) pendingNativeInstallations.delete(entry.id);
+    const job = installationJobs.get(entry.id);
+    if (job) {
+      const progress = text('div','','tool-version-copy');
+      const stageLabel = ({preparing:'准备中',downloading:'下载中',dependencies:'准备中',installing:job.upgrade?'升级中':'安装中',waiting_for_user:'打开安装器',failed:'未完成',cancelled:'已取消'})[job.state.stage] || '处理中';
+      progress.append(text('span', stageLabel, 'tool-version'));
+      if (job.state.stage === 'downloading') {
+        const summary = window.TokenMarketDownloadProgress.summary(job.state.downloadProgress);
+        const inline = text('small',summary.includes('%') ? summary.split(' · ')[0] : summary,'tool-download-inline');
+        inline.title = summary; progress.append(inline);
+      }
+      const button = actionButton(job.upgrade ? '升级' : entry.id === 'qwenwork' ? '下载安装' : '安装', `tool-install${job.running ? ' tool-operation-running' : ''}`, () => install(entry,job.upgrade), job.running);
+      button.setAttribute('aria-busy', String(job.running));
+      button.title = job.state.detail || '';
+      cell.append(progress,button);
+      return cell;
+    }
     const copy = text('div', '', 'tool-version-copy'), update = updates.get(entry.id);
     if (update?.state === 'broken') {
       copy.append(text('span','无法运行','tool-version-empty'),text('small',update.note,'tool-location-error')); cell.append(copy); return cell;
     }
     if (!isPresent(entry) && !update?.canUpgrade) {
-      copy.append(text('span', '未安装', 'tool-version-empty')); cell.append(copy, installationActions(entry, locked));
+      const status = text('span', '未安装', 'tool-version-empty');
+      if (pendingNativeInstallations.has(entry.id)) {
+        status.classList.add('tool-operation-running', 'tool-native-install-pending');
+        status.setAttribute('aria-busy', 'true');
+        status.title = '安装器已打开，等待检测到安装完成';
+      }
+      copy.append(status); cell.append(copy, installationActions(entry, locked));
       if (!entry.installation?.supported) cell.append(text('span', entry.installation?.reason || '暂无兼容安装方案', 'tool-install-unavailable'));
       return cell;
     }
@@ -286,56 +311,84 @@
   }
   const installDialog = document.createElement('dialog');
   installDialog.className = 'tool-install-dialog';
-  installDialog.innerHTML = '<h3></h3><p class="tool-install-status" role="status" aria-live="polite"></p><pre class="tool-install-output"></pre><div class="tool-actions"><button type="button" class="tool-install-cancel">取消安装</button><button type="button" class="tool-install-stop-wait" title="仅停止客户端等待，取消安装请在原生安装器中操作" hidden>停止等待</button><button type="button" class="tool-install-retry" hidden>重试安装</button><button type="button" class="tool-install-guide" hidden>查看其他安装方式</button><button type="button" class="tool-install-close" hidden>关闭</button></div>';
+  installDialog.innerHTML = '<h3></h3><p class="tool-install-status" role="status" aria-live="polite"></p><div class="tool-download-progress" hidden><progress max="100" aria-label="安装包下载进度"></progress><p class="tool-download-summary"></p></div><pre class="tool-install-output"></pre><p class="tool-install-background-note">关闭窗口后任务会继续，可在工具列表中查看进度。</p><div class="tool-actions"><button type="button" class="tool-install-cancel">取消安装</button><button type="button" class="tool-install-stop-wait" title="仅停止客户端等待，取消安装请在原生安装器中操作" hidden>停止等待</button><button type="button" class="tool-install-retry" hidden>重试安装</button><button type="button" class="tool-install-guide" hidden>查看其他安装方式</button><button type="button" class="tool-install-close" hidden>关闭</button></div>';
   document.body.append(installDialog);
-  let installationTool = null, installationIsUpgrade = false, installationIsUninstall = false;
-  const installTerminal = state => ['succeeded','failed','cancelled'].includes(state?.stage);
+  let installationTool = null, installationIsUpgrade = false, installationIsUninstall = false, installationState = null;
+  const installTerminal = state => ['succeeded','failed','cancelled','installer_opened'].includes(state?.stage);
   const installStages = {preparing:'正在准备安装',downloading:'正在下载安装程序',dependencies:'正在准备运行依赖',installing:'正在安装',waiting_for_user:'请完成原生安装器中的步骤',detecting:'正在检测实际安装',succeeded:'安装完成',failed:'安装未完成',cancelled:'安装已取消'};
   function renderInstallation(state) {
+    installationState = state;
     const operation = installationIsUninstall ? '卸载' : installationIsUpgrade ? '升级' : '安装';
     const label = (installStages[state.stage] || '正在安装').replaceAll('安装', operation);
-    installDialog.querySelector('.tool-install-cancel').textContent = `取消${operation}`;
+    installDialog.querySelector('.tool-install-cancel').textContent = state.stage === 'downloading' ? '取消下载' : `取消${operation}`;
     installDialog.querySelector('.tool-install-retry').textContent = installationIsUninstall ? '重新选择安装' : `重试${operation}`;
-    installDialog.querySelector('.tool-install-status').textContent = !state.detail ? label : state.detail.startsWith(label) ? state.detail : `${label}：${state.detail}`;
+    installDialog.querySelector('.tool-install-status').textContent = state.detail || label;
+    window.TokenMarketDownloadProgress.render(installDialog.querySelector('.tool-download-progress'), state.stage === 'downloading', state.downloadProgress);
     const output = installDialog.querySelector('.tool-install-output'); output.textContent = (state.output || []).join('\n'); output.scrollTop = output.scrollHeight;
     const terminal = installTerminal(state);
-    installDialog.querySelector('.tool-install-retry').disabled = installing;
+    installDialog.querySelector('.tool-install-retry').disabled = installing || Boolean(installationJobs.get(installationTool?.id)?.running);
     installDialog.querySelector('.tool-install-cancel').hidden = terminal || state.stage === 'waiting_for_user';
     installDialog.querySelector('.tool-install-stop-wait').hidden = state.stage !== 'waiting_for_user';
     installDialog.querySelector('.tool-install-retry').hidden = !['failed','cancelled'].includes(state.stage);
     installDialog.querySelector('.tool-install-guide').hidden = state.stage !== 'failed';
-    installDialog.querySelector('.tool-install-close').hidden = !terminal && state.stage !== 'waiting_for_user';
+    installDialog.querySelector('.tool-install-close').hidden = false;
+    installDialog.querySelector('.tool-install-close').textContent = terminal ? '关闭' : '关闭窗口';
+    installDialog.querySelector('.tool-install-background-note').hidden = terminal;
+  }
+  function showInstallation(job) {
+    installationTool = job.entry; installationIsUpgrade = job.upgrade; installationIsUninstall = false;
+    installDialog.querySelector('h3').textContent = `${job.upgrade ? '升级' : '安装'} ${job.entry.name}`;
+    renderInstallation(job.state);
+    if (!installDialog.open) installDialog.showModal();
   }
   async function install(entry, upgrade = false, confirmedUpdate = null) {
-    if (!authenticated || installing || batching || checking || connecting || disconnecting || window.TokenMarketConnectionTests?.busy) return;
-    const current = generation; installing = true; installationTool = entry; installationIsUpgrade = upgrade; installationIsUninstall = false;
-    installDialog.querySelector('h3').textContent = `${upgrade ? '升级' : '安装'} ${entry.name}`;
-    renderInstallation({stage:'preparing',detail:'安装不会自动接入或发起模型测试',output:[]});
-    if (!installDialog.open) installDialog.showModal(); render();
+    if (!authenticated || installing || installationJobs.get(entry.id)?.running || batching || checking || connecting || disconnecting || window.TokenMarketConnectionTests?.busy) return;
+    const current = generation;
+    const job = {entry,upgrade,running:true,state:{stage:'preparing',detail:'正在准备安装',output:[]}};
+    installationJobs.set(entry.id,job);
+    const update = state => {
+      job.state = state;
+      if (installationTool?.id === entry.id && installDialog.open) renderInstallation(state);
+      render();
+    };
+    if (installationTool?.id === entry.id && installDialog.open) renderInstallation(job.state);
+    render();
     let operationSucceeded = false;
     try {
-      const state = await runInstaller(entry, upgrade, current, renderInstallation, () => false, confirmedUpdate);
+      const state = await runInstaller(entry, upgrade, current, update, () => false, confirmedUpdate);
       operationSucceeded = state?.stage === 'succeeded';
+      if (state?.stage === 'installer_opened') pendingNativeInstallations.add(entry.id);
       if (upgrade && operationSucceeded) updates.delete(entry.id);
-    } catch (error) { if (authenticated && current === generation) renderInstallation({stage:'failed',detail:String(error),output:[]}); }
+    } catch (error) { if (authenticated && current === generation) update({stage:'failed',detail:String(error),output:[]}); }
     finally {
+      job.running = false;
       if (authenticated && current === generation) await refresh(true);
-      installing = false; installDialog.querySelector('.tool-install-retry').disabled = false;
-      if (authenticated) { render(); if (operationSucceeded || current !== generation) void checkUpdates(); }
+      if (installationTool?.id === entry.id && installDialog.open) renderInstallation(job.state);
+      if (operationSucceeded || job.state.stage === 'installer_opened' || job.state.stage === 'cancelled') installationJobs.delete(entry.id);
+      if (authenticated && current === generation) {
+        if (job.state.stage === 'failed' && (!installDialog.open || installationTool?.id !== entry.id)) feedback(`${entry.name}：${job.state.detail}`,true);
+        render();
+        if (operationSucceeded) void checkUpdates(false,true);
+      }
     }
   }
   installDialog.querySelector('.tool-install-guide').onclick = async () => {
     if (!installationTool) return;
     try { await invoke('download_tool', {tool:installationTool.id}); } catch (error) { showResult('无法打开安装说明', String(error)); }
   };
-  installDialog.querySelector('.tool-install-close').onclick = () => installDialog.close();
+  installDialog.querySelector('.tool-install-close').onclick = () => {
+    if (installTerminal(installationState)) { installationJobs.delete(installationTool?.id); installationState = null; render(); }
+    installDialog.close();
+  };
   installDialog.querySelector('.tool-install-retry').onclick = () => { if (installationTool) { if (installationIsUninstall) {installDialog.close(); void confirmUninstall(installationTool);} else void install(installationTool, installationIsUpgrade); } };
   installDialog.querySelector('.tool-install-cancel').onclick = async () => { if (!installationTool) return; try { await invoke('cancel_tool_installation', {tool:installationTool.id}); } catch (error) { feedback(String(error),true); } };
   installDialog.querySelector('.tool-install-stop-wait').onclick = installDialog.querySelector('.tool-install-cancel').onclick;
-  installDialog.addEventListener('cancel', event => { if (installing) event.preventDefault(); });
+  installDialog.addEventListener('cancel', () => {
+    if (installTerminal(installationState)) { installationJobs.delete(installationTool?.id); installationState = null; render(); }
+  });
   async function launch(entry) {
     const current = generation;
-    try { await invoke('launch_connected_tool', {tool:entry.id}); if (authenticated && current === generation) feedback('已请求启动。现有会话请退出后重新启动以读取配置。'); }
+    try { await invoke('launch_connected_tool', {tool:entry.id}); }
     catch (error) { if (authenticated && current === generation) showResult('无法打开工具', String(error)); }
   }
   const uninstallDialog = document.createElement('dialog'); uninstallDialog.className = 'tool-uninstall-confirm'; document.body.append(uninstallDialog);
@@ -404,8 +457,9 @@
   }
   function actions(entry, detailed = false) {
     const testing = Boolean(window.TokenMarketConnectionTests?.busy);
-    const locked = loading || connecting || disconnecting || testing || installing || batching || checking;
+    const locked = loading || connecting || disconnecting || testing || installing || Boolean(installationJobs.get(entry.id)?.running) || batching || checking;
     const group = text('div', '', 'tool-actions');
+    if (detailed && installationJobs.has(entry.id)) group.append(actionButton('查看进度','tool-install-view',() => showInstallation(installationJobs.get(entry.id))));
     const broken = updates.get(entry.id)?.state === 'broken';
     if (entry.connection) {
       group.append(actionButton('打开工具', 'primary tool-launch', () => launch(entry), !entry.installed || broken || locked));
@@ -478,7 +532,7 @@
     } else models.append(text('p', '接入后会显示该连接的可用模型。'));
     if (entry.id === 'dumate' && connection?.keyId) {
       models.append(actionButton('切换模型', 'tool-switch-model', () => openDuMateModels(entry, true),
-        loading || connecting || disconnecting || installing || batching || checking || Boolean(window.TokenMarketConnectionTests?.busy) || testBlocked(entry)));
+        loading || connecting || disconnecting || installing || Boolean(installationJobs.get(entry.id)?.running) || batching || checking || Boolean(window.TokenMarketConnectionTests?.busy) || testBlocked(entry)));
       models.append(text('p', '切换只保存所选模型，下次启动搭子时生效。若搭子正在运行，请重启后生效。'));
     }
     left.append(models);
@@ -933,7 +987,7 @@
         summary.textContent = `正在升级 ${index+1}/${jobs.length}：${job.entry.name}`;
         try {
           const state = await runInstaller(job.entry, true, current, state => {
-            job.status.textContent = (installStages[state.stage] || '升级中').replaceAll('安装','升级'); job.status.title = state.detail || '';
+            job.status.textContent = (installStages[state.stage] || '升级中').replaceAll('安装','升级') + (state.stage === 'downloading' ? ` · ${window.TokenMarketDownloadProgress.summary(state.downloadProgress)}` : ''); job.status.title = state.detail || '';
           }, () => batchStop, job.update);
           if (!state) { skipped = jobs.length-index-1; break; }
           if (state.stage === 'succeeded') { succeeded++; updates.delete(job.entry.id); }
@@ -996,6 +1050,9 @@
       root.hidden = !value;
       if (value === authenticated) return;
       authenticated = value; generation += 1;
+      installationState = null;
+      installationJobs.clear();
+      pendingNativeInstallations.clear();
       closeRestartConfirmation();
       if (!value && installDialog.open) installDialog.close();
       if (uninstallDialog.open) uninstallDialog.close();

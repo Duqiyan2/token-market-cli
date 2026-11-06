@@ -1,6 +1,7 @@
 //! Explicit tool installation, independent of credentials and Tool Connections.
 pub(crate) mod attempt;
 pub(crate) mod discovery;
+mod download;
 mod dumate;
 mod gui;
 mod harness_cli;
@@ -46,6 +47,7 @@ pub enum InstallStage {
     Dependencies,
     Installing,
     WaitingForUser,
+    InstallerOpened,
     Detecting,
     Succeeded,
     Failed,
@@ -53,7 +55,10 @@ pub enum InstallStage {
 }
 impl InstallStage {
     pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Succeeded | Self::Failed | Self::Cancelled)
+        matches!(
+            self,
+            Self::Succeeded | Self::Failed | Self::Cancelled | Self::InstallerOpened
+        )
     }
 }
 #[derive(Debug, Clone, Serialize)]
@@ -101,6 +106,13 @@ pub struct InstallStatus {
     pub detail: String,
     pub installed: bool,
     pub version: Option<String>,
+    pub download_progress: Option<DownloadProgress>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DownloadProgress {
+    pub downloaded_bytes: u64,
+    pub total_bytes: Option<u64>,
 }
 #[derive(Debug, Clone)]
 pub struct InstallStep {
@@ -127,6 +139,15 @@ pub trait InstallExecutor: Send + Sync {
         cancelled: &AtomicBool,
         output: &mut dyn FnMut(String),
     ) -> Result<()>;
+    fn execute_with_progress(
+        &self,
+        step: &InstallStep,
+        cancelled: &AtomicBool,
+        output: &mut dyn FnMut(String),
+        _progress: &mut dyn FnMut(Option<DownloadProgress>),
+    ) -> Result<()> {
+        self.execute(step, cancelled, output)
+    }
     fn version(&self, command: &Path) -> Result<String>;
     fn runtime_version(&self, command: &Path, _node: &Path) -> Result<String> {
         self.version(command)
@@ -152,8 +173,21 @@ impl InstallExecutor for NativeInstallExecutor {
         cancelled: &AtomicBool,
         output: &mut dyn FnMut(String),
     ) -> Result<()> {
+        self.execute_with_progress(step, cancelled, output, &mut |_| {})
+    }
+    fn execute_with_progress(
+        &self,
+        step: &InstallStep,
+        cancelled: &AtomicBool,
+        output: &mut dyn FnMut(String),
+        progress: &mut dyn FnMut(Option<DownloadProgress>),
+    ) -> Result<()> {
         if let Some((url, path)) = &step.download {
             std::fs::create_dir_all(path.parent().context("安装下载目录无效")?)?;
+            let headers = tempfile::NamedTempFile::new()?;
+            // curl must reopen the header file on Windows.
+            let headers = headers.into_temp_path();
+            std::fs::File::create(path)?;
             let args = vec![
                 "--fail".into(),
                 "--location".into(),
@@ -179,16 +213,21 @@ impl InstallExecutor for NativeInstallExecutor {
                 "300".into(),
                 "--output".into(),
                 path.to_string_lossy().into(),
+                "--dump-header".into(),
+                headers.to_string_lossy().into(),
                 url.clone(),
             ];
-            run_process(
+            let mut reporter = download::Reporter::new(path, &headers);
+            run_process_observed(
                 if cfg!(windows) { "curl.exe" } else { "curl" },
                 &args,
                 &[],
                 cancelled,
                 output,
                 None,
+                &mut || progress(Some(reporter.sample())),
             )?;
+            progress(None);
         }
         if !step.program.is_empty() {
             run_process(
@@ -291,6 +330,25 @@ fn run_process(
     output: &mut dyn FnMut(String),
     timeout: Option<Duration>,
 ) -> Result<()> {
+    run_process_observed(
+        program,
+        args,
+        environment,
+        cancelled,
+        output,
+        timeout,
+        &mut || {},
+    )
+}
+fn run_process_observed(
+    program: &str,
+    args: &[String],
+    environment: &[(String, String)],
+    cancelled: &AtomicBool,
+    output: &mut dyn FnMut(String),
+    timeout: Option<Duration>,
+    observe: &mut dyn FnMut(),
+) -> Result<()> {
     if cancelled.load(Ordering::SeqCst) {
         bail!("安装已取消")
     }
@@ -344,6 +402,7 @@ fn run_process(
     drop(sender);
     let deadline = timeout.map(|timeout| Instant::now() + timeout);
     loop {
+        observe();
         while let Ok(line) = receiver.try_recv() {
             output(line);
         }
@@ -377,6 +436,7 @@ fn run_process(
             for line in receiver.iter() {
                 output(line);
             }
+            observe();
             if !status.success() {
                 bail!("安装程序失败（{status}），请查看输出后重试")
             }
@@ -504,14 +564,8 @@ impl InstallationManager {
     /// with configuration mutation. This is never part of read-only discovery.
     pub fn connection_guard(&self, tool: ToolId) -> Result<InstallationGuard> {
         let guard = installation_lock(&self.environment, tool)?;
-        if matches!(tool, ToolId::DuMate | ToolId::DuMateEnterprise) {
-            let version = self
-                .installed_version(tool)?
-                .context("无法确认 DuMate 版本，请先安装官方 1.0.89 客户端")?;
-            if !gui::matches_version(tool, &version, dumate::VERSION) {
-                bail!("当前 DuMate 接入仅验证 1.0.89（检测到 {version}），请按官方说明选择该版本；未修改配置或自动升级")
-            }
-        }
+        // DuMate compatibility belongs to its adapter preflight, not the
+        // installer's pinned artifact version (Windows may add a fourth part).
         if tool == ToolId::KimiCode {
             if let Some(version) = self
                 .installed_version(tool)
@@ -561,7 +615,12 @@ impl InstallationManager {
         Ok(())
     }
     pub fn start(&self, tool: ToolId) -> Result<InstallStatus> {
-        self.start_operation(tool)
+        self.start_operation(tool, true)
+    }
+    /// Desktop native installers own the remaining user interaction. Release
+    /// the job after opening them; returning to the app performs fresh discovery.
+    pub fn start_desktop(&self, tool: ToolId) -> Result<InstallStatus> {
+        self.start_operation(tool, false)
     }
     /// Targets come from the last successful official release check, never a UI command or URL.
     pub fn start_upgrade(&self, tool: ToolId) -> Result<InstallStatus> {
@@ -635,6 +694,7 @@ impl InstallationManager {
             stage: InstallStage::Preparing,
             output: vec![],
             output_sequence: 0,
+            download_progress: None,
             detail: format!("正在准备升级至官方最新版 {}", target.plan.version),
             installed: true,
             version: Some(target.plan.version.clone()),
@@ -707,7 +767,7 @@ impl InstallationManager {
         });
         Ok(status)
     }
-    fn start_operation(&self, tool: ToolId) -> Result<InstallStatus> {
+    fn start_operation(&self, tool: ToolId, wait_for_gui: bool) -> Result<InstallStatus> {
         let plan = recipes::plan(tool, &self.environment, &self.architecture)?;
         let operation_lock = installation_lock(&self.environment, tool)?;
         let cancelled = Arc::new(AtomicBool::new(false));
@@ -716,6 +776,7 @@ impl InstallationManager {
             stage: InstallStage::Preparing,
             output: vec![],
             output_sequence: 0,
+            download_progress: None,
             detail: "正在检查已有安装".into(),
             installed: false,
             version: Some(plan.version.clone()),
@@ -738,15 +799,27 @@ impl InstallationManager {
         }
         let manager = self.clone();
         std::thread::spawn(move || {
-            let result = manager.install(&plan, &cancelled);
+            let result = manager.install(&plan, &cancelled, wait_for_gui);
             let installed = ToolInventory::new(manager.environment.clone()).is_installed(tool);
             drop(operation_lock);
             manager.update(tool, |state| {
                 state.installed = installed;
                 match result {
                     Ok(()) => {
-                        state.stage = InstallStage::Succeeded;
-                        state.detail = "已检测到安装；请按需接入或打开工具".into();
+                        if !installed
+                            && !wait_for_gui
+                            && plan
+                                .steps
+                                .iter()
+                                .any(|s| s.stage == InstallStage::WaitingForUser)
+                        {
+                            state.stage = InstallStage::InstallerOpened;
+                            state.detail =
+                                gui::instructions(tool, manager.environment.platform).into();
+                        } else {
+                            state.stage = InstallStage::Succeeded;
+                            state.detail = "已检测到安装；请按需接入或打开工具".into();
+                        }
                     }
                     Err(error) => {
                         state.stage = if cancelled.load(Ordering::SeqCst) {
@@ -761,7 +834,12 @@ impl InstallationManager {
         });
         Ok(status)
     }
-    fn install(&self, plan: &InstallPlan, cancelled: &AtomicBool) -> Result<()> {
+    fn install(
+        &self,
+        plan: &InstallPlan,
+        cancelled: &AtomicBool,
+        wait_for_gui: bool,
+    ) -> Result<()> {
         if gui::is_gui(plan.tool) {
             if let Some(path) =
                 ToolInventory::new(self.environment.clone()).application_path(plan.tool)
@@ -774,7 +852,10 @@ impl InstallationManager {
             }
         }
         let repairing_owned;
-        let command = if matches!(plan.tool, ToolId::DuMate | ToolId::DuMateEnterprise) {
+        let command = if matches!(
+            plan.tool,
+            ToolId::DuMate | ToolId::DuMateEnterprise | ToolId::QwenWork
+        ) {
             None
         } else {
             self.environment.command_path(&plan.command)
@@ -830,7 +911,11 @@ impl InstallationManager {
             .iter()
             .any(|step| step.stage == InstallStage::WaitingForUser)
         {
-            return self.wait_for_application(plan, cancelled);
+            return if wait_for_gui {
+                self.wait_for_application(plan, cancelled)
+            } else {
+                Ok(())
+            };
         }
         if cancelled.load(Ordering::SeqCst) {
             bail!("安装已取消；已准备的依赖保留")
@@ -865,21 +950,16 @@ impl InstallationManager {
                 bail!("安装已取消；已准备的依赖保留")
             }
             self.update(plan.tool, |state| {
+                state.download_progress = step.download.as_ref().map(|_| DownloadProgress {
+                    downloaded_bytes: 0,
+                    total_bytes: None,
+                });
                 state.stage = if step.download.is_some() {
                     InstallStage::Downloading
                 } else {
                     step.stage
                 };
-                state.detail = if step.stage == InstallStage::WaitingForUser {
-                    gui::instructions(plan.tool, self.environment.platform).into()
-                } else {
-                    if upgrading {
-                        "升级进行中，可查看输出"
-                    } else {
-                        "安装进行中，可查看输出"
-                    }
-                    .into()
-                };
+                state.detail = step_detail(state.stage, upgrading).into();
             });
             // Native GUI installers own their own cancellation. Stopping this
             // client's waiting must not terminate a detached installer process.
@@ -900,25 +980,43 @@ impl InstallationManager {
                     }
                 }
             }
-            let result = self.executor.execute(step, cancellation, &mut |line| {
-                self.update(plan.tool, |state| {
-                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) {
-                        if value["name"] == "openclaw" {
-                            state.stage = InstallStage::Installing;
-                        } else if value["name"]
-                            .as_str()
-                            .is_some_and(|name| name.contains("node") || name == "dependencies")
-                        {
-                            state.stage = InstallStage::Dependencies;
+            let result = self.executor.execute_with_progress(
+                step,
+                cancellation,
+                &mut |line| {
+                    self.update(plan.tool, |state| {
+                        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) {
+                            if value["name"] == "openclaw" {
+                                state.stage = InstallStage::Installing;
+                            } else if value["name"]
+                                .as_str()
+                                .is_some_and(|name| name.contains("node") || name == "dependencies")
+                            {
+                                state.stage = InstallStage::Dependencies;
+                            }
                         }
-                    }
-                    state.output.push(safe_output(&line));
-                    state.output_sequence += 1;
-                    if state.output.len() > 200 {
-                        state.output.remove(0);
-                    }
+                        state.output.push(safe_output(&line));
+                        state.output_sequence += 1;
+                        if state.output.len() > 200 {
+                            state.output.remove(0);
+                        }
+                    });
+                },
+                &mut |progress| {
+                    self.update(plan.tool, |state| {
+                        state.download_progress = progress;
+                        if state.download_progress.is_none() {
+                            state.stage = step.stage;
+                            state.detail = step_detail(step.stage, upgrading).into();
+                        }
+                    });
+                },
+            );
+            if result.is_ok() && step.stage == InstallStage::WaitingForUser {
+                self.update(plan.tool, |state| {
+                    state.detail = gui::instructions(plan.tool, self.environment.platform).into();
                 });
-            });
+            }
             let observed = attempt::observe(&self.environment, plan.tool);
             result?;
             observed?;
@@ -954,6 +1052,17 @@ impl InstallationManager {
         if let Some(job) = self.jobs.lock().unwrap().get_mut(&tool.to_string()) {
             action(&mut job.status);
         }
+    }
+}
+
+fn step_detail(stage: InstallStage, upgrading: bool) -> &'static str {
+    match stage {
+        InstallStage::Downloading => "正在下载安装包，下载完成后将开始安装",
+        InstallStage::Dependencies => "正在准备工具运行所需的依赖，请稍候",
+        InstallStage::WaitingForUser => "下载完成，正在打开安装器；如出现系统确认提示，请允许打开",
+        InstallStage::Installing if upgrading => "正在运行更新程序，请稍候",
+        InstallStage::Installing => "正在运行安装程序，请稍候",
+        _ => "正在准备安装，请稍候",
     }
 }
 

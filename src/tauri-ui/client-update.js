@@ -4,6 +4,11 @@
   const invoke = (command, args) => window.__TAURI__.core.invoke(command, args);
   const publish = (value, action) => document.dispatchEvent(new CustomEvent('client-update-action-result', {detail:{value,action}}));
   const el = id => document.getElementById(id);
+  const progress = document.createElement('div');
+  progress.className = 'tool-download-progress';
+  progress.hidden = true;
+  progress.innerHTML = '<progress max="100" aria-label="客户端更新下载进度"></progress><p class="tool-download-summary"></p>';
+  el('client-update-status').after(progress);
   const check = el('check-client-update');
   const recovery = el('client-update-recovery');
   recovery.onclick = async () => {
@@ -38,7 +43,7 @@
     confirm.close();
     document.dispatchEvent(new Event('client-update-manual-check'));
     downloading = true;
-    publish({...latest,status:'downloading',error:null}, 'download');
+    publish({...latest,status:'downloading',downloadProgress:null,error:null}, 'download');
     try { publish(await invoke('download_client_update', {version}), 'download'); }
     catch (error) { publish({...latest,status:'failed',currentVersion,error:String(error)}, 'download'); }
     finally { downloading = false; }
@@ -72,6 +77,7 @@
       value = {...value,status:'idle',error:null};
     }
     latest = value;
+    window.TokenMarketDownloadProgress.render(progress, value.status === 'downloading', value.downloadProgress);
     recovery.disabled = !value.recoveryAvailable;
     el('client-recovery-help').hidden = Boolean(value.recoveryAvailable);
     currentVersion = value.currentVersion;

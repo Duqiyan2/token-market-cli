@@ -98,6 +98,241 @@ fn application(home: &Path, name: &str, version: &str) -> PathBuf {
 }
 
 #[test]
+fn qwenwork_downloads_the_official_package_for_each_supported_platform() {
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join("User ' & home");
+    for (platform, arch, filename) in [
+        (
+            HostPlatform::MacOs,
+            "aarch64",
+            "qwenworkcn-darwin-arm64.dmg",
+        ),
+        (HostPlatform::MacOs, "x86_64", "qwenworkcn-darwin-x64.dmg"),
+        (HostPlatform::Windows, "x86_64", "qwenworkcn-setup-x64.exe"),
+    ] {
+        let environment = environment(&home, platform);
+        let plan =
+            tokenmarket_core::installation::recipes::plan(ToolId::QwenWork, &environment, arch)
+                .unwrap();
+        assert_eq!(
+            plan.method,
+            tokenmarket_core::installation::InstallMethod::Desktop
+        );
+        assert_eq!(plan.version, "latest");
+        assert_eq!(plan.steps.len(), 2);
+        let package = home.join(".tokenmarket/installers/qwenwork").join(filename);
+        assert_eq!(plan.steps[0].stage, InstallStage::Downloading);
+        assert_eq!(
+            plan.steps[0].download,
+            Some((
+                format!("https://assets.qwenwork.cn/release/latest/{filename}"),
+                package.clone()
+            ))
+        );
+        let handoff = &plan.steps[1];
+        assert_eq!(handoff.stage, InstallStage::WaitingForUser);
+        assert!(handoff.download.is_none());
+        if platform == HostPlatform::MacOs {
+            assert_eq!(handoff.program, "/usr/bin/open");
+            assert_eq!(handoff.args, vec![package.to_string_lossy().into_owned()]);
+        } else {
+            assert_eq!(handoff.program, "powershell.exe");
+            assert_eq!(
+                handoff.args.last().unwrap(),
+                &format!(
+                    "$ErrorActionPreference = 'Stop'; Start-Process -FilePath '{}'",
+                    package.to_string_lossy().replace('\'', "''")
+                )
+            );
+        }
+    }
+}
+
+fn qwenwork_application(home: &Path, version: &str) {
+    let bundle = application(home, "QwenWorkCN", version);
+    let plist_path = bundle.join("Contents/Info.plist");
+    let mut info = plist::Value::from_file(&plist_path).unwrap();
+    info.as_dictionary_mut().unwrap().insert(
+        "CFBundleIdentifier".into(),
+        plist::Value::String("cn.qwenwork.desktop.mac".into()),
+    );
+    info.to_file_xml(plist_path).unwrap();
+}
+
+#[test]
+fn qwenwork_native_download_can_retry_and_reuses_a_later_installed_version() {
+    let root = tempfile::tempdir().unwrap();
+    let executor = Arc::new(GuiInstaller::default());
+    let manager = InstallationManager::new(
+        environment(root.path(), HostPlatform::MacOs),
+        "aarch64".into(),
+        executor.clone(),
+    );
+    // A same-named CLI is not the QwenWork desktop application.
+    std::fs::create_dir_all(root.path().join("bin")).unwrap();
+    let command = root.path().join("bin/qwenwork");
+    std::fs::write(&command, "unrelated CLI; never execute").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(command, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    executor.fail.store(true, Ordering::SeqCst);
+    manager.start_desktop(ToolId::QwenWork).unwrap();
+    let failed = until(&manager, ToolId::QwenWork, |s| s.stage.is_terminal());
+    assert_eq!(failed.stage, InstallStage::Failed);
+    assert!(!failed.installed);
+    executor.fail.store(false, Ordering::SeqCst);
+    for _ in 0..2 {
+        manager.start_desktop(ToolId::QwenWork).unwrap();
+        let opened = until(&manager, ToolId::QwenWork, |s| s.stage.is_terminal());
+        assert_eq!(
+            opened.stage,
+            InstallStage::InstallerOpened,
+            "{}",
+            opened.detail
+        );
+        assert!(!opened.installed);
+        assert!(opened.detail.contains("登录"));
+    }
+    let downloads = executor.steps.lock().unwrap().len();
+    qwenwork_application(root.path(), "1.6.0");
+    manager.start_desktop(ToolId::QwenWork).unwrap();
+    let done = until(&manager, ToolId::QwenWork, |s| s.stage.is_terminal());
+    assert_eq!(done.stage, InstallStage::Succeeded, "{}", done.detail);
+    assert!(done.installed);
+    assert_eq!(executor.steps.lock().unwrap().len(), downloads);
+    assert!(!root.path().join(".qwenworkcn/.env").exists());
+    assert!(!root
+        .path()
+        .join(".tokenmarket/desktop-connections")
+        .exists());
+}
+
+#[test]
+fn qwenwork_cli_waits_for_the_real_app_without_connecting_or_requiring_login() {
+    let root = tempfile::tempdir().unwrap();
+    let executor = Arc::new(GuiInstaller::default());
+    let manager = InstallationManager::new(
+        environment(root.path(), HostPlatform::MacOs),
+        "x86_64".into(),
+        executor,
+    );
+    let config = root.path().join(".qwenworkcn/.env");
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    std::fs::write(&config, "EXISTING_SETTING=keep").unwrap();
+    manager.start(ToolId::QwenWork).unwrap();
+    let waiting = until(&manager, ToolId::QwenWork, |s| {
+        s.stage == InstallStage::WaitingForUser && s.detail.contains("登录")
+    });
+    assert!(!waiting.installed);
+    // Discovery alone is insufficient: reject an app with the wrong identity.
+    application(root.path(), "QwenWorkCN", "1.5.0");
+    assert!(
+        !ToolInventory::new(environment(root.path(), HostPlatform::MacOs))
+            .is_installed(ToolId::QwenWork)
+    );
+    qwenwork_application(root.path(), "1.5.0");
+    let done = until(&manager, ToolId::QwenWork, |s| s.stage.is_terminal());
+    assert_eq!(done.stage, InstallStage::Succeeded, "{}", done.detail);
+    assert!(done.installed);
+    assert_eq!(
+        std::fs::read_to_string(config).unwrap(),
+        "EXISTING_SETTING=keep"
+    );
+    assert!(!root.path().join(".qwenworkcn/.status.json").exists());
+    assert!(!root
+        .path()
+        .join(".tokenmarket/desktop-connections")
+        .exists());
+}
+
+#[test]
+fn qwenwork_unsupported_platforms_keep_official_guidance_without_running_installers() {
+    let root = tempfile::tempdir().unwrap();
+    let executor = Arc::new(GuiInstaller::default());
+    for (platform, arch) in [
+        (HostPlatform::Unix, "x86_64"),
+        (HostPlatform::Windows, "aarch64"),
+        (HostPlatform::MacOs, "unsupported"),
+    ] {
+        let manager = InstallationManager::new(
+            environment(root.path(), platform),
+            arch.into(),
+            executor.clone(),
+        );
+        let availability = manager.availability(ToolId::QwenWork);
+        assert!(!availability.supported);
+        assert!(availability.reason.unwrap().contains("其他系统或架构"));
+        assert!(manager.start_desktop(ToolId::QwenWork).is_err());
+    }
+    assert!(executor.steps.lock().unwrap().is_empty());
+}
+
+#[test]
+fn desktop_handoff_releases_the_tool_and_allows_another_download_before_installation() {
+    let root = tempfile::tempdir().unwrap();
+    let executor = Arc::new(GuiInstaller::default());
+    let manager = InstallationManager::new(
+        environment(root.path(), HostPlatform::MacOs),
+        "aarch64".into(),
+        executor.clone(),
+    );
+    for attempt in 1..=2 {
+        manager.start_desktop(ToolId::WorkBuddy).unwrap();
+        let opened = until(&manager, ToolId::WorkBuddy, |state| {
+            state.stage.is_terminal()
+        });
+        assert_eq!(opened.stage, InstallStage::InstallerOpened);
+        assert!(
+            !opened.installed,
+            "opening an installer is not installation success"
+        );
+        assert_eq!(executor.steps.lock().unwrap().len(), attempt * 2);
+    }
+    application(root.path(), "WorkBuddy", "5.9.3");
+    assert!(
+        ToolInventory::new(environment(root.path(), HostPlatform::MacOs))
+            .is_installed(ToolId::WorkBuddy)
+    );
+    manager.start_desktop(ToolId::WorkBuddy).unwrap();
+    assert_eq!(
+        until(&manager, ToolId::WorkBuddy, |s| s.stage.is_terminal()).stage,
+        InstallStage::Succeeded
+    );
+    assert_eq!(
+        executor.steps.lock().unwrap().len(),
+        4,
+        "reuse the actual installed application"
+    );
+}
+
+#[test]
+fn windows_desktop_download_can_be_repeated_without_waiting_for_native_installation() {
+    let root = tempfile::tempdir().unwrap();
+    let executor = Arc::new(GuiInstaller::default());
+    let manager = InstallationManager::new(
+        environment(root.path(), HostPlatform::Windows),
+        "x86_64".into(),
+        executor.clone(),
+    );
+    for _ in 0..2 {
+        manager.start_desktop(ToolId::WorkBuddy).unwrap();
+        let state = until(&manager, ToolId::WorkBuddy, |s| s.stage.is_terminal());
+        assert_eq!(state.stage, InstallStage::InstallerOpened);
+        assert!(!state.installed);
+    }
+    assert_eq!(executor.steps.lock().unwrap().len(), 4);
+    let application = root.path().join("Applications/WorkBuddy/WorkBuddy.exe");
+    std::fs::create_dir_all(application.parent().unwrap()).unwrap();
+    std::fs::write(application, "fixture executable; never run").unwrap();
+    assert!(
+        ToolInventory::new(environment(root.path(), HostPlatform::Windows))
+            .is_installed(ToolId::WorkBuddy)
+    );
+}
+
+#[test]
 fn workbuddy_waits_for_actual_application_after_native_handoff_and_preserves_configuration() {
     let root = tempfile::tempdir().unwrap();
     let home = root.path().join("User ' & home");
@@ -116,7 +351,7 @@ fn workbuddy_waits_for_actual_application_after_native_handoff_and_preserves_con
         state.stage == InstallStage::WaitingForUser
     });
     assert!(!waiting.installed);
-    assert!(waiting.detail.contains("原生安装器"));
+    assert!(waiting.detail.contains("安装包已打开"));
     assert!(!ToolInventory::new(environment(&home, HostPlatform::MacOs))
         .is_installed(ToolId::WorkBuddy));
     application(&home, "WorkBuddy", "5.9.3");

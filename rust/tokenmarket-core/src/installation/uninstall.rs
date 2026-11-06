@@ -446,6 +446,7 @@ impl InstallationManager {
             stage: InstallStage::Preparing,
             output: vec![plan.command.clone()],
             output_sequence: 1,
+            download_progress: None,
             detail: "正在卸载选定安装；配置和用户数据保留".into(),
             installed: true,
             version: None,

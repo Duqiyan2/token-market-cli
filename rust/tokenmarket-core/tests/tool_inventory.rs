@@ -127,6 +127,98 @@ fn macos_bundles_require_the_declared_executable() {
 }
 
 #[test]
+fn windows_qwenwork_detects_the_active_version_behind_the_official_launcher() {
+    let root = tempfile::tempdir().unwrap();
+    let programs = root.path().join("home/AppData/Local/Programs");
+    let install = programs.join("QwenWorkCN");
+    let main = install.join("1.5.0-26110306/QwenWorkCN.exe");
+    executable(&install.join("Launcher.exe"));
+    executable(&main);
+    std::fs::create_dir_all(main.parent().unwrap().join("resources")).unwrap();
+    std::fs::write(
+        main.parent().unwrap().join("resources/app.asar"),
+        "inert archive",
+    )
+    .unwrap();
+    std::fs::write(
+        install.join("updater.cfg"),
+        r#"{"currentVersion":"1.5.0-26110306","appExecutableName":"QwenWorkCN.exe","pendingActivation":false,"installingVersions":[]}"#,
+    ).unwrap();
+    let mut environment = environment(root.path(), HostPlatform::Windows);
+    environment.application_directories = vec![programs];
+    let inventory = ToolInventory::new(environment);
+    assert!(
+        inventory.is_installed(ToolId::QwenWork),
+        "official Launcher.exe + updater.cfg + versioned executable was reported missing"
+    );
+    assert_eq!(inventory.application_path(ToolId::QwenWork), Some(main));
+    let entry = inventory
+        .list()
+        .unwrap()
+        .into_iter()
+        .find(|e| e.id == ToolId::QwenWork)
+        .unwrap();
+    assert!(entry.installed);
+    assert!(entry.can_connect);
+}
+
+#[test]
+fn windows_qwenwork_tracks_active_versions_and_ignores_incomplete_or_unrelated_launchers() {
+    let root = tempfile::tempdir().unwrap();
+    let install = root.path().join("custom install/千问办公 & QwenWorkCN");
+    let mut environment = environment(root.path(), HostPlatform::Windows);
+    // A registered custom InstallLocation is already the application root.
+    environment.application_directories = vec![install.clone()];
+    let inventory = ToolInventory::new(environment);
+    executable(&install.join("Launcher.exe"));
+    assert!(!inventory.is_installed(ToolId::QwenWork));
+    let old = install.join("1.5.0-26110306/QwenWorkCN.exe");
+    let staged = install.join("1.6.0-26110401/QwenWorkCN.exe");
+    executable(&old);
+    executable(&staged);
+    let config = install.join("updater.cfg");
+    let write_version = |version: &str, executable: &str| {
+        std::fs::write(
+            &config,
+            serde_json::json!({
+                "currentVersion":version,"appExecutableName":executable,
+                "installingVersions":["1.6.0-26110401"]
+            })
+            .to_string(),
+        )
+        .unwrap();
+    };
+    write_version("1.5.0-26110306", "QwenWorkCN.exe");
+    assert_eq!(inventory.application_path(ToolId::QwenWork), Some(old));
+    write_version("1.6.0-26110401", "QwenWorkCN.exe");
+    assert_eq!(
+        inventory.application_path(ToolId::QwenWork),
+        Some(staged.clone())
+    );
+    std::fs::remove_file(staged).unwrap();
+    assert!(!inventory.is_installed(ToolId::QwenWork));
+    for version in [
+        "",
+        "..",
+        "../1.5.0-26110306",
+        "1.5.0/../../outside",
+        r"1.5.0\..\outside",
+        r"C:\outside",
+        "/outside",
+    ] {
+        write_version(version, "QwenWorkCN.exe");
+        assert!(
+            !inventory.is_installed(ToolId::QwenWork),
+            "invalid version: {version}"
+        );
+    }
+    write_version("1.5.0-26110306", "OtherApp.exe");
+    assert!(!inventory.is_installed(ToolId::QwenWork));
+    std::fs::write(config, "invalid JSON").unwrap();
+    assert!(!inventory.is_installed(ToolId::QwenWork));
+}
+
+#[test]
 fn windows_inventory_recognizes_pathext_launchers_and_installed_desktop_executables() {
     let root = tempfile::tempdir().unwrap();
     let inventory = ToolInventory::new(environment(root.path(), HostPlatform::Windows));

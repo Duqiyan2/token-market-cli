@@ -37,7 +37,7 @@ pub(super) fn validate_app(app: &Path) -> Result<()> {
     {
         bail!("搭子程序名称无法确认")
     }
-    // Read only package identity/version, never unpack or modify the installed app.
+    // Read only package identity, never unpack or modify the installed app.
     let mut file = File::open(
         app.parent()
             .context("搭子目录无效")?
@@ -82,11 +82,8 @@ pub(super) fn validate_app(app: &Path) -> Result<()> {
     let mut bytes = vec![0; length as usize];
     file.read_exact(&mut bytes)?;
     let package: serde_json::Value = serde_json::from_slice(&bytes)?;
-    if package["name"] != "qianfan-desktop-app"
-        || package["version"] != "1.0.89"
-        || package["buildVersion"].as_str() != Some("447")
-    {
-        bail!("当前搭子版本尚不支持一键重启，请手动重启搭子")
+    if package["name"] != "qianfan-desktop-app" {
+        bail!("无法确认百度搭子应用身份，请手动重启搭子")
     }
     Ok(())
 }
@@ -111,8 +108,11 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let app = root.path().join("DuMate.exe");
         std::fs::create_dir(root.path().join("resources")).unwrap();
-        let write = |version: &str| {
-            let package = serde_json::to_vec(&serde_json::json!({"name":"qianfan-desktop-app","version":version,"buildVersion":"447"})).unwrap();
+        let write = |name: &str, version: &str, build: &str| {
+            let package = serde_json::to_vec(
+                &serde_json::json!({"name":name,"version":version,"buildVersion":build}),
+            )
+            .unwrap();
             let index = serde_json::to_vec(
                 &serde_json::json!({"files":{"package.json":{"size":package.len(),"offset":"0"}}}),
             )
@@ -126,9 +126,13 @@ mod tests {
             bytes.extend(package);
             std::fs::write(root.path().join("resources/app.asar"), bytes).unwrap();
         };
-        write("1.0.89");
+        write("qianfan-desktop-app", "1.0.89", "447");
         validate_app(&app).unwrap();
-        write("1.0.90");
+        for version in ["1.0.89.0", "1.0.88", "1.0.90", "2.0.0"] {
+            write("qianfan-desktop-app", version, "500");
+            validate_app(&app).unwrap();
+        }
+        write("another-app", "1.0.89", "447");
         assert!(validate_app(&app).is_err());
         std::fs::write(root.path().join("resources/app.asar"), [0xff; 8]).unwrap();
         assert!(validate_app(&app).is_err());

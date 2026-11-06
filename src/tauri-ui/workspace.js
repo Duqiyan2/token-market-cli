@@ -215,7 +215,8 @@
     const switchAction = button('切换空间', showSpaces); switchAction.className = 'account-switch-action';
     workspace.append(text('p', '新接入的工具使用这个空间，已有连接保持各自的计费归属。'), switchAction);
     const wallet = text('div', '', 'account-wallet'); wallet.append(text('h2', '可用余额'), text('div', amount, 'account-balance'), controls());
-    const walletStatus = text('p', notice || snapshot.balance_error || '余额与充值以当前空间为准。', 'workspace-status'); walletStatus.dataset.feedback = ''; walletStatus.setAttribute('role', 'status'); wallet.append(walletStatus);
+    wallet.append(text('p', '余额与充值以当前空间为准。', 'workspace-status'));
+    const walletStatus = text('p', notice || snapshot.balance_error || '', 'workspace-status'); walletStatus.dataset.feedback = ''; walletStatus.setAttribute('role', 'status'); wallet.append(walletStatus);
     overview.append(workspace, wallet); accountContent.append(overview);
 
     const spaces = text('section', '', 'account-section'); spaces.append(text('h2', '可切换空间'));

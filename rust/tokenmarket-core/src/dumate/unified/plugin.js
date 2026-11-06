@@ -19,10 +19,8 @@ const mediaParts = parts => Array.isArray(parts) && parts.some(part =>
   || part.type === 'file' && /\.(?:jpe?g|png|gif|webp|bmp|tiff?|svg|mp4|mov|avi|mkv|wmv|flv|webm|m4v|3gp)(?:[?#].*)?$/i.test(part.filename ?? part.url ?? ''));
 
 function snapshot() {
-  if (!['darwin', 'win32'].includes(process.platform) || process.env.DUMATE_APP_VER !== '1.0.89.447'
-      || ![undefined, '0', '1'].includes(process.env.OPENCODE_NEW_RUNTIME)
-      || process.env.DUMATE_LOGIN_MODE === 'enterprise' || process.env['X-Dumate-Prd-Source'] === 'enterprise') {
-    throw Error('当前搭子版本或运行模式不支持统一接管。');
+  if (!['darwin', 'win32'].includes(process.platform) || process.env.DUMATE_LOGIN_MODE === 'enterprise' || process.env['X-Dumate-Prd-Source'] === 'enterprise') {
+    throw Error('当前搭子平台或登录模式不支持统一接管。');
   }
   const account = process.env.XDG_CONFIG_HOME;
   if (!account || !path.isAbsolute(account)) throw Error(FAILURE);
@@ -172,10 +170,13 @@ function createAdapter() {
   globalThis.fetch = unifiedFetch;
   return {
     config(config) {
+      const quota = config?.provider?.QianfanPersonalQuota;
+      if (!quota || typeof quota.options?.baseURL !== 'string'
+          || quota.models?.['glm-5']?.id !== 'model-text') {
+        failure = '搭子个人版模型接口不兼容：缺少文本模型或原生模型入口。'; throw Error(failure);
+      }
       config.model = 'QianfanPersonalQuota/glm-5'; config.small_model = config.model;
       for (const agent of Object.values(config.agent ?? {})) if (agent && typeof agent === 'object') agent.model = config.model;
-      const quota = config.provider?.QianfanPersonalQuota;
-      if (!quota) { failure = '搭子个人版模型接口发生变化。'; throw Error(failure); }
       if (quota.options?.baseURL !== VIRTUAL) nativeQuota = { ...quota.options };
       quota.options = { ...quota.options, baseURL: VIRTUAL, apiKey: 'tokenmarket-engine-local', fetch: unifiedFetch };
       const selected = ready();

@@ -56,7 +56,7 @@ pub async fn start_tool_upgrade(
 pub fn start_tool_installation(app: AppHandle, tool: String) -> Result<InstallStatus, String> {
     let tool = tokenmarket_core::tool_id(&tool).map_err(|error| error.to_string())?;
     app.state::<InstallationManager>()
-        .start(tool)
+        .start_desktop(tool)
         .map_err(|error| error.to_string())
 }
 #[tauri::command]

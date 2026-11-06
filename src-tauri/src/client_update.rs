@@ -29,6 +29,7 @@ pub struct ClientUpdateStatus {
     pub install_available: bool,
     pub recovery_available: bool,
     pub show_recovery_notice: bool,
+    pub download_progress: Option<tokenmarket_core::installation::DownloadProgress>,
 }
 
 /// Constructed only from a successfully verified native download. Never IPC data.
@@ -176,6 +177,7 @@ impl ClientUpdater {
             startup_started: AtomicBool::new(false),
             state: Mutex::new(UpdateState {
                 status: ClientUpdateStatus {
+                    download_progress: None,
                     status: "idle".into(),
                     current_version,
                     available_version: None,
@@ -448,6 +450,11 @@ impl ClientUpdater {
             }
             state.verified_bytes = None;
             state.status.status = "downloading".into();
+            state.status.download_progress =
+                Some(tokenmarket_core::installation::DownloadProgress {
+                    downloaded_bytes: 0,
+                    total_bytes: None,
+                });
             state.status.automatic = false;
             state.status.remind = false;
             state.status.error = None;
@@ -456,9 +463,22 @@ impl ClientUpdater {
         // Upstream's check timeout is not copied onto Update.
         update.timeout = Some(Duration::from_secs(120));
         let _ = app.emit("desktop-client-update-status", self.status());
+        let mut last_progress = std::time::Instant::now() - Duration::from_secs(1);
         let result = update
             .download(
-                |_, _| {},
+                |chunk, total| {
+                    {
+                        let mut state = self.state.lock().expect("client update state");
+                        if let Some(progress) = state.status.download_progress.as_mut() {
+                            progress.downloaded_bytes += chunk as u64;
+                            progress.total_bytes = total.filter(|n| *n > 0);
+                        }
+                    }
+                    if last_progress.elapsed() >= Duration::from_millis(250) {
+                        let _ = app.emit("desktop-client-update-status", self.status());
+                        last_progress = std::time::Instant::now();
+                    }
+                },
                 || {
                     self.state
                         .lock()

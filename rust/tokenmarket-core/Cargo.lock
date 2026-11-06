@@ -1341,6 +1341,7 @@ dependencies = [
  "chrono",
  "jsonc-parser",
  "keyring",
+ "memchr",
  "plist",
  "rand 0.8.8",
  "reqwest",

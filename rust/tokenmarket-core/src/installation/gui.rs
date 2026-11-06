@@ -22,18 +22,30 @@ pub(super) fn is_gui(tool: ToolId) -> bool {
     )
 }
 pub(super) fn instructions(tool: ToolId, platform: HostPlatform) -> &'static str {
-    if matches!(tool, ToolId::DuMate | ToolId::DuMateEnterprise) && platform == HostPlatform::MacOs
+    if tool == ToolId::QwenWork {
+        if platform == HostPlatform::MacOs {
+            "安装包已打开，请将 QwenWorkCN.app 拖入“应用程序”。安装完成后先打开千问办公并登录，再返回接入；配置保存后重启千问生效"
+        } else {
+            "安装程序已打开，请按千问办公安装向导完成安装。安装完成后先打开并登录，再返回接入；配置保存后重启千问生效"
+        }
+    } else if matches!(tool, ToolId::DuMate | ToolId::DuMateEnterprise)
+        && platform == HostPlatform::MacOs
     {
         "请将已打开文件夹中的 DuMate.app 拖入 Applications。安装完成后请先登录要接入的个人版或企业版；接入前完全退出 DuMate"
     } else if tool == ToolId::DeepSeekHarness && platform == HostPlatform::MacOs {
         "请将已打开文件夹中的 DeepSeek Harness.app 移入 Applications。dsh 命令注册可在工具内另行操作；取消请关闭原生安装窗口"
     } else if platform == HostPlatform::MacOs {
-        "请在原生安装器中将应用拖入 Applications。取消安装请在原生安装器中操作；关闭此窗口会继续等待实际安装"
+        "安装包已打开，请将应用拖入“应用程序”。安装完成后返回工具列表即可刷新状态"
     } else {
-        "请完成原生安装器中的安装向导。取消安装请在原生安装器中操作；关闭此窗口会继续等待实际安装"
+        "安装程序已打开，请按安装向导完成安装。返回工具列表后会刷新安装状态"
     }
 }
 pub(super) fn matches_version(tool: ToolId, actual: &str, target: &str) -> bool {
+    // The official QwenWork download page publishes a moving latest channel.
+    // SDK compatibility is checked separately during connection preflight.
+    if tool == ToolId::QwenWork && target == "latest" {
+        return super::updates::compare_versions(actual, actual).is_some();
+    }
     actual.split_whitespace().any(|version| {
         version == target
             || (tool == ToolId::WorkBuddy && version.starts_with(&format!("{target}.")))
@@ -45,7 +57,7 @@ pub(super) fn plan(
     architecture: &str,
 ) -> Result<InstallPlan> {
     if tool == ToolId::QwenWork {
-        bail!("请通过千问办公官网安装，登录后完全退出再接入；更新版本后需要重新接入")
+        return qwenwork_plan(environment, architecture);
     }
     if matches!(tool, ToolId::DuMate | ToolId::DuMateEnterprise) {
         let mut plan = super::dumate::plan(environment, architecture)?;
@@ -110,6 +122,63 @@ pub(super) fn plan(
             environment: vec![],
             download: Some((format!("https://acc-1258344699.cos.ap-guangzhou.myqcloud.com/workbuddy/saas/{platform}/{filename}"), package)),
         }, handoff],
+    })
+}
+/// Official download-page links, checked 2026-11-06: https://qwenwork.cn/download.
+fn qwenwork_plan(environment: &InstallationEnvironment, architecture: &str) -> Result<InstallPlan> {
+    let filename = match (environment.platform, architecture) {
+        (HostPlatform::MacOs, "aarch64") => "qwenworkcn-darwin-arm64.dmg",
+        (HostPlatform::MacOs, "x86_64") => "qwenworkcn-darwin-x64.dmg",
+        (HostPlatform::Windows, "x86_64") => "qwenworkcn-setup-x64.exe",
+        _ => bail!("千问办公下载安装与接入当前支持 macOS 14+（Apple 芯片 / Intel）和 Windows 10+ x64；其他系统或架构请通过官网查看安装方案"),
+    };
+    let package = environment
+        .home
+        .join(".tokenmarket/installers/qwenwork")
+        .join(filename);
+    let handoff = if environment.platform == HostPlatform::MacOs {
+        InstallStep {
+            stage: InstallStage::WaitingForUser,
+            program: "/usr/bin/open".into(),
+            args: vec![package.to_string_lossy().into_owned()],
+            environment: vec![],
+            download: None,
+        }
+    } else {
+        InstallStep {
+            stage: InstallStage::WaitingForUser,
+            program: "powershell.exe".into(),
+            args: vec![
+                "-NoProfile".into(),
+                "-NonInteractive".into(),
+                "-Command".into(),
+                format!(
+                    "$ErrorActionPreference = 'Stop'; Start-Process -FilePath '{}'",
+                    package.to_string_lossy().replace('\'', "''")
+                ),
+            ],
+            environment: vec![],
+            download: None,
+        }
+    };
+    Ok(InstallPlan {
+        method: super::InstallMethod::Desktop,
+        tool: ToolId::QwenWork,
+        version: "latest".into(),
+        command: "qwenwork".into(),
+        steps: vec![
+            InstallStep {
+                stage: InstallStage::Downloading,
+                program: String::new(),
+                args: vec![],
+                environment: vec![],
+                download: Some((
+                    format!("https://assets.qwenwork.cn/release/latest/{filename}"),
+                    package,
+                )),
+            },
+            handoff,
+        ],
     })
 }
 pub(super) fn harness_application_version(application: &Path) -> Result<String> {

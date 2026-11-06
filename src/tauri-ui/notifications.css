@@ -1,0 +1,32 @@
+/* Transient page feedback must never participate in the content layout.
+   Keep each live region in its owning view so hidden pages stay silent. */
+:is(#feedback, #session-feedback, .tools-feedback, .tools-updates-status, .workspace-status[data-feedback], #desktop-preferences-notice, #usage-feedback, .client-update-failure-notice) {
+  position: fixed;
+  inset: auto 16px 16px auto;
+  z-index: 40;
+  width: min(420px, calc(100vw - 32px));
+  min-height: 0;
+  max-height: min(150px, calc((100dvh - 64px) / 5));
+  overflow: auto;
+  overflow-wrap: anywhere;
+  margin: 0;
+  padding: 12px 16px;
+  border: 1px solid var(--info-line);
+  border-radius: 8px;
+  background: var(--info-soft);
+  color: var(--info-ink);
+  box-shadow: 0 8px 24px var(--shadow);
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: left;
+}
+:is(#feedback, #session-feedback, .tools-feedback, .tools-updates-status, .workspace-status[data-feedback], #usage-feedback):empty,
+#desktop-preferences-notice:has(.settings-feedback:empty):has(button[hidden]) { display: none; }
+:is(#feedback, #session-feedback, .tools-feedback, #usage-feedback, .client-update-failure-notice).error,
+#desktop-preferences-notice:has(.error) {
+  background: var(--error-soft);
+  border-color: var(--error-line);
+  color: var(--error);
+}
+#desktop-preferences-notice .settings-feedback { margin: 0; min-height: 0; font-size: inherit; color: inherit; }
+#desktop-preferences-retry { margin-top: 8px; }

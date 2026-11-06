@@ -518,14 +518,14 @@ impl ToolInventory {
         &self,
     ) -> Result<crate::installation::InstallationGuard> {
         crate::dumate::personal_config(&self.environment.home, self.environment.platform)?;
-        if self.environment.home == crate::config::home_dir() {
-            let application = self
-                .application_path(ToolId::DuMate)
-                .context("未找到搭子安装位置")?;
-            crate::dumate::unified::validate_engine(&application, self.environment.platform)?;
-        }
-        self.installation_connection_guard(ToolId::DuMate)
+        let guard = self.installation_connection_guard(ToolId::DuMate)?;
+        let application = self
+            .application_path(ToolId::DuMate)
+            .context("未找到搭子安装位置")?;
+        crate::dumate::unified::validate_engine(&application, self.environment.platform)?;
+        Ok(guard)
     }
+
     fn installation_connection_guard(
         &self,
         tool: ToolId,
@@ -603,6 +603,11 @@ impl ToolInventory {
                 for folder in std::iter::once(directory.clone())
                     .chain(folders.iter().map(|name| directory.join(name)))
                 {
+                    if tool == ToolId::QwenWork {
+                        if let Some(application) = qwenwork_windows_application(&folder) {
+                            return Some(application);
+                        }
+                    }
                     if let Ok(entries) = fs::read_dir(folder) {
                         for entry in entries.flatten() {
                             if files.iter().any(|name| {
@@ -756,6 +761,91 @@ fn macos_bundle_installed(path: &Path) -> bool {
     )
 }
 
+/// The official Windows launcher selects its active version from updater.cfg.
+/// Return the real executable so SDK resources and process identity use the
+/// same version. A generic Launcher.exe alone is not an installed QwenWork.
+fn qwenwork_windows_application(directory: &Path) -> Option<PathBuf> {
+    let data = fs::read(directory.join("updater.cfg")).ok()?;
+    let config: serde_json::Value = serde_json::from_slice(&data).ok()?;
+    if !config
+        .get("appExecutableName")?
+        .as_str()?
+        .eq_ignore_ascii_case("QwenWorkCN.exe")
+    {
+        return None;
+    }
+    let version = config.get("currentVersion")?.as_str()?;
+    // The version must be one directory beneath this installation, including
+    // when Windows-shaped fixtures are checked on another operating system.
+    if !version.as_bytes().first()?.is_ascii_digit()
+        || !version
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+    {
+        return None;
+    }
+    let application = directory.join(version).join("QwenWorkCN.exe");
+    is_executable(&application, HostPlatform::Windows).then_some(application)
+}
+
+#[cfg(any(windows, test))]
+fn registered_application_directory(name: &str, location: &str) -> Option<PathBuf> {
+    if ![
+        "workbuddy",
+        "deepseek harness",
+        "opencode",
+        "openclaw",
+        "dumate",
+        "百度搭子",
+        "qwenwork",
+        "千问办公",
+    ]
+    .iter()
+    .any(|product| name.to_ascii_lowercase().contains(product))
+        || location.trim().is_empty()
+    {
+        return None;
+    }
+    Some(PathBuf::from(location))
+}
+
+#[cfg(test)]
+mod windows_application_discovery_tests {
+    use super::*;
+
+    #[test]
+    fn windows_registry_qwenwork_custom_installation_is_detected() {
+        let root = tempfile::tempdir().unwrap();
+        let installation = root.path().join("custom/千问办公");
+        fs::create_dir_all(&installation).unwrap();
+        let executable = installation.join("QwenWorkCN.exe");
+        fs::write(&executable, "inert application fixture; never execute").unwrap();
+        for display_name in ["QwenWorkCN", "千问办公"] {
+            let environment = InstallationEnvironment {
+                platform: HostPlatform::Windows,
+                home: root.path().join("home"),
+                command_directories: vec![],
+                application_directories: registered_application_directory(
+                    display_name,
+                    installation.to_str().unwrap(),
+                )
+                .into_iter()
+                .collect(),
+                executable_extensions: vec![".EXE".into()],
+            };
+            let inventory = ToolInventory::new(environment);
+            assert!(
+                inventory.is_installed(ToolId::QwenWork),
+                "registry entry {display_name} was dropped"
+            );
+            assert_eq!(
+                inventory.application_path(ToolId::QwenWork),
+                Some(executable.clone())
+            );
+        }
+    }
+}
+
 #[cfg(windows)]
 fn registered_application_directories() -> Vec<PathBuf> {
     use winreg::{
@@ -780,22 +870,9 @@ fn registered_application_directories() -> Vec<PathBuf> {
                 let Ok(name) = app.get_value::<String, _>("DisplayName") else {
                     continue;
                 };
-                if ![
-                    "workbuddy",
-                    "deepseek harness",
-                    "opencode",
-                    "openclaw",
-                    "dumate",
-                    "百度搭子",
-                ]
-                .iter()
-                .any(|product| name.to_ascii_lowercase().contains(product))
-                {
-                    continue;
-                }
                 if let Ok(location) = app.get_value::<String, _>("InstallLocation") {
-                    if !location.trim().is_empty() {
-                        paths.push(PathBuf::from(location));
+                    if let Some(directory) = registered_application_directory(&name, &location) {
+                        paths.push(directory);
                     }
                 }
             }

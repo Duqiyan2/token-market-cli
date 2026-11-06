@@ -9,7 +9,7 @@
 
 ## 使用方式
 
-1. 安装官方 DuMate **1.0.89**，登录企业版；管理员须同时开放自定义模型与模型选择权限。本次支持 HTTPS 企业来源；HTTP 私有部署暂未验证。
+1. 安装官方 DuMate 并登录企业版；接入不要求与安装器版本相同，依据当前活动账号、配置结构及实时企业权限校验，`1.0.89` 是已验收版本；管理员须同时开放自定义模型与模型选择权限。本次支持 HTTPS 企业来源；HTTP 私有部署暂未验证。
 2. 完全退出 DuMate，在 Token Market 选择独立的“百度搭子 DuMate（企业版）→ 接入”，或执行 `tokenmarket connect dumate-enterprise`。
 3. 接入导入带有效长度元数据的文本模型，初始状态是未测试；不会创建或切换 DuMate 会话，也不会自动调用模型。
 4. 保持 DuMate 完全退出，在 Token Market 的工具详情选择一个模型并确认费用测试，或显式执行 `tokenmarket test dumate-enterprise --model <模型 ID>`。这会发送一次真实的非流式文本请求，并将该模型的真实检查结果写回 DuMate。通过后模型为 `normal`，失败为 `abnormal`；其他未测试模型保持原状态。
