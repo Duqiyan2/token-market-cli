@@ -422,7 +422,11 @@ fn pi_installs_the_npm_release_and_redetects_without_connection() {
         assert!(manager.availability(tool).supported);
         assert_eq!(
             manager.availability(tool).version.as_deref(),
-            Some("latest")
+            Some(if platform == HostPlatform::Windows {
+                "1.4.0"
+            } else {
+                "latest"
+            })
         );
         manager.start(tool).unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
@@ -437,10 +441,20 @@ fn pi_installs_the_npm_release_and_redetects_without_connection() {
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         let steps = installer.steps.lock().unwrap();
-        assert_eq!(steps.len(), 1);
-        let command = steps[0].args.join(" ");
-        assert!(command.contains("@earendil-works/pi-coding-agent@latest"));
-        assert!(steps[0].download.is_none());
+        if platform == HostPlatform::Windows {
+            assert!(steps.iter().any(|step| step
+                .download
+                .as_ref()
+                .is_some_and(|(url, _)| url.contains(_asset))));
+            assert!(steps.iter().any(|step| step.args.join(" ").contains(_sha)));
+        } else {
+            assert_eq!(steps.len(), 1);
+            assert!(steps[0]
+                .args
+                .join(" ")
+                .contains("@earendil-works/pi-coding-agent@latest"));
+            assert!(steps[0].download.is_none());
+        }
         assert!(!root
             .path()
             .join(".tokenmarket/desktop-connections")
