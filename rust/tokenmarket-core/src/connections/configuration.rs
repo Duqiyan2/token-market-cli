@@ -51,6 +51,11 @@ impl ConfigDocument {
             config.set_runtime(runtime);
         }
     }
+    pub fn preserve_qwenwork_route(&mut self, previous: Option<&super::ConnectionRecord>) {
+        if let Self::QwenWork(config) = self {
+            config.preserve_route(previous);
+        }
+    }
     pub fn select_models(&self, models: &[Value]) -> Result<Vec<Value>> {
         match self {
             Self::Provider(provider) => provider.select_models(models),

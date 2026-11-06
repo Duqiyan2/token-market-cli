@@ -1,4 +1,7 @@
 //! DuMate 1.0.89 account configuration and read-only enterprise permission checks.
+pub(crate) mod legacy;
+pub mod restart;
+pub(crate) mod unified;
 use crate::inventory::HostPlatform;
 use anyhow::{bail, Context, Result};
 use serde_json::Value;
@@ -85,6 +88,14 @@ pub(crate) fn require_stopped(config: &Path) -> Result<()> {
     if !config.starts_with(user_data(&crate::config::home_dir(), platform)) {
         return Ok(());
     }
+    if is_running()? {
+        bail!("请先完全退出 DuMate（含后台进程）后重试；接入/取消接入后再打开以读取配置")
+    }
+    Ok(())
+}
+
+/// Read process presence only; never query tasks, open or terminate DuMate.
+pub(crate) fn is_running() -> Result<bool> {
     #[cfg(target_os = "macos")]
     {
         for name in ["DuMate", "dumate-main-server"] {
@@ -95,25 +106,30 @@ pub(crate) fn require_stopped(config: &Path) -> Result<()> {
                 .status()
                 .context("无法确认 DuMate 是否已退出，请完全退出后重试")?;
             if status.success() {
-                bail!("请先完全退出 DuMate（含后台进程）后重试；接入/取消接入后再打开以读取配置")
+                return Ok(true);
             }
             if status.code() != Some(1) {
                 bail!("无法确认 DuMate 是否已退出，请完全退出后重试")
             }
         }
+        return Ok(false);
     }
     #[cfg(windows)]
     {
+        use std::os::windows::process::CommandExt;
         let status = std::process::Command::new("powershell.exe").args([
             "-NoProfile", "-NonInteractive", "-Command",
             "$ErrorActionPreference='Stop'; if (Get-Process -Name DuMate,dumate-main-server -ErrorAction SilentlyContinue) { exit 2 }; exit 0",
-        ]).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status()
+        ]).creation_flags(0x0800_0000).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status()
             .context("无法确认 DuMate 是否已退出，请完全退出后重试")?;
-        if !status.success() {
-            bail!("请先完全退出 DuMate（含后台进程）后重试；接入/取消接入后再打开以读取配置")
-        }
+        return match status.code() {
+            Some(0) => Ok(false),
+            Some(2) => Ok(true),
+            _ => bail!("无法确认 DuMate 是否已退出，请完全退出后重试"),
+        };
     }
-    Ok(())
+    #[cfg(not(any(target_os = "macos", windows)))]
+    bail!("当前平台不支持检测搭子运行状态")
 }
 
 fn enterprise_profile(home: &Path, platform: HostPlatform) -> Result<(PathBuf, Value, url::Url)> {

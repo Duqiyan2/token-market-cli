@@ -1,0 +1,51 @@
+{
+  "date": "2026-11-05",
+  "status": "superseded",
+  "implementation": "Native persisted provider configuration; independent user-triggered restart; no runtime provider mutation or routing extension.",
+  "save_actions": [
+    "connect",
+    "reconnect",
+    "switch model",
+    "disconnect"
+  ],
+  "restart": {
+    "implicit_restart": false,
+    "active_or_unknown": "block restart; keep saved configuration",
+    "termination": "normal AppKit request; never force-kill DuMate",
+    "compatibility": "macOS DuMate 1.0.89.447 personal local engine; otherwise manual restart",
+    "race_boundary": "Task status check and new task creation are not atomic."
+  },
+  "verification": {
+    "core_targeted": {
+      "passed": 80,
+      "failed": 0
+    },
+    "desktop_chromium": {
+      "passed": 82,
+      "failed": 0
+    },
+    "desktop_webkit_dumate": {
+      "passed": 10,
+      "failed": 0
+    },
+    "native_probe": {
+      "official_engine_idle_busy_idle_verified": true,
+      "global_check_includes_other_projects": true,
+      "external_network": "denied",
+      "real_user_data": "denied",
+      "real_app_restarted": false,
+      "production_quit_script_verified_on_own_fixture": true,
+      "normal_termination_delegate_called": true,
+      "user_dumate_process_untouched": true
+    },
+    "tauri_cargo_check": "passed"
+  },
+  "migration": "Recognized old bridge disabled and moved to .js.disabled backup; native settings and foreign plugins preserved.",
+  "limitations": [
+    "Real user DuMate not restarted during verification.",
+    "Real paid model requests not performed.",
+    "Windows native restart not implemented; manual restart guidance.",
+    "Native cloud-assistant routing and output-limit behavior remain DuMate controlled."
+  ],
+  "superseded_by": "2026-11-06-dumate-restart-confirmation.json"
+}

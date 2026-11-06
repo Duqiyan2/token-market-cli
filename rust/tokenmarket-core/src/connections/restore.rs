@@ -42,10 +42,11 @@ pub(super) fn reconnect_baseline(
         }
         for field in &mut receipt.fields {
             let owned = field.pointer.starts_with("/models/byok-tokenmarket-")
-                || matches!(
-                    field.pointer.as_str(),
-                    "/ALLOW_CUSTOM_BYOK" | "/QW_QODER_WORKER_RUNTIME_PATH"
-                );
+                || receipt
+                    .path
+                    .to_string_lossy()
+                    .ends_with(".tokenmarket.json")
+                || crate::qwenwork::managed_env(field.pointer.trim_start_matches('/'));
             if owned {
                 if let Some(current) = lookup(&value, &tokens(&field.pointer)?)? {
                     field.applied = current.clone();
@@ -94,12 +95,16 @@ pub(super) fn baseline_receipts(
         for receipt in &mut receipts {
             for field in &mut receipt.fields {
                 if field.pointer.starts_with("/models/byok-tokenmarket-")
-                    || field.pointer == "/QW_QODER_WORKER_RUNTIME_PATH"
-                        && field
-                            .before
-                            .as_ref()
-                            .and_then(Value::as_str)
-                            .is_some_and(crate::qwenwork_runtime::is_managed_worker)
+                    || field
+                        .before
+                        .as_ref()
+                        .and_then(Value::as_str)
+                        .is_some_and(|value| {
+                            crate::qwenwork_runtime::is_managed_env_value(
+                                field.pointer.trim_start_matches('/'),
+                                value,
+                            )
+                        })
                 {
                     field.before = None;
                 }
@@ -218,13 +223,16 @@ pub(super) fn prepare(
             let path = tokens(&receipt.pointer)?;
             let baseline = if record.tool == crate::ToolId::QwenWork
                 && (receipt.pointer.starts_with("/models/byok-tokenmarket-")
-                    || receipt.pointer == "/QW_QODER_WORKER_RUNTIME_PATH"
-                        && receipt
-                            .before
-                            .as_ref()
-                            .and_then(Value::as_str)
-                            .is_some_and(crate::qwenwork_runtime::is_managed_worker))
-            {
+                    || receipt
+                        .before
+                        .as_ref()
+                        .and_then(Value::as_str)
+                        .is_some_and(|value| {
+                            crate::qwenwork_runtime::is_managed_env_value(
+                                receipt.pointer.trim_start_matches('/'),
+                                value,
+                            )
+                        })) {
                 None
             } else {
                 receipt.before.clone()
@@ -434,6 +442,7 @@ pub(super) enum Format {
     Toml,
     Yaml,
     Dotenv,
+    DuMateScript,
 }
 impl Format {
     fn for_tool(tool: crate::ToolId, path: &Path) -> Result<Self> {
@@ -444,6 +453,12 @@ impl Format {
         }
     }
     pub(super) fn for_path(path: &Path) -> Result<Self> {
+        if path
+            .file_name()
+            .is_some_and(|v| v == crate::dumate::unified::PLUGIN_NAME)
+        {
+            return Ok(Self::DuMateScript);
+        }
         if path.file_name().is_some_and(|v| v == ".env") {
             return Ok(Self::Dotenv);
         }
@@ -463,6 +478,9 @@ impl Format {
             return Ok(json!({}));
         };
         let result: Value = match self {
+            Self::DuMateScript => {
+                json!({"$content":std::str::from_utf8(bytes).context("统一接管扩展编码无效")?})
+            }
             Self::Jsonc => super::jsonc::parse(bytes)?,
             Self::Dotenv => crate::qwenwork::parse_dotenv(Some(bytes))?,
             Self::Json => serde_json::from_slice(bytes).context("配置不是有效 JSON，未执行恢复")?,
@@ -494,6 +512,7 @@ impl Format {
         touched: &[String],
     ) -> Result<Vec<u8>> {
         match self {
+            Self::DuMateScript => Ok(value["$content"].as_str().unwrap_or("").as_bytes().to_vec()),
             Self::Json => Ok(serde_json::to_vec_pretty(value)?),
             Self::Dotenv => crate::qwenwork::render_dotenv(bytes, value, touched),
             Self::Jsonc => super::jsonc::render(bytes, value),
@@ -647,7 +666,7 @@ pub(super) fn verify_applied(record: &ConnectionRecord) -> Result<()> {
         // Reuse adapter preflight to catch newly added competing auth mechanisms.
         if record.tool != crate::ToolId::DeepSeekHarness
             && !(record.tool == crate::ToolId::QwenWork
-                && receipt.path.file_name().is_some_and(|v| v == ".env"))
+                && !crate::qwenwork::is_database(&receipt.path))
         {
             super::configuration::ConfigDocument::parse(
                 record.tool,

@@ -8,7 +8,7 @@
   const number = value => Number(value || 0).toLocaleString('en-US');
   const compact = value => Intl.NumberFormat('en-US', {notation:'compact',maximumFractionDigits:2}).format(Number(value || 0));
   const integer = value => { try { return BigInt(value || '0'); } catch (_) { return 0n; } };
-  function money(value) { const n = integer(value), a = n < 0n ? -n : n; return `${n < 0n ? '-' : ''}${(a / 1000000n).toLocaleString('en-US')}.${(a % 1000000n).toString().padStart(6, '0')}`; }
+  function money(value, decimals = 6) { const n = integer(value), a = n < 0n ? -n : n, unit = 10n ** BigInt(6 - decimals), rounded = (a + unit / 2n) / unit, base = 10n ** BigInt(decimals); return `${n < 0n && rounded !== 0n ? '-' : ''}${(rounded / base).toLocaleString('en-US')}.${(rounded % base).toString().padStart(decimals, '0')}`; }
   const date = value => new Intl.DateTimeFormat('en-CA', {timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(value));
   const time = value => new Intl.DateTimeFormat('zh-CN', {timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}).format(new Date(value));
   const clock = value => new Intl.DateTimeFormat('en-GB', {timeZone:'Asia/Shanghai',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(value));
@@ -18,12 +18,12 @@
   let context = null, generation = 0, metric = 'totalTokens', tools = [], buckets = null, detail = null;
   let cursors = [null], pageIndex = 0, snapshot = null, loadingBuckets = false, loadingLogs = false;
   let summaryError = '', detailError = '', syncRequested = false;
-  let selectedTool = '', chartWidth = 0;
+  let selectedTool = '', chartWidth = 0, bucketsRange = null;
   const visible = () => context && window.TokenMarketShell?.page === 'usage' && !document.hidden;
   function scopeKey() { return context ? `${context.user.id}:${context.default_workspace.id}` : ''; }
   const range = () => window.TokenMarketUsageRange.read();
   function filters() { return {tool:selectedTool, model:'', status:'ALL'}; }
-  function query(cursor = null, page = 1) { return {...snapshot,ownerId:String(context.user.id),workspaceId:String(context.default_workspace.id),cursor,page,pageSize:Number(el('usage-page-size').value)}; }
+  function query(cursor = null, page = 1, requestSnapshot = snapshot) { return {...requestSnapshot,ownerId:String(context.user.id),workspaceId:String(context.default_workspace.id),cursor,page,pageSize:Number(el('usage-page-size').value)}; }
   function emptyRow(message) { const row = node('tr'), cell = node('td',message,'usage-empty'); cell.colSpan = 10;row.append(cell);el('usage-rows').replaceChildren(row); }
   function controls() {
     el('usage-refresh').disabled = loadingBuckets || loadingLogs;
@@ -33,7 +33,7 @@
     el('usage-prev').disabled = loadingLogs || pageIndex === 0 || !detail;
     el('usage-next').disabled = loadingLogs || !detail?.nextCursor;
     el('usage-page-label').textContent = `第 ${pageIndex + 1} 页`;
-    el('usage-updated').textContent = loadingBuckets ? '正在读取汇总…' : buckets ? `更新于 ${time(buckets.asOf)}` : '';
+    el('usage-updated').textContent = loadingBuckets ? buckets ? '正在更新…' : '正在读取汇总…' : buckets ? `更新于 ${time(buckets.asOf)}` : '';
     const errors = [summaryError,detailError].filter(Boolean);el('usage-feedback').textContent = errors.join('；');el('usage-feedback').hidden = errors.length === 0;
   }
   function toolOptions(next) {
@@ -42,7 +42,7 @@
     el('usage-key-count').textContent = `${tools.length} 个工具 · ${number(tools.reduce((sum,t)=>sum+t.keyCount,0))} 个历史 Key`;
     const choices=[{id:'',name:'全部'},...tools];
     if(selectedTool&&!tools.some(t=>t.id===selectedTool))choices.push({id:selectedTool,name:selectedTool});
-    el('usage-tools').replaceChildren(...choices.map(tool=>{
+    const options=document.createDocumentFragment();options.append(...choices.map(tool=>{
       const button=node('button');button.type='button';button.dataset.tool=tool.id;button.title=tool.name;button.setAttribute('aria-label',tool.name);button.setAttribute('aria-pressed',String(selectedTool===tool.id));
       if(!tool.id)button.textContent='全部';
       else {
@@ -52,6 +52,7 @@
       }
       button.onclick=()=>selectTool(tool.id);return button;
     }));
+    window.TokenMarketLiveUI.children(el('usage-tools'),options);
     if(focusedTool!=null)[...el('usage-tools').children].find(b=>b.dataset.tool===focusedTool)?.focus();
   }
   function selectTool(tool) {selectedTool=tool;toolOptions(tools);void refresh(true);}
@@ -67,9 +68,9 @@
     const totalLabel=`共 ${count} 条`;if(el('usage-total-count').textContent!==totalLabel)el('usage-total-count').textContent=totalLabel;
     if (!buckets) { el('usage-tokens').title='';el('usage-chart').setAttribute('aria-label','暂无汇总数据');['usage-cost','usage-requests','usage-tokens','usage-cache'].forEach(id=>{el(id).textContent='—';});el('usage-chart').replaceChildren(node('p',loadingBuckets?'正在读取用量…':'暂无汇总数据'));return; }
     const total = totals(buckets.buckets);
-    el('usage-cost').textContent=money(total.costMicro);el('usage-requests').textContent=number(total.requestCount);el('usage-tokens').textContent=compact(total.totalTokens);
+    el('usage-cost').textContent=money(total.costMicro, 2);el('usage-requests').textContent=number(total.requestCount);el('usage-tokens').textContent=compact(total.totalTokens);
     el('usage-tokens').title=number(total.totalTokens);el('usage-cache').textContent=total.inputTokenCount>0?`${(total.cacheReadTokens/total.inputTokenCount*100).toFixed(1)}%`:'—';
-    const hourly=snapshot.endTime-snapshot.startTime<=86400000;
+    const hourly=bucketsRange.endTime-bucketsRange.startTime<=86400000;
     el('usage-chart-title').textContent=`${metricNames[metric]} · 按${hourly?'小时':'天'}`;
     if(!total.requestCount) { el('usage-chart').setAttribute('aria-label','所选时间内暂无用量');el('usage-chart').replaceChildren(node('p','所选时间内暂无用量'));return; }
     let series=[];
@@ -78,15 +79,15 @@
         el('usage-chart').setAttribute('aria-label','小时趋势暂不可用');el('usage-chart').replaceChildren(node('p','小时趋势暂不可用，请稍后刷新。'));return;
       }
       const byHour=new Map(buckets.buckets.map(b=>[b.bucketStart,b]));
-      const count=Math.max(1,Math.ceil((snapshot.endTime-snapshot.startTime)/3600000));
+      const count=Math.max(1,Math.ceil((bucketsRange.endTime-bucketsRange.startTime)/3600000));
       for(let i=0;i<count;i++) {
-        const bucketStart=snapshot.startTime+i*3600000;
-        series.push({date:date(bucketStart),bucketStart,bucketEnd:Math.min(bucketStart+3600000,snapshot.endTime),...(byHour.get(bucketStart)||{})});
+        const bucketStart=bucketsRange.startTime+i*3600000;
+        series.push({date:date(bucketStart),bucketStart,bucketEnd:Math.min(bucketStart+3600000,bucketsRange.endTime),...(byHour.get(bucketStart)||{})});
       }
     } else {
       const byDate=new Map(buckets.buckets.map(b=>[b.date,b]));
-      const firstDay=Date.parse(`${date(snapshot.startTime)}T00:00:00+08:00`);
-      for(let t=firstDay;t<=snapshot.endTime;t+=86400000) {const key=date(t);series.push({date:key,...(byDate.get(key)||{})});}
+      const firstDay=Date.parse(`${date(bucketsRange.startTime)}T00:00:00+08:00`);
+      for(let t=firstDay;t<=bucketsRange.endTime;t+=86400000) {const key=date(t);series.push({date:key,...(byDate.get(key)||{})});}
     }
     const monthly=!hourly&&series.length>90;
     if(monthly){const months=new Map();for(const b of series){const key=b.date.slice(0,7);if(!months.has(key))months.set(key,[]);months.get(key).push(b);}series=[...months].map(([key,list])=>({date:key,...totals(list)}));el('usage-chart-title').textContent=`${metricNames[metric]} · 按月`;}
@@ -99,8 +100,8 @@
     const svg=svgNode('svg',{viewBox:`0 0 ${width} ${height}`,'aria-hidden':'true',preserveAspectRatio:'xMinYMin meet'}),max=Math.max(...series.map(metricValue),1);
     for(let i=0;i<3;i++) {
       const y=top+i*plotHeight/2;
-      svg.append(svgNode('line',{x1:left,x2:width-right,y1:y,y2:y,class:'usage-gridline'}));
-      const label=svgNode('text',{x:left-12,y:y+4,'text-anchor':'end'});
+      svg.append(svgNode('line',{x1:left,x2:width-right,y1:y,y2:y,class:'usage-gridline','data-live-key':`grid-${i}`}));
+      const label=svgNode('text',{x:left-12,y:y+4,'text-anchor':'end','data-live-key':`axis-${i}`});
       label.textContent=metric==='cacheRate'?`${(max*(1-i/2)).toFixed(0)}%`:compact(max*(1-i/2));svg.append(label);
     }
     const step=plotWidth/series.length,barWidth=Math.min(36,step*.65);
@@ -109,64 +110,67 @@
     if(hourly)series.forEach((b,i)=>{if(i>0&&b.date!==series[i-1].date){for(const index of labelIndices)if(Math.abs(index-i)*step<55)labelIndices.delete(index);labelIndices.add(i);}});
     series.forEach((b,i)=>{
       const value=metricValue(b),barHeight=value/max*plotHeight,center=left+(i+.5)*step;
-      const bar=svgNode('rect',{x:center-barWidth/2,y:baseline-barHeight,width:barWidth,height:barHeight,rx:3});
+      const bar=svgNode('rect',{x:center-barWidth/2,y:baseline-barHeight,width:barWidth,height:barHeight,rx:3,'data-live-key':`bar-${hourly?`hour-${i}`:b.date}`});
       const title=svgNode('title');title.textContent=`${hourly?`${b.date} ${clock(b.bucketStart)} – ${date(b.bucketEnd)} ${clock(b.bucketEnd)}`:b.date} ${metricNames[metric]}：${metric==='costMicro'?money(b.costMicro):metric==='cacheRate'?`${value.toFixed(1)}%`:number(value)}`;
       bar.append(title);svg.append(bar);
       if(labelIndices.has(i)) {
-        const label=svgNode('text',{x:Math.min(width-right-18,Math.max(left+18,center)),y:220,'text-anchor':'middle'});
+        const label=svgNode('text',{x:Math.min(width-right-18,Math.max(left+18,center)),y:220,'text-anchor':'middle','data-live-key':`label-${hourly?`hour-${i}`:b.date}`});
         label.textContent=hourly?(i>0&&b.date!==series[i-1].date?b.date.slice(5).replace('-','/'):clock(b.bucketStart)):monthly?b.date.slice(2).replace('-','/'):b.date.slice(5).replace('-','/');svg.append(label);
       }
     });
-    el('usage-chart').setAttribute('aria-label',`${metricNames[metric]}按${hourly?'小时':monthly?'月':'日'}趋势，${series.length} ${hourly?'个小时':monthly?'个月':'天'}`);el('usage-chart').replaceChildren(svg);
+    el('usage-chart').setAttribute('aria-label',`${metricNames[metric]}按${hourly?'小时':monthly?'月':'日'}趋势，${series.length} ${hourly?'个小时':monthly?'个月':'天'}`);const drawing=document.createDocumentFragment();drawing.append(svg);window.TokenMarketLiveUI.children(chart,drawing);
   }
   function renderRows() {
     if (!detail) { emptyRow(loadingLogs?'正在读取请求日志…':detailError?'请求日志读取失败，请重试。':'暂无请求日志');return; }
     if(!detail.items.length) { emptyRow(tools.length?'没有符合条件的请求日志。':'本设备在当前空间还没有工具用量。');return; }
     const names=new Map(tools.map(t=>[t.id,t.name]));
-    el('usage-rows').replaceChildren(...detail.items.map(item=>{
-      const row=node('tr');row.dataset.requestId=item.requestId;row.className='usage-request-row';row.title=`查看请求详情 · 请求 ID：${item.requestId}`;
+    const rows=document.createDocumentFragment();rows.append(...detail.items.map(item=>{
+      const row=node('tr');row.dataset.requestId=item.requestId;row.dataset.liveKey=item.requestId;row.className='usage-request-row';row.title=`查看请求详情 · 请求 ID：${item.requestId}`;
       const values=[time(item.startedAt),names.get(item.tool)||item.tool||'未知工具',item.model||'—',money(item.costMicro),number(item.inputTokens),number(item.outputTokens),number(item.cacheReadTokens)];
       values.forEach((value,index)=>{const cell=node('td',index===0?'':value,index===2?'usage-model-cell':'');if(index===0){const button=node('button',value,'usage-request-open');button.type='button';button.setAttribute('aria-label',`查看 ${time(item.startedAt)} 的请求详情`);button.setAttribute('aria-haspopup','dialog');button.setAttribute('aria-controls','usage-request-detail');cell.append(button);}if(index===2)cell.title=value;row.append(cell);});
-      const status=node('td'),cancelled=item.status?.startsWith('CLIENT_CANCELLED'),success=item.status==='SUCCESS';const badge=node('span',`${success?'成功':cancelled?'已取消':'失败'}${item.statusCode>0?` ${item.statusCode}`:''}`,`usage-status ${success?'success':cancelled?'':'failed'}`);status.append(badge);row.append(status,node('td',duration(item.durationMs)),node('td',duration(item.ttftMs)));row.onclick=event=>{if(event.target.closest('button')||!window.getSelection()?.toString())window.TokenMarketUsageDetail.open(item,{toolName:names.get(item.tool)||item.tool||'未知工具',workspace:context.default_workspace.name},row.querySelector('button'));};return row;
+      const status=node('td'),cancelled=item.status?.startsWith('CLIENT_CANCELLED'),success=item.status==='SUCCESS';const badge=node('span',`${success?'成功':cancelled?'已取消':'失败'}${item.statusCode>0?` ${item.statusCode}`:''}`,`usage-status ${success?'success':cancelled?'':'failed'}`);status.append(badge);row.append(status,node('td',duration(item.durationMs)),node('td',duration(item.ttftMs)));row.onclick=event=>{if(event.target.closest('button')||!window.getSelection()?.toString())window.TokenMarketUsageDetail.open(item,{toolName:names.get(item.tool)||item.tool||'未知工具',workspace:context.default_workspace.name},event.currentTarget.querySelector('button'));};return row;
     }));
+    window.TokenMarketLiveUI.children(el('usage-rows'),rows);
     window.TokenMarketUsageDetail.update(detail.items,{tools,workspace:context.default_workspace.name});
   }
   function invalidate(clearScope = false) {
-    generation++;loadingBuckets=false;loadingLogs=false;buckets=null;detail=null;cursors=[null];pageIndex=0;snapshot=null;summaryError='';detailError='';syncRequested=false;
+    generation++;loadingBuckets=false;loadingLogs=false;buckets=null;bucketsRange=null;detail=null;cursors=[null];pageIndex=0;snapshot=null;summaryError='';detailError='';syncRequested=false;
     if(clearScope){window.TokenMarketUsageDetail.close(false);tools=[];selectedTool='';toolOptions([]);window.TokenMarketUsageRange.close();}
     renderSummary();renderRows();controls();
   }
   function flushSync() {
     if(syncRequested&&!loadingBuckets&&!loadingLogs){syncRequested=false;void refresh();}
   }
-  async function loadPage(target) {
-    if(!visible() || !snapshot || loadingLogs)return;
-    const gen=generation,request=query(cursors[target],target+1);loadingLogs=true;detailError='';controls();if(!detail)renderRows();
-    try { const result=await invoke('desktop_usage_logs',{request});if(gen!==generation)return;detail=result;pageIndex=target;toolOptions(result.tools);renderRows(); }
+  async function loadPage(target, requestSnapshot = snapshot) {
+    if(!visible() || !requestSnapshot || loadingLogs)return;
+    const gen=generation,request=query(requestSnapshot===snapshot?cursors[target]:null,target+1,requestSnapshot);loadingLogs=true;detailError='';controls();if(!detail)renderRows();
+    try { const result=await invoke('desktop_usage_logs',{request});if(gen!==generation)return;if(requestSnapshot!==snapshot)cursors=[null];snapshot=requestSnapshot;detail=result;pageIndex=target;toolOptions(result.tools);renderRows(); }
     catch(error){if(gen===generation){detailError=`日志：${String(error)}`;if(!detail)renderRows();}}
     finally{if(gen===generation){loadingLogs=false;controls();flushSync();}}
   }
   async function refresh(force = false) {
     if(!visible())return;
     if(!force && (loadingBuckets||loadingLogs)){syncRequested=true;return;}
-    invalidate();snapshot={...range(),...filters()};
-    const gen=generation,request=query();
-    loadingBuckets=true;renderSummary();controls();
+    // Keep the displayed snapshot until each response succeeds; scope changes
+    // still invalidate immediately to prevent showing another account's data.
+    generation++;loadingBuckets=false;loadingLogs=false;summaryError='';detailError='';syncRequested=false;
+    const requestSnapshot={...range(),...filters()},gen=generation,request=query(null,1,requestSnapshot);
+    loadingBuckets=true;if(!buckets)renderSummary();controls();
     const summary = (async()=>{
       try {
         const result=await invoke('desktop_usage_buckets',{request});
         if(gen!==generation)return;
-        buckets=result;toolOptions(result.tools);summaryError='';renderSummary();
-      }catch(error){if(gen===generation){summaryError=`汇总：${String(error)}`;renderSummary();}}
-      finally{if(gen===generation){loadingBuckets=false;renderSummary();controls();flushSync();}}
+        buckets=result;bucketsRange=requestSnapshot;toolOptions(result.tools);summaryError='';renderSummary();
+      }catch(error){if(gen===generation){summaryError=`汇总：${String(error)}`;if(!buckets)renderSummary();}}
+      finally{if(gen===generation){loadingBuckets=false;controls();flushSync();}}
     })();
-    await Promise.allSettled([summary,loadPage(0)]);
+    await Promise.allSettled([summary,loadPage(0,requestSnapshot)]);
   }
   el('usage-filters').onsubmit=event=>{event.preventDefault();if(!el('usage-date-panel').hidden)el('usage-date-apply').click();else void refresh(true);};
   window.addEventListener('usage-range-changed',()=>void refresh(true));
   toolOptions([]);
   el('usage-refresh').onclick=()=>void refresh(true);
-  el('usage-page-size').onchange=()=>{cursors=[null];pageIndex=0;detail=null;void loadPage(0);};
+  el('usage-page-size').onchange=()=>{cursors=[null];void loadPage(0);};
   el('usage-next').onclick=()=>{if(detail?.nextCursor){cursors[pageIndex+1]=detail.nextCursor;void loadPage(pageIndex+1);}};
   el('usage-prev').onclick=()=>{if(pageIndex>0)void loadPage(pageIndex-1);};
   document.querySelectorAll('[data-usage-metric]').forEach(button=>{button.onclick=()=>{metric=button.dataset.usageMetric;document.querySelectorAll('[data-usage-metric]').forEach(b=>{b.classList.toggle('active',b===button);b.setAttribute('aria-pressed',String(b===button));});renderSummary();};});

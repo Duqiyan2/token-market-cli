@@ -215,7 +215,9 @@ impl ProviderConfig {
 
     pub fn credential(&self, gateway: &str) -> Result<Option<String>> {
         match self.tool {
-            ToolId::DuMate => super::dumate::credential(&self.document.value, gateway),
+            ToolId::DuMate => {
+                super::dumate::credential(&self.document.value, gateway, &self.document.path)
+            }
             ToolId::GrokBuild => super::grok::credential(&self.document.value, gateway),
             ToolId::KimiCode => super::kimi::credential(&self.document.value, gateway),
             ToolId::Hermes => super::hermes::credential(&self.document.value, gateway),

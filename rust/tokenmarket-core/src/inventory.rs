@@ -502,7 +502,6 @@ impl ToolInventory {
     pub fn connection_guard(&self, tool: ToolId) -> Result<crate::installation::InstallationGuard> {
         if tool == ToolId::QwenWork {
             crate::qwenwork::require_ready(&self.environment.home, self.environment.platform)?;
-            crate::qwenwork::require_stopped(&self.config_path(tool))?;
         }
         if matches!(tool, ToolId::DuMate | ToolId::DuMateEnterprise) {
             let path = if tool == ToolId::DuMateEnterprise {
@@ -512,6 +511,25 @@ impl ToolInventory {
             };
             crate::dumate::require_stopped(&path)?;
         }
+        self.installation_connection_guard(tool)
+    }
+    /// Persist compatible personal preferences and adapter; DuMate loads them on restart.
+    pub(crate) fn dumate_model_change_guard(
+        &self,
+    ) -> Result<crate::installation::InstallationGuard> {
+        crate::dumate::personal_config(&self.environment.home, self.environment.platform)?;
+        if self.environment.home == crate::config::home_dir() {
+            let application = self
+                .application_path(ToolId::DuMate)
+                .context("未找到搭子安装位置")?;
+            crate::dumate::unified::validate_engine(&application, self.environment.platform)?;
+        }
+        self.installation_connection_guard(ToolId::DuMate)
+    }
+    fn installation_connection_guard(
+        &self,
+        tool: ToolId,
+    ) -> Result<crate::installation::InstallationGuard> {
         crate::installation::InstallationManager::new(
             self.environment.clone(),
             std::env::consts::ARCH.into(),

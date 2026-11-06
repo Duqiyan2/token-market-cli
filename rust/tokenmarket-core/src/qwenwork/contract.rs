@@ -10,6 +10,8 @@ const ASSEMBLY: &str = r#"if(t){let e=@provider@(t.provider),i=@type@(e,t.type??
 const TRANSPORT: &str = r#"let w=@builder@(t,{...g,target:r,beforeSend:@before@,sessionForm:A});c(),Q(),A.assertCustomProviderAccess(o.identity);try{return @stream@(w,n)}finally{l?.()}"#;
 const POLICY: &str = r#"function @policy@(A){if(null==A)return;if(!@object@(A))return null;let e=A.model,t=null!=e&&""!==e,i=A.parameters;"#;
 const ENTRY: &str = r#"});@entry@(),@cli@(async()=>{let{createCliDependencies:A}=await Promise.resolve().then(()=>(@depsInit@(),@deps@));return A()});"#;
+const ENDPOINT: &str = r#"function @resolver@(A,e={}){let{env:t,region:i}=@environment@();"#;
+const ENDPOINT_OVERRIDE: &str = r#"let n=@override@();if(n)return{url:n,purpose:A,mode:"server-override",env:t,region:i,reason:"cn_server_endpoint_env"};"#;
 
 pub struct Match<'a> {
     pub start: usize,
@@ -80,6 +82,8 @@ pub struct Contract {
     pub builder: String,
     pub stream: String,
     pub thinking: String,
+    pub endpoint_resolver: String,
+    pub endpoint_override: String,
 }
 impl Contract {
     pub fn recognize(source: &str) -> Result<Self> {
@@ -127,6 +131,13 @@ impl Contract {
             .next()
             .ok_or_else(|| anyhow::anyhow!(ADAPTATION_REQUIRED))?;
         let thinking=unique(source,"function @thinking@(){return{modes:[],supportedEffortLevels:[],requiredBetasForEffort:[]}}")?;
+        let endpoint = unique(source, ENDPOINT)?;
+        let endpoint_end = source[endpoint.end..]
+            .find("}function ")
+            .map(|n| endpoint.end + n + 1)
+            .ok_or_else(|| anyhow::anyhow!(ADAPTATION_REQUIRED))?;
+        let endpoint_body = &source[endpoint.start..endpoint_end];
+        let endpoint_override = unique(endpoint_body, ENDPOINT_OVERRIDE)?;
         let provider = &assembly.bindings["provider"];
         let style = assembly.bindings["style"].clone();
         let url = assembly.bindings["url"].clone();
@@ -145,6 +156,8 @@ impl Contract {
             builder: transport.bindings["builder"].clone(),
             stream: transport.bindings["stream"].clone(),
             thinking: thinking.bindings["thinking"].clone(),
+            endpoint_resolver: endpoint.bindings["resolver"].clone(),
+            endpoint_override: endpoint_body[endpoint_override.start..endpoint_override.end].into(),
         })
     }
 
@@ -161,7 +174,7 @@ impl Contract {
             "r={kind:\"qoder\"};",
             "throw new Error(\"Cloud model fallback is forbidden\");r={kind:\"qoder\"};",
         );
-        output.push_str(&format!("\n{}();{}();export {{{} as requestDispatcher,{} as parseModelPolicy,{} as assembleModel}};\n",self.dispatch_init,self.assembly_init,self.dispatcher,self.policy,self.assembler));
+        output.push_str(&format!("\n{}();{}();export {{{} as requestDispatcher,{} as parseModelPolicy,{} as assembleModel,{} as resolveEndpoint}};\n",self.dispatch_init,self.assembly_init,self.dispatcher,self.policy,self.assembler,self.endpoint_resolver));
         Ok(output)
     }
 }

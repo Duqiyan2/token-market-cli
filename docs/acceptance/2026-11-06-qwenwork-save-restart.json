@@ -1,0 +1,44 @@
+{
+  "date": "2026-11-06",
+  "status": "source-and-isolated-tests-verified-device-restart-pending",
+  "scope": "QwenWorkCN text-model integration only. Image and video integration are deferred by user decision. No shared multi-app integration redesign.",
+  "save_and_restart": {
+    "save": "Connect, reconnect and disconnect persist owned configuration while QwenWork is running. They do not request app exit, restart or paid inference.",
+    "saved_notice": "已保存，重启千问办公后生效。",
+    "buttons": ["重启千问办公", "稍后手动重启千问办公"],
+    "restart": "An explicit click requests normal OS termination. QwenWork owns task interruption, draft and quit confirmation. Reopen only after the app and background processes fully exit.",
+    "cancel_or_refusal": "No force kill or duplicate launch. Saved configuration is retained.",
+    "running_work": "An already-started native relay retains its loaded connection until its worker or host exits. Saving a new connection or disconnect does not revoke that running relay locally. Fresh relays validate currently saved state.",
+    "billing": "Before restart, an existing task may continue using its original model, account/workspace and billing context.",
+    "task_introspection": false,
+    "app_bundle_modified": false,
+    "native_force_kill": false
+  },
+  "stability_changes": [
+    "Auxiliary model selection is retained when available, otherwise uses the designated default or stable model-ID ordering.",
+    "New route files live outside SDK version directories; existing route receipt paths are retained across runtime upgrades.",
+    "Nullable/defaulted/generated native columns and column reordering are compatible; missing core fields, incompatible field types/keys and required fields without defaults are rejected before writes.",
+    "SQLite WAL readers can retain their read snapshots while managed connection changes are committed.",
+    "Desktop auxiliary relay startup failure does not terminate the SDK worker or restore its official model fallback."
+  ],
+  "verification": {
+    "rust_qwenwork_unit_tests": {"passed": 19, "failed": 0},
+    "rust_qwenwork_integration_tests": {"passed": 13, "failed": 0},
+    "desktop_ui_chromium": {"passed": 89, "failed": 0},
+    "desktop_ui_webkit_focused": {"passed": 4, "failed": 0},
+    "macos_tauri_cargo_check": "passed",
+    "windows_x64_core_cargo_xwin_check": "passed",
+    "macos_native_process_probe": "read-only, passed; no exit requested",
+    "paid_model_requests": 0,
+    "real_app_exit_restart_executed": false,
+    "windows_native_device_validation": false,
+    "official_credit_ledger_validation": false,
+    "packaged_or_installed": false
+  },
+  "limitations": [
+    "Complete real Agent task execution across a save and actual native quit confirmation still requires device acceptance.",
+    "Some vendor configuration readers may observe persisted fields before a full restart; live hot-switch behavior is not promised.",
+    "Windows normal window close can hide the app under vendor settings; if complete exit is not observed, stop and ask for manual exit.",
+    "Compatibility checks do not guarantee arbitrary future SDK execution-contract changes. Deep additional product changes require user consultation."
+  ]
+}

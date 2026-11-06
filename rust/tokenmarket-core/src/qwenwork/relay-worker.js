@@ -1,4 +1,12 @@
 /* TOKENMARKET_LOCAL_RELAY_V2 — never receives the platform API key. */
+// System models (subagents, review and SDK utilities) must never fall through
+// to the official inference service when a managed desktop route is active.
+if(globalThis.__tmQwenRoute&&t.custom_model?.url!=="https://tokenmarket.local.invalid/v1/chat/completions"){
+  const route=globalThis.__tmQwenRoute;
+  s=route.default_model;
+  t={...t,custom_model:{provider:"openai",style:"openai",url:"https://tokenmarket.local.invalid/v1/chat/completions",
+    model:s,parameters:{api_key:`tokenmarket-local-v2:${route.fingerprint}`}}};
+}
 if(t.custom_model?.url==="https://tokenmarket.local.invalid/v1/chat/completions"){
   c();
   const __tm=t.custom_model,__marker=__tm.parameters?.api_key;

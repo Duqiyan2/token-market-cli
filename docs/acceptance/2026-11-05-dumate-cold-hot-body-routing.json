@@ -1,0 +1,217 @@
+{
+  "status": "superseded",
+  "superseded_by": "2026-11-05-dumate-restart-only.json",
+  "superseded_reason": "Returned to persisted native preferences with explicit optional restart; runtime mutation and routing extension removed.",
+  "date": "2026-11-05",
+  "platform": "macOS arm64",
+  "version": "1.0.89.447",
+  "scope": "Read-only real desktop log correlation, plus official backend and engine with isolated XDG profile and localhost fixture; original integration retained",
+  "real_desktop_observations": {
+    "cold_engine_start_utc": "2026-11-05T10:46:24.945Z",
+    "body_requests": [
+      {
+        "local_time": "18:46:52.378",
+        "engine_log": "opencode/std.log:14950",
+        "gateway_log": "desktop-main/Gateway.log:1655",
+        "agent": "build",
+        "small": false,
+        "source": "user",
+        "resolved_model": "glm-5.3",
+        "route": "legacy_custom",
+        "target_host": "api.tokensapi.cn"
+      },
+      {
+        "local_time": "18:48:06.077",
+        "engine_log": "opencode/std.log:15376",
+        "gateway_log": "desktop-main/Gateway.log:1666",
+        "same_session_follow_up": true,
+        "agent": "build",
+        "small": false,
+        "source": "user",
+        "resolved_model": "glm-5.3",
+        "route": "legacy_custom",
+        "target_host": "api.tokensapi.cn"
+      },
+      {
+        "local_time": "18:52:02.290",
+        "engine_log": "opencode/std.log:15944",
+        "gateway_log": "desktop-main/Gateway.log:1687",
+        "new_session": true,
+        "agent": "build",
+        "small": false,
+        "source": "user",
+        "resolved_model": "glm-5.3",
+        "route": "legacy_custom",
+        "target_host": "api.tokensapi.cn"
+      }
+    ],
+    "earlier_cloud_route_observed": true,
+    "feature_control_before_cold_start": {
+      "local_time": "18:46:24.651",
+      "electron_log": "electron.log:24638",
+      "result": "InternalServerError",
+      "fallback_snapshot_defaults_used": true
+    },
+    "earlier_feature_control": {
+      "local_time": "17:19:04.917",
+      "electron_log": "electron.log:18549",
+      "ai_assistant_enabled": true,
+      "routing_remote_enabled": true
+    },
+    "current_engine_environment": {
+      "ai_assistant_enabled_flag": "absent (false)",
+      "routing_remote_enabled": false,
+      "opencode_new_runtime": false
+    },
+    "restart_always_routes_body_to_custom_model_proven": false,
+    "real_desktop_hot_switch_exercised_by_this_probe": false,
+    "real_configuration_or_tasks_modified_by_this_probe": false,
+    "some_real_gateway_body_requests_returned_502": true
+  },
+  "isolated_native_replay": {
+    "version": "1.0.89.447",
+    "external_network": "denied",
+    "real_user_data": "denied",
+    "scenarios": [
+      {
+        "ai_assistant_enabled": false,
+        "plugin_used": false,
+        "same_backend_and_engine_processes": true,
+        "opencode_new_runtime": false,
+        "native_cloud_reply_not_tested": false,
+        "stages": [
+          {
+            "stage": "cold_start_body",
+            "body_model": "fixture-cold",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 131072,
+            "preference_output_limit": 4096,
+            "outbound_max_tokens": [
+              64000
+            ],
+            "outbound_output_limit_matches_preference": false
+          },
+          {
+            "stage": "hot_switch_existing_session",
+            "body_model": "fixture-switched",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 262144,
+            "preference_output_limit": 8192,
+            "outbound_max_tokens": [
+              64000
+            ],
+            "outbound_output_limit_matches_preference": false
+          },
+          {
+            "stage": "hot_switch_new_session",
+            "body_model": "fixture-switched",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 262144,
+            "preference_output_limit": 8192,
+            "outbound_max_tokens": [
+              64000
+            ],
+            "outbound_output_limit_matches_preference": false
+          },
+          {
+            "stage": "hot_reconnect_existing_session",
+            "body_model": "fixture-reconnected",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 524288,
+            "preference_output_limit": 16384,
+            "outbound_max_tokens": [
+              64000
+            ],
+            "outbound_output_limit_matches_preference": false
+          },
+          {
+            "stage": "hot_reconnect_new_session",
+            "body_model": "fixture-reconnected",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 524288,
+            "preference_output_limit": 16384,
+            "outbound_max_tokens": [
+              64000
+            ],
+            "outbound_output_limit_matches_preference": false
+          }
+        ]
+      },
+      {
+        "ai_assistant_enabled": true,
+        "plugin_used": false,
+        "same_backend_and_engine_processes": true,
+        "opencode_new_runtime": false,
+        "native_cloud_reply_not_tested": true,
+        "stages": [
+          {
+            "stage": "cold_start_body",
+            "body_provider": "ai_assistant",
+            "custom_model_body_requests": 0
+          },
+          {
+            "stage": "hot_switch_existing_session",
+            "body_provider": "ai_assistant",
+            "custom_model_body_requests": 0
+          },
+          {
+            "stage": "hot_switch_new_session",
+            "body_provider": "ai_assistant",
+            "custom_model_body_requests": 0
+          },
+          {
+            "stage": "hot_reconnect_existing_session",
+            "body_provider": "ai_assistant",
+            "custom_model_body_requests": 0
+          },
+          {
+            "stage": "hot_reconnect_new_session",
+            "body_provider": "ai_assistant",
+            "custom_model_body_requests": 0
+          },
+          {
+            "stage": "native_session_preference_without_plugin",
+            "body_model": "fixture-reconnected",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 524288,
+            "preference_output_limit": 16384,
+            "outbound_max_tokens": [
+              16384
+            ],
+            "outbound_output_limit_matches_preference": true
+          },
+          {
+            "stage": "new_session_still_independent",
+            "body_provider": "ai_assistant",
+            "custom_model_body_requests": 0
+          }
+        ]
+      }
+    ]
+  },
+  "command": "python3 tests/helpers/dumate-agent-lifecycle-native-probe.py",
+  "assertion_coverage": [
+    "complete body response, not title only",
+    "same-key model switch on existing and new sessions",
+    "reconnect model, base URL and key on existing and new sessions",
+    "live input capacity updates without restarting backend or engine",
+    "cloud classifier/native feature flag contrast",
+    "native per-session fixed preference without plugins",
+    "new sessions do not inherit another session fixed preference",
+    "outbound output-limit discrepancy recorded explicitly"
+  ],
+  "limits": [
+    "OPENCODE_NEW_RUNTIME=0 only; Sandbox Manager/VM worker runtime not covered",
+    "Cloud classification is mocked; cloud replies are not executed (no scheduler configured)",
+    "Real completed cloud conversation history migration not covered",
+    "Ordinary personal route outputLimit preference is not respected by the engine outbound max_tokens in this fixture",
+    "Native per-session preference experiment is not integrated in Token Market",
+    "No new desktop package built; production integration unchanged"
+  ]
+}

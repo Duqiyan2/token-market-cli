@@ -1,0 +1,58 @@
+{
+  "date": "2026-11-06",
+  "status": "verified-with-device-boundaries",
+  "implementation": "Configuration save remains separate from restart. Busy tasks require one explicit interruption confirmation. No waiting/restart queue.",
+  "dialogs": {
+    "saved": {
+      "message": "已保存，重启搭子后生效。",
+      "buttons": [
+        "重启搭子",
+        "稍后手动重启搭子"
+      ]
+    },
+    "busy": {
+      "message": "重启搭子会中断当前任务，是否继续？",
+      "buttons": [
+        "强制重启搭子",
+        "取消"
+      ]
+    }
+  },
+  "restart": {
+    "initial_request": "force=false; busy returns confirmation_required without quitting",
+    "confirmed_request": "force=true; rechecks current identity and status, permits interruption of busy tasks",
+    "unknown": "manual restart; never quit unidentified processes",
+    "termination": "Normal AppKit termination request; wait for complete exit before opening. No force-kill signals.",
+    "configuration": "unchanged by restart, cancellation, failure or popup dismissal",
+    "compatibility": "macOS DuMate 1.0.89.447 personal local engine; otherwise manual restart"
+  },
+  "verification": {
+    "rust_restart_tests": {
+      "passed": 4,
+      "failed": 0
+    },
+    "chromium_dumate": {
+      "passed": 13,
+      "failed": 0
+    },
+    "webkit_dumate": {
+      "passed": 13,
+      "failed": 0
+    },
+    "tauri_cargo_check": "passed",
+    "scenarios": [
+      "Initial save and cancellation both offer explicit restart.",
+      "Busy check never implicitly forces restart.",
+      "Cancel and Escape do not send force=true.",
+      "Logout or dismissal prevents a late confirmation.",
+      "Explicit force allows busy tasks to be interrupted.",
+      "Unknown state, quit refusal or incomplete exit never opens a replacement instance."
+    ]
+  },
+  "boundaries": [
+    "Native quit script unchanged from prior fixture verification.",
+    "Real user DuMate was not restarted or interrupted in this verification.",
+    "No real paid model request.",
+    "Windows native restart not implemented."
+  ]
+}

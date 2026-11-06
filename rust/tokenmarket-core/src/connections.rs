@@ -41,6 +41,35 @@ pub struct ConnectContext {
     pub owner_id: String,
     pub workspace_id: String,
 }
+/// Safe model choices from the tool's live, key-authorized catalogue.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionModels {
+    pub models: Vec<String>,
+    pub selected_model: String,
+}
+enum ModelSelection<'a> {
+    Default,
+    Preview(bool),
+    Selected(&'a str, bool),
+}
+impl ModelSelection<'_> {
+    fn preserves_binding(&self) -> bool {
+        matches!(self, Self::Preview(true) | Self::Selected(_, true))
+    }
+}
+enum EstablishResult {
+    Connected(ReconnectOutcome),
+    Models(ConnectionModels),
+}
+impl EstablishResult {
+    fn connected(self) -> ReconnectOutcome {
+        match self {
+            Self::Connected(result) => result,
+            Self::Models(_) => unreachable!("configuration operation returned a preview"),
+        }
+    }
+}
 #[derive(Clone, Serialize, Deserialize)]
 pub struct FieldReceipt {
     pub pointer: String,
@@ -390,8 +419,17 @@ impl ConnectionManager {
         path: PathBuf,
     ) -> Result<ConnectionSummary> {
         Ok(self
-            .establish(context, tool, inventory, path, None, None)
+            .establish(
+                context,
+                tool,
+                inventory,
+                path,
+                None,
+                None,
+                ModelSelection::Default,
+            )
             .await?
+            .connected()
             .connection)
     }
     pub async fn reconnect(
@@ -402,8 +440,18 @@ impl ConnectionManager {
         inventory: &ToolInventory,
         path: PathBuf,
     ) -> Result<ReconnectOutcome> {
-        self.establish(context, tool, inventory, path, Some(expected_key_id), None)
-            .await
+        Ok(self
+            .establish(
+                context,
+                tool,
+                inventory,
+                path,
+                Some(expected_key_id),
+                None,
+                ModelSelection::Default,
+            )
+            .await?
+            .connected())
     }
     pub async fn recover_connection(
         &self,
@@ -414,15 +462,87 @@ impl ConnectionManager {
         path: PathBuf,
         confirmed_lost_key: &str,
     ) -> Result<ReconnectOutcome> {
-        self.establish(
-            context,
-            tool,
-            inventory,
-            path,
-            expected_connection_key,
-            Some(confirmed_lost_key),
-        )
-        .await
+        Ok(self
+            .establish(
+                context,
+                tool,
+                inventory,
+                path,
+                expected_connection_key,
+                Some(confirmed_lost_key),
+                ModelSelection::Default,
+            )
+            .await?
+            .connected())
+    }
+    /// Model changes retain the connection's owner and billing workspace.
+    pub fn dumate_model_context(
+        &self,
+        mut context: ConnectContext,
+        expected_key: &str,
+    ) -> Result<ConnectContext> {
+        let record = self
+            .list()?
+            .into_iter()
+            .find(|record| record.tool == ToolId::DuMate && record.key_id == expected_key)
+            .context("连接已改变，请刷新后重试")?;
+        if record.owner.id != context.owner_id {
+            bail!("请登录此连接所属账号后切换模型")
+        }
+        if !self.matches_environment(&record) {
+            bail!("此连接属于其他环境，请先重新接入")
+        }
+        context.workspace_id = record.bound_workspace.id;
+        Ok(context)
+    }
+    /// Preparing choices may save a reusable key, but never changes tool configuration.
+    pub async fn prepare_dumate_models(
+        &self,
+        context: ConnectContext,
+        inventory: &ToolInventory,
+        path: PathBuf,
+        expected_key: Option<&str>,
+        confirmed_lost_key: Option<&str>,
+        preserve_binding: bool,
+    ) -> Result<ConnectionModels> {
+        match self
+            .establish(
+                context,
+                ToolId::DuMate,
+                inventory,
+                path,
+                expected_key,
+                confirmed_lost_key,
+                ModelSelection::Preview(preserve_binding),
+            )
+            .await?
+        {
+            EstablishResult::Models(models) => Ok(models),
+            EstablishResult::Connected(_) => unreachable!("preview configured a connection"),
+        }
+    }
+    pub async fn configure_dumate_model(
+        &self,
+        context: ConnectContext,
+        inventory: &ToolInventory,
+        path: PathBuf,
+        expected_key: Option<&str>,
+        confirmed_lost_key: Option<&str>,
+        model: &str,
+        preserve_binding: bool,
+    ) -> Result<ReconnectOutcome> {
+        Ok(self
+            .establish(
+                context,
+                ToolId::DuMate,
+                inventory,
+                path,
+                expected_key,
+                confirmed_lost_key,
+                ModelSelection::Selected(model, preserve_binding),
+            )
+            .await?
+            .connected())
     }
     async fn establish(
         &self,
@@ -432,13 +552,28 @@ impl ConnectionManager {
         path: PathBuf,
         replacement: Option<&str>,
         confirmed_lost_key: Option<&str>,
-    ) -> Result<ReconnectOutcome> {
+        selection: ModelSelection<'_>,
+    ) -> Result<EstablishResult> {
         let _guard = self
             .gate
             .try_lock()
             .map_err(|_| anyhow::anyhow!("接入正在进行，请稍候"))?;
+        let _dumate_operation = if tool == ToolId::DuMate {
+            crate::dumate::restart::configuration_lock(&path)?
+        } else {
+            None
+        };
+        let _qwenwork_operation = if tool == ToolId::QwenWork {
+            crate::qwenwork_restart::configuration_lock(&path)?
+        } else {
+            None
+        };
         inventory.require_installed(tool)?;
-        let _installation_guard = inventory.connection_guard(tool)?;
+        let _installation_guard = if tool == ToolId::DuMate {
+            inventory.dumate_model_change_guard()?
+        } else {
+            inventory.connection_guard(tool)?
+        };
         if matches!(
             tool,
             ToolId::DuMate | ToolId::DuMateEnterprise | ToolId::QwenWork
@@ -516,6 +651,13 @@ impl ConnectionManager {
         match (replacement, &previous) {
             (None, Some(_)) => bail!("已有连接，请使用重新接入操作"),
             (Some(expected), Some(old)) if old.key_id == expected => {
+                if selection.preserves_binding()
+                    && (old.owner.id != context.owner_id
+                        || old.bound_workspace.id != context.workspace_id
+                        || !self.matches_environment(old))
+                {
+                    bail!("连接归属已改变，请刷新后重新选择模型")
+                }
                 if old.receipts.first().map(|r| &r.path) != Some(&path) {
                     bail!("配置路径已改变，请先取消原连接后重新接入")
                 }
@@ -570,8 +712,24 @@ impl ConnectionManager {
         } else {
             None
         };
-        let (key, key_reused) = self
-            .obtain_key(
+        let (key, key_reused) = if selection.preserves_binding() {
+            let record = previous.as_ref().context("请先接入百度搭子后切换模型")?;
+            // Changing a model must never migrate, issue or recover a different key.
+            // Invalid or reset credentials require the explicit Reconnect action.
+            let key = cached
+                .filter(|key| key.key_id == record.key_id && key.api_key == record.api_key)
+                .unwrap_or_else(|| IssuedKey {
+                    issuance: None,
+                    api_key: record.api_key.clone(),
+                    key_id: record.key_id.clone(),
+                    owner: record.owner.clone(),
+                    bound_workspace: record.bound_workspace.clone(),
+                });
+            self.validate_for_apply(&context, tool, &device_id, &key)
+                .await?;
+            (key, true)
+        } else {
+            self.obtain_key(
                 &context,
                 tool,
                 &device_id,
@@ -579,7 +737,30 @@ impl ConnectionManager {
                 recovered,
                 confirmed_lost_key,
             )
-            .await?;
+            .await?
+        };
+        let available = self.load_models(tool, &key.api_key).await?;
+        if matches!(selection, ModelSelection::Preview(_)) {
+            let models = dumate::eligible(&available)?;
+            let selected = config.select_models(&models)?;
+            return Ok(EstablishResult::Models(ConnectionModels {
+                models: models
+                    .iter()
+                    .map(|row| row["id"].as_str().unwrap().to_owned())
+                    .collect(),
+                selected_model: selected[0]["id"].as_str().unwrap().to_owned(),
+            }));
+        }
+        let models = match selection {
+            ModelSelection::Selected(id, _) => {
+                let model = available
+                    .iter()
+                    .find(|row| row["id"].as_str() == Some(id))
+                    .context("所选模型已不可用，请刷新模型列表后重试；原配置已保留")?;
+                config.select_models(&[model.clone()])?
+            }
+            _ => config.select_models(&available)?,
+        };
         let result = self
             .apply(
                 &context,
@@ -592,15 +773,37 @@ impl ConnectionManager {
                 &mut records,
                 previous.as_ref(),
                 configuration_location,
+                models,
             )
             .await;
         let connection = result?;
         self.confirm_key(&context, tool, &device_id, &key, true)
             .await?;
-        Ok(ReconnectOutcome {
+        Ok(EstablishResult::Connected(ReconnectOutcome {
             connection,
             key_reused,
-        })
+        }))
+    }
+    async fn load_models(&self, tool: ToolId, api_key: &str) -> Result<Vec<Value>> {
+        let response = self
+            .http
+            .get(format!(
+                "{}/v1/models",
+                self.gateway_url.trim_end_matches('/')
+            ))
+            .bearer_auth(api_key)
+            .timeout(std::time::Duration::from_secs(30))
+            .send()
+            .await
+            .context("无法获取模型目录，原配置已保留")?;
+        if !response.status().is_success() {
+            bail!("无法获取模型目录，原配置已保留")
+        }
+        let catalogue: Value = response
+            .json()
+            .await
+            .context("模型目录无效，原配置已保留")?;
+        model_plan::select(tool, &catalogue)
     }
     async fn apply(
         &self,
@@ -614,6 +817,7 @@ impl ConnectionManager {
         records: &mut Vec<ConnectionRecord>,
         previous: Option<&ConnectionRecord>,
         configuration_location: crate::inventory::ConfigurationLocation,
+        models: Vec<Value>,
     ) -> Result<ConnectionSummary> {
         if key.bound_workspace.id != context.workspace_id
             || key.owner.id != context.owner_id
@@ -623,26 +827,20 @@ impl ConnectionManager {
         {
             bail!("连接归属校验失败")
         }
-        let response = self
-            .http
-            .get(format!(
-                "{}/v1/models",
-                self.gateway_url.trim_end_matches('/')
-            ))
-            .bearer_auth(&key.api_key)
-            .timeout(std::time::Duration::from_secs(30))
-            .send()
-            .await
-            .context("无法获取模型目录，原配置已保留")?;
-        if !response.status().is_success() {
-            bail!("无法获取模型目录，原配置已保留")
+        if tool == ToolId::DuMate {
+            if let Some(previous) = previous {
+                dumate::validate_unified_replacement(previous)?;
+            }
+            crate::dumate::legacy::retire(path)?;
         }
-        let catalogue: Value = response
-            .json()
-            .await
-            .context("模型目录无效，原配置已保留")?;
-        let models = config.select_models(&model_plan::select(tool, &catalogue)?)?;
-        let prepared = config.apply(&self.gateway_url, &key.api_key, &models)?;
+        config.preserve_qwenwork_route(previous);
+        let mut prepared = config.apply(&self.gateway_url, &key.api_key, &models)?;
+        if tool == ToolId::DuMate {
+            prepared
+                .additional_files
+                .extend(dumate::unified_files(path, &prepared.bytes)?);
+            dumate::preserve_official_media(&mut prepared)?;
+        }
         let mut files = vec![PreparedFile {
             path: path.into(),
             before: before.clone(),
@@ -675,11 +873,8 @@ impl ConnectionManager {
         self.validate_for_apply(context, tool, device_id, key)
             .await?;
         configuration_location.authorize(tool).await?;
-        if matches!(tool, ToolId::DuMate | ToolId::DuMateEnterprise) {
+        if tool == ToolId::DuMateEnterprise {
             crate::dumate::require_stopped(path)?;
-        }
-        if tool == ToolId::QwenWork {
-            crate::qwenwork::require_stopped(path)?;
         }
         let mut receipts = vec![];
         for file in &files {
@@ -805,18 +1000,35 @@ impl ConnectionManager {
             .position(|record| record.tool == tool && record.key_id == expected_key_id)
             .context("连接已改变，请刷新后重试")?;
         let record = records[index].clone();
+        let _qwenwork_operation = if tool == ToolId::QwenWork {
+            record
+                .receipts
+                .first()
+                .map(|receipt| crate::qwenwork_restart::configuration_lock(&receipt.path))
+                .transpose()?
+                .flatten()
+        } else {
+            None
+        };
+        let _dumate_operation = if tool == ToolId::DuMate {
+            record
+                .receipts
+                .first()
+                .map(|receipt| crate::dumate::restart::configuration_lock(&receipt.path))
+                .transpose()?
+                .flatten()
+        } else {
+            None
+        };
         if !matches!(record.version, 1 | 2) {
             bail!("连接记录版本不支持安全恢复")
         }
-        if tool == ToolId::QwenWork {
-            let path = &record
-                .receipts
-                .first()
-                .context("千问办公连接缺少配置记录")?
-                .path;
-            crate::qwenwork::require_stopped(path)?;
-        }
-        let plan = restore::prepare(&record, &request, &self.private)?;
+        let (restore_record, extra) = if tool == ToolId::DuMate {
+            dumate::prepare_unified_disconnect(&record)?
+        } else {
+            (record.clone(), Vec::new())
+        };
+        let plan = restore::prepare(&restore_record, &request, &self.private)?;
         if !plan.conflicts.is_empty() {
             return Ok(DisconnectOutcome {
                 state: "conflicts",
@@ -852,19 +1064,20 @@ impl ConnectionManager {
             )?;
         }
         records.remove(index);
-        if matches!(tool, ToolId::DuMate | ToolId::DuMateEnterprise) {
+        if tool == ToolId::DuMate {
+            if let Some(receipt) = record.receipts.first() {
+                crate::dumate::legacy::retire(&receipt.path)?;
+            }
+        }
+        if tool == ToolId::DuMateEnterprise {
             if let Some(receipt) = record.receipts.first() {
                 crate::dumate::require_stopped(&receipt.path)?;
             }
         }
-        plan.commit(
-            &store,
-            &original_store,
-            &self
-                .private
-                .encode(&store, &serde_json::to_vec_pretty(&records)?)?,
-            &[],
-        )?;
+        let encoded = self
+            .private
+            .encode(&store, &serde_json::to_vec_pretty(&records)?)?;
+        plan.commit(&store, &original_store, &encoded, &extra)?;
         Ok(DisconnectOutcome {
             state: "disconnected",
             revision: None,

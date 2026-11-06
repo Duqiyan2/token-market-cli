@@ -10,7 +10,7 @@ module.exports = async function openFixture(browser, options = {}) {
     const user = {id:'user-fixture',name:'界面测试账号',user_name:'界面测试账号',display_name:'界面测试账号',role:'USER',avatar_url:'avatar_0'};
     const personal = {id:'personal',name:'个人空间',type:'PERSONAL',defaultWorkspace:true};
     const team = {id:'team',name:'团队空间',type:'TEAM',status:'ACTIVE',roleCode:'TEAM_MEMBER'};
-    const fixture = window.__fixture = {calls:[],user,personal,team,current:personal,signedIn:options.signedIn !== false,pending:null,testPassed:true,conflicts:options.conflicts || false,inventoryError:options.inventoryError || false,workspaceError:options.workspaceError || false,events:{}};
+    const fixture = window.__fixture = {calls:[],user,personal,team,current:personal,signedIn:options.signedIn !== false,pending:null,testPassed:true,conflicts:options.conflicts || false,inventoryError:options.inventoryError || false,workspaceError:options.workspaceError || false,events:{},dumateRestartBusy:options.dumateRestartBusy || false,dumateRestartError:options.dumateRestartError || null};
     const connection = (id, state = 'configured_untested') => ({state,owner:{id:user.id,name:user.name},boundWorkspace:{id:personal.id,name:personal.name},models:[options.model || 'server-model'],keyId:'receipt-'+id,protocol:'OPENAI_CHAT_COMPLETIONS',testResult:null});
     fixture.entries = [['claude-code','Claude Code'],['codex','Codex'],['workbuddy','WorkBuddy'],['deepseek-harness','DeepSeek Harness'],['openclaw','OpenClaw'],['opencode','OpenCode'],['grok-build','Grok Build'],['hermes','Hermes'],['pi','Pi'],['minimax-code','MiniMax Code'],['oh-my-pi','Oh My Pi'],['kimi-code','Kimi Code'],['dumate','百度搭子 DuMate（个人版）'],['dumate-enterprise','百度搭子 DuMate（企业版）'],['qwenwork','千问办公']].map(([id,name],i) => ({id,name,installed:i<3,canConnect:i<3,connection:i<2?connection(id,i===0?'test_passed':options.changed?'configuration_changed':'configured_untested'):null}));
     if (options.multi) fixture.entries[2].connection = {...connection('workbuddy'),models:['server-model-a','server-model-b']};
@@ -41,12 +41,13 @@ module.exports = async function openFixture(browser, options = {}) {
       const canUpgrade=entry.installed && (upgradeEligible(entry.id) || options.newerRelease===entry.id) && fixture.updateVersions[entry.id]!==latest;
       return {tool:entry.id,currentVersion:entry.installed ? fixture.updateVersions[entry.id] : null,targetVersion:options.updateFailure===entry.id ? null : latest,latestVersion:options.updateFailure===entry.id ? null : latest,manualUpgrade:entry.installed && options.manualUpgrade===entry.id,canUpgrade:canUpgrade && options.manualUpgrade!==entry.id && options.updateFailure!==entry.id && options.brokenTool!==entry.id,state:!entry.installed ? 'not_installed' : options.brokenTool===entry.id ? 'broken' : options.updateFailure===entry.id ? 'check_failed' : options.manualUpgrade===entry.id ? 'manual_update' : canUpgrade ? 'available' : 'current',note:options.brokenTool===entry.id ? '已安装，但运行依赖缺失' : options.updateFailure===entry.id ? '官方版本检查失败，可稍后重试' : options.manualUpgrade===entry.id ? '请通过原安装渠道更新至官方最新版' : '官方最新版',upgradePath:entry.installations?.[0]?.path,upgradeCommand:canUpgrade?'更新选定的安装':null,upgradeRevision:'fixture-upgrade-'+entry.id};
     });
+    fixture.dumateModelError = Boolean(options.dumateModelError);
     fixture.windowPreferences = {run_in_background:options.runInBackground !== false,background_available:options.backgroundAvailable !== false,close_notice_pending:Boolean(options.closeNoticePending),error:null};
     if (options.legacy) fixture.entries[3].connection = {state:'legacy',owner:null,boundWorkspace:null,keyId:null,protocol:null,models:['legacy-model']};
     const clone = value => structuredClone(value);
     const loginStatus = () => ({context:fixture.signedIn?{user:{id:user.id,name:user.name},default_workspace:fixture.current}:null,pending:fixture.pending});
     fixture.balanceAmount='128.60';
-    const workspace = () => ({user,current_workspace:fixture.current,switchable_workspaces:[personal,team],balance:options.noBalance?null:{currency:'CNY',amount:fixture.balanceAmount},balance_error:options.noBalance?'读取余额失败':null,can_recharge:!options.restricted,menus:options.restricted?[]:[{path:'/console/tokens'},{path:'/console/billing'},{path:'/console/spaces'}]});
+    const workspace = () => ({owner_user_id:user.id,user:{display_name:user.display_name,user_name:user.user_name,email:null,avatar_url:user.avatar_url,role:user.role},current_workspace:fixture.current,switchable_workspaces:[personal,team],balance:options.noBalance?null:{currency:'CNY',amount:fixture.balanceAmount},balance_error:options.noBalance?'读取余额失败':null,can_recharge:!options.restricted,menus:options.restricted?[]:[{path:'/console/tokens'},{path:'/console/billing'},{path:'/console/spaces'}]});
     fixture.emit = (name,payload) => (fixture.events[name]||[]).forEach(fn=>fn({payload}));
     fixture.loginStatus = loginStatus;
     fixture.clientInstallBusy=Boolean(options.clientInstallBusy);
@@ -83,6 +84,7 @@ module.exports = async function openFixture(browser, options = {}) {
       const entry = fixture.entries.find(t=>t.id===args.tool);
       if (options.credentialLost && ['connect_tool','reconnect_tool'].includes(command) && !args.recovery) throw {message:'本机保存的连接信息已丢失',recovery:{keyId:'missing-fixture',ownerId:user.id,workspaceId:fixture.current.id,ownerName:user.name,workspaceName:fixture.current.name}};
       if (args.recovery && (args.recovery.ownerId!==user.id || args.recovery.workspaceId!==fixture.current.id)) throw Error('账号或空间已改变');
+      if (options.dumateCredentialLost && ['prepare_dumate_models','configure_dumate_model'].includes(command) && !args.target.recovery) throw {message:'本机保存的连接信息已丢失',recovery:{keyId:'missing-dumate',ownerId:user.id,workspaceId:fixture.current.id,ownerName:user.name,workspaceName:fixture.current.name}};
       switch(command) {
         case 'desktop_client_update_status': {
           const value=clone(fixture.clientUpdateStatus);
@@ -113,6 +115,23 @@ module.exports = async function openFixture(browser, options = {}) {
         case 'desktop_workspace_context': if(fixture.workspaceError)throw Error('空间读取失败');return clone(workspace());
         case 'desktop_tool_inventory': if(fixture.inventoryError)throw Error('工具读取失败');if(fixture.deferInventory)return new Promise(resolve=>fixture.resolveInventory=()=>resolve(clone(fixture.entries)));return clone(fixture.entries);
         case 'switch_desktop_workspace': fixture.current = args.workspaceId==='team'?team:personal;return clone(workspace());
+        case 'prepare_dumate_models': {
+          if (typeof args.target.expectedOwnerId !== 'string') throw Error('invalid args `target` for command `prepare_dumate_models`: missing field `expectedOwnerId`');
+          if (fixture.dumateModelError) throw Error('无法获取模型目录，原配置已保留');
+          if (fixture.deferDuMateModels) return new Promise(resolve => fixture.resolveDuMateModels = () => resolve({models:['fixture-model','other-model'],selectedModel:'fixture-model'}));
+          return {models:options.dumateModels || ['fixture-model','other-model'],selectedModel:'fixture-model'};
+        }
+        case 'configure_dumate_model': {
+          if (args.target.expectedOwnerId !== user.id || args.target.expectedWorkspaceId !== fixture.current.id) throw Error('账号或当前空间已改变');
+          const dumate=fixture.entries.find(t=>t.id==='dumate');
+          const bound=args.target.preserveBinding ? dumate.connection.boundWorkspace : {id:fixture.current.id,name:fixture.current.name};
+          dumate.connection={...connection('dumate'),models:[args.model],boundWorkspace:bound};
+          return {connection:clone(dumate.connection),keyReused:true};
+        }
+        case 'is_dumate_running': if(options.dumateRunningError)throw Error('无法确认搭子运行状态');return options.dumateRunning !== false;
+        case 'restart_dumate': if(!args.force)return {state:'confirmation_required',message:'所有正在运行的任务都将被中断，定时任务也将无法调度。'};if(fixture.dumateRestartError)throw Error(fixture.dumateRestartError);return {state:'restarted',message:'已重新打开搭子，配置将由搭子在启动时加载。请在搭子中确认。'};
+        case 'is_qwenwork_running': if(options.qwenworkRunningError)throw Error('无法确认千问办公运行状态');return options.qwenworkRunning !== false;
+        case 'restart_qwenwork': if(fixture.qwenworkRestartError)throw Error(fixture.qwenworkRestartError);return {state:'restarted',message:'已打开千问办公，配置将在启动时加载。'};
         case 'prepare_tool_connect': return null;
         case 'connect_tool': entry.connection=connection(entry.id);if(entry.id==='dumate-enterprise')entry.connection.models=['server-model-a','server-model-b'];entry.connection.boundWorkspace={id:fixture.current.id,name:fixture.current.name};return clone(entry.connection);
         case 'prepare_tool_reconnect': return {oldOwner:clone(entry.connection.owner),oldWorkspace:clone(entry.connection.boundWorkspace),currentOwner:{id:user.id,name:user.name},currentWorkspace:{id:fixture.current.id,name:fixture.current.name}};

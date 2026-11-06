@@ -12,6 +12,25 @@ use tokenmarket_core::{
 
 struct FixtureRuntime;
 struct IncompatibleRuntime;
+struct UpgradedFixtureRuntime;
+impl tokenmarket_core::qwenwork_runtime::RuntimeInstaller for UpgradedFixtureRuntime {
+    fn prepare(
+        &self,
+        application: &Path,
+        database: &Path,
+        gateway: &str,
+    ) -> anyhow::Result<tokenmarket_core::qwenwork_runtime::RuntimeInstallation> {
+        let previous = tokenmarket_core::qwenwork_runtime::RuntimeInstaller::prepare(
+            &FixtureRuntime,
+            application,
+            database,
+            gateway,
+        )?;
+        let worker = previous.worker.with_file_name("upgraded-worker.mjs");
+        std::fs::write(&worker, "// inert upgraded runtime fixture")?;
+        Ok(tokenmarket_core::qwenwork_runtime::RuntimeInstallation { worker })
+    }
+}
 impl tokenmarket_core::qwenwork_runtime::RuntimeInstaller for IncompatibleRuntime {
     fn prepare(
         &self,
@@ -191,6 +210,69 @@ fn context() -> ConnectContext {
         owner_id: "u1".into(),
         workspace_id: "42".into(),
     }
+}
+
+#[tokio::test]
+async fn qwenwork_auxiliary_model_survives_catalogue_reordering_and_growth() {
+    let root = tempfile::tempdir().unwrap();
+    let (inventory, path, env) = fixture(root.path());
+    let mut reordered = catalogue();
+    reordered["data"].as_array_mut().unwrap().reverse();
+    reordered["data"].as_array_mut().unwrap().insert(
+        0,
+        json!({"id":"a-new-model","model_types":["TEXT_GENERATION"]}),
+    );
+    let (url, server) = platform(vec![catalogue(), reordered.clone(), reordered], 4).await;
+    let manager = qwen_manager(root.path().join("state"), url.clone(), url);
+    let connected = manager
+        .connect(context(), ToolId::QwenWork, &inventory, path.clone())
+        .await
+        .unwrap();
+    let route = || {
+        let text = std::fs::read_to_string(&env).unwrap();
+        let file = text
+            .lines()
+            .find_map(|line| line.strip_prefix("TOKENMARKET_QWENWORK_ROUTE="))
+            .unwrap();
+        serde_json::from_slice::<Value>(&std::fs::read(file).unwrap()).unwrap()
+    };
+    assert_eq!(
+        route()["default_model"],
+        "alpha.model",
+        "API catalogue order must not choose the auxiliary model"
+    );
+    manager
+        .reconnect(
+            context(),
+            ToolId::QwenWork,
+            &connected.key_id,
+            &inventory,
+            path.clone(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        route()["default_model"],
+        "alpha.model",
+        "an existing available auxiliary model must survive catalogue growth"
+    );
+    let manager = manager.with_qwenwork_runtime(std::sync::Arc::new(UpgradedFixtureRuntime));
+    manager
+        .reconnect(
+            context(),
+            ToolId::QwenWork,
+            &connected.key_id,
+            &inventory,
+            path,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        route()["default_model"],
+        "alpha.model",
+        "SDK/runtime upgrades must preserve the available auxiliary model"
+    );
+    server.await.unwrap();
 }
 
 #[tokio::test]
@@ -428,11 +510,8 @@ fn qwenwork_discovers_only_official_app_and_keeps_platform_config_paths() {
 async fn qwenwork_connect_test_and_restore_preserve_other_models_settings_and_env() {
     let root = tempfile::tempdir().unwrap();
     let (inventory, path, env) = fixture(root.path());
-    std::fs::write(
-        &env,
-        "# local settings\r\nOTHER='keep'\r\nALLOW_CUSTOM_BYOK=0\r\n",
-    )
-    .unwrap();
+    let initial_env = "# local settings\r\nOTHER='keep'\r\nENGINE_MAAS_MINT_URL=https://user.invalid/mint\r\nQODERCN_SERVER_ENDPOINT=https://user.invalid\r\nALLOW_CUSTOM_BYOK=0\r\n";
+    std::fs::write(&env, initial_env).unwrap();
     let (url, server) = platform(vec![catalogue()], 3).await;
     let manager = qwen_manager(root.path().join("state"), url.clone(), url.clone());
     let connected = manager
@@ -442,8 +521,15 @@ async fn qwenwork_connect_test_and_restore_preserve_other_models_settings_and_en
     assert_eq!(connected.models, vec!["vendor/zeta~1", "alpha.model"]);
     assert_eq!(model_count(&path), 3);
     let updated_env = std::fs::read_to_string(&env).unwrap();
-    assert!(updated_env.starts_with("# local settings\r\nOTHER='keep'\r\nALLOW_CUSTOM_BYOK=1\r\n"));
+    assert!(updated_env.starts_with("# local settings\r\nOTHER='keep'\r\n"));
+    assert!(updated_env.contains("ALLOW_CUSTOM_BYOK=1\r\n"));
     assert!(updated_env.contains("QW_QODER_WORKER_RUNTIME_PATH="));
+    assert!(
+        updated_env.contains("ENGINE_MAAS_MINT_URL=http://127.0.0.1:"),
+        "desktop auxiliary models must use the local credential and model relay"
+    );
+    assert!(updated_env.contains("TOKENMARKET_QWENWORK_ROUTE="));
+    assert!(updated_env.contains("QODERCN_SERVER_ENDPOINT=https://tokenmarket.local.invalid"));
     let db = rusqlite::Connection::open(&path).unwrap();
     let (endpoint,parameters,limit):(String,String,i64)=db.query_row("SELECT url,encrypted_parameters,max_input_tokens FROM byok_custom_models WHERE model='vendor/zeta~1'",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
     assert_eq!(endpoint, tokenmarket_core::qwenwork_runtime::MODEL_ENDPOINT);
@@ -514,9 +600,7 @@ async fn qwenwork_connect_test_and_restore_preserve_other_models_settings_and_en
         .unwrap(),
         "user-encrypted-secret"
     );
-    assert!(std::fs::read_to_string(env)
-        .unwrap()
-        .ends_with("ALLOW_CUSTOM_BYOK=0\r\n"));
+    assert_eq!(std::fs::read_to_string(env).unwrap(), initial_env);
 }
 
 #[tokio::test]
@@ -786,7 +870,9 @@ async fn qwenwork_preflight_does_not_issue_keys_for_invalid_login_or_database() 
             "uninitialized" => std::fs::remove_file(&path).unwrap(),
             "changed_schema" => rusqlite::Connection::open(&path)
                 .unwrap()
-                .execute_batch("ALTER TABLE byok_custom_models ADD COLUMN future_field TEXT")
+                .execute_batch(
+                    "ALTER TABLE byok_custom_models RENAME COLUMN model TO incompatible_model",
+                )
                 .unwrap(),
             _ => unreachable!(),
         }

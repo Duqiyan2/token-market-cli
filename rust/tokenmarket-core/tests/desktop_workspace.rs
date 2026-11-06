@@ -62,6 +62,8 @@ async fn switching_saves_shared_preference_and_keeps_decimal_parent_account_and_
     let workspace = DesktopWorkspace::new(base, "https://console.example.test".into());
     let initial = workspace.load(&session).await.unwrap();
     assert_eq!(initial.current_workspace.id, "11");
+    assert_eq!(initial.owner_user_id, "1");
+    assert!(initial.user.get("id").is_none());
     assert_eq!(initial.balance.unwrap().amount, "1.123456");
     let next = workspace.switch(&session, "22").await.unwrap();
     assert_eq!(next.current_workspace.id, "22");

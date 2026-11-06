@@ -1,0 +1,255 @@
+{
+  "date": "2026-11-06",
+  "status": "isolated-native-verified",
+  "fix": "Accept the verified OPENCODE_NEW_RUNTIME=1 alongside 0/absent during unified adapter startup. Preserve policy, account, model routing and media boundaries. Unknown runtime modes still fail before model requests.",
+  "DuMate": "1.0.89.447 macOS arm64",
+  "adapterSHA256": "a0411205d4f1f582f3f30f90ffdd1c6dc182fa79cfddb40f82c0019d7be4b558",
+  "nativeProbes": {
+    "0": {
+      "runtime_mode": "0",
+      "stages": [
+        {
+          "stage": "old_task_before_takeover",
+          "body_model": "fixture-old",
+          "actual_model_calls": 5,
+          "all_calls_pinned": false
+        },
+        {
+          "stage": "old_task_after_cold_takeover",
+          "body_model": "fixture-one",
+          "actual_model_calls": 4,
+          "all_calls_pinned": true
+        },
+        {
+          "stage": "new_task_after_cold_takeover",
+          "body_model": "fixture-one",
+          "actual_model_calls": 5,
+          "all_calls_pinned": true
+        },
+        {
+          "stage": "image_uses_native_official_route",
+          "official_model_calls": 2,
+          "platform_key_on_media": false
+        },
+        {
+          "stage": "video_uses_native_official_route",
+          "official_model_calls": 2,
+          "platform_key_on_media": false
+        },
+        {
+          "stage": "actual_subagent_tool_execution",
+          "body_model": "fixture-one",
+          "actual_model_calls": 8,
+          "all_calls_pinned": true
+        },
+        {
+          "stage": "explicit_summary",
+          "actual_model_calls": 3,
+          "all_calls_pinned": true
+        },
+        {
+          "stage": "saving_without_restart_keeps_active_snapshot",
+          "body_model": "fixture-one",
+          "actual_model_calls": 4,
+          "all_calls_pinned": true
+        },
+        {
+          "stage": "upstream_failure_no_official_fallback",
+          "actual_model_calls": 3,
+          "all_calls_pinned": true
+        },
+        {
+          "stage": "old_task_after_model_switch_restart",
+          "body_model": "fixture-two",
+          "actual_model_calls": 4,
+          "all_calls_pinned": true
+        },
+        {
+          "stage": "newer_task_after_model_switch_restart",
+          "body_model": "fixture-two",
+          "actual_model_calls": 4,
+          "all_calls_pinned": true
+        },
+        {
+          "stage": "remote_classifier_old_task_is_local",
+          "body_model": "fixture-two",
+          "actual_model_calls": 2,
+          "all_calls_pinned": true
+        },
+        {
+          "stage": "remote_classifier_new_task_is_local",
+          "body_model": "fixture-two",
+          "actual_model_calls": 3,
+          "all_calls_pinned": true
+        },
+        {
+          "stage": "scheduler_remapped_preflight_is_local",
+          "body_model": "fixture-two",
+          "actual_model_calls": 2,
+          "all_calls_pinned": true
+        },
+        {
+          "stage": "old_task_after_reconnect_restart",
+          "body_model": "fixture-reconnected",
+          "actual_model_calls": 4,
+          "all_calls_pinned": true
+        },
+        {
+          "stage": "new_task_after_reconnect_restart",
+          "body_model": "fixture-reconnected",
+          "actual_model_calls": 5,
+          "all_calls_pinned": true
+        },
+        {
+          "stage": "cancelled_after_restart_restores_original",
+          "body_model": "fixture-old",
+          "actual_model_calls": 4,
+          "all_calls_pinned": false
+        },
+        {
+          "stage": "invalid_policy_fails_closed",
+          "actual_model_calls": 0,
+          "all_calls_pinned": true
+        }
+      ],
+      "synthetic_completed_cloud_text_history_preserved": true,
+      "observed_agents": [
+        "build",
+        "compaction",
+        "explore",
+        "title"
+      ],
+      "external_network": "denied",
+      "real_user_data": "denied",
+      "real_app_restarted": false
+    },
+    "1": {
+      "runtime_mode": "1",
+      "stages": [
+        {
+          "stage": "old_task_before_takeover",
+          "body_model": "fixture-old",
+          "actual_model_calls": 5,
+          "all_calls_pinned": false
+        },
+        {
+          "stage": "old_task_after_cold_takeover",
+          "body_model": "fixture-one",
+          "actual_model_calls": 4,
+          "all_calls_pinned": true
+        },
+        {
+          "stage": "new_task_after_cold_takeover",
+          "body_model": "fixture-one",
+          "actual_model_calls": 5,
+          "all_calls_pinned": true
+        },
+        {
+          "stage": "image_uses_native_official_route",
+          "official_model_calls": 2,
+          "platform_key_on_media": false
+        },
+        {
+          "stage": "video_uses_native_official_route",
+          "official_model_calls": 2,
+          "platform_key_on_media": false
+        },
+        {
+          "stage": "actual_subagent_tool_execution",
+          "body_model": "fixture-one",
+          "actual_model_calls": 8,
+          "all_calls_pinned": true
+        },
+        {
+          "stage": "explicit_summary",
+          "actual_model_calls": 3,
+          "all_calls_pinned": true
+        },
+        {
+          "stage": "saving_without_restart_keeps_active_snapshot",
+          "body_model": "fixture-one",
+          "actual_model_calls": 4,
+          "all_calls_pinned": true
+        },
+        {
+          "stage": "upstream_failure_no_official_fallback",
+          "actual_model_calls": 3,
+          "all_calls_pinned": true
+        },
+        {
+          "stage": "old_task_after_model_switch_restart",
+          "body_model": "fixture-two",
+          "actual_model_calls": 4,
+          "all_calls_pinned": true
+        },
+        {
+          "stage": "newer_task_after_model_switch_restart",
+          "body_model": "fixture-two",
+          "actual_model_calls": 4,
+          "all_calls_pinned": true
+        },
+        {
+          "stage": "remote_classifier_old_task_is_local",
+          "body_model": "fixture-two",
+          "actual_model_calls": 2,
+          "all_calls_pinned": true
+        },
+        {
+          "stage": "remote_classifier_new_task_is_local",
+          "body_model": "fixture-two",
+          "actual_model_calls": 3,
+          "all_calls_pinned": true
+        },
+        {
+          "stage": "scheduler_remapped_preflight_is_local",
+          "body_model": "fixture-two",
+          "actual_model_calls": 2,
+          "all_calls_pinned": true
+        },
+        {
+          "stage": "old_task_after_reconnect_restart",
+          "body_model": "fixture-reconnected",
+          "actual_model_calls": 4,
+          "all_calls_pinned": true
+        },
+        {
+          "stage": "new_task_after_reconnect_restart",
+          "body_model": "fixture-reconnected",
+          "actual_model_calls": 5,
+          "all_calls_pinned": true
+        },
+        {
+          "stage": "cancelled_after_restart_restores_original",
+          "body_model": "fixture-old",
+          "actual_model_calls": 4,
+          "all_calls_pinned": false
+        },
+        {
+          "stage": "invalid_policy_fails_closed",
+          "actual_model_calls": 0,
+          "all_calls_pinned": true
+        }
+      ],
+      "synthetic_completed_cloud_text_history_preserved": true,
+      "observed_agents": [
+        "build",
+        "compaction",
+        "explore",
+        "title"
+      ],
+      "external_network": "denied",
+      "real_user_data": "denied",
+      "real_app_restarted": false
+    }
+  },
+  "unitTests": {
+    "passed": 10,
+    "failed": 0,
+    "unknownRuntimeRejected": true
+  },
+  "realUserConfigurationChanged": false,
+  "realAppRestarted": false,
+  "paidModelRequests": false,
+  "windowsNativeAcceptance": false,
+  "activation": "Update/reopen Token Market, reconnect DuMate to regenerate the saved adapter, then restart DuMate."
+}

@@ -15,14 +15,73 @@
   let checking = false, updatePending = null, checkRequested = false, checkExplicitRequested = false;
   let updates = new Map();
   let entries = [];
+  const isVisibleTool = tool => tool !== 'dumate-enterprise';
   const expandedInstallations = new Set();
   let selectedTool = null, filter = 'all', search = '';
   const detailRoot = document.getElementById('tool-detail-region');
+  const restartConfirm = document.createElement('dialog');
+  restartConfirm.className = 'dumate-restart-confirm';
+  restartConfirm.innerHTML = '<h3>强制重启搭子</h3><p>所有正在运行的任务都将被中断，定时任务也将无法调度。</p><div class="tool-actions"><button class="danger force-restart-dumate" type="button">强制重启搭子</button><button class="cancel-restart-dumate" type="button" autofocus>取消</button></div>';
+  document.body.append(restartConfirm);
+  let resolveRestartConfirmation = null;
+  function closeRestartConfirmation(confirmed=false) {
+    const resolve=resolveRestartConfirmation;resolveRestartConfirmation=null;
+    if (restartConfirm.open) restartConfirm.close();
+    resolve?.(confirmed);
+  }
+  restartConfirm.querySelector('.force-restart-dumate').onclick=()=>closeRestartConfirmation(true);
+  restartConfirm.querySelector('.cancel-restart-dumate').onclick=()=>closeRestartConfirmation();
+  restartConfirm.addEventListener('cancel',event=>{event.preventDefault();closeRestartConfirmation();});
+  let restartingDuMate=false;
+  async function restartDuMate(button,status) {
+    if (!authenticated || restartingDuMate) return;
+    const current=generation, token=Symbol(), origin=status.closest('dialog');status._restartToken=token;
+    const active=()=>authenticated && current===generation && status._restartToken===token && origin?.open;
+    restartingDuMate=true;button.disabled=true;button.textContent='正在准备重启…';
+    status.textContent='';
+    try {
+      let result=await invoke('restart_dumate',{force:false});
+      if (!active()) return;
+      if (result.state==='confirmation_required') {
+        const confirmed=await new Promise(resolve=>{resolveRestartConfirmation=resolve;restartConfirm.showModal();});
+        if (!confirmed || !active()) return;
+        button.textContent='正在重启搭子…';
+        result=await invoke('restart_dumate',{force:true});
+      }
+      if (active()) origin.close();
+    } catch (error) {
+      if (active()) status.textContent=String(error);
+    } finally {
+      restartingDuMate=false;button.disabled=false;button.textContent='重启搭子';
+    }
+  }
+  let restartingQwenWork=false;
+  async function restartQwenWork(button,status) {
+    if (!authenticated || restartingQwenWork) return;
+    const current=generation, token=Symbol(), origin=status.closest('dialog');status._restartToken=token;
+    const active=()=>authenticated && current===generation && status._restartToken===token && origin?.open;
+    restartingQwenWork=true;button.disabled=true;button.textContent='请在千问办公中确认退出…';status.textContent='';
+    try {
+      const result=await invoke('restart_qwenwork',{});
+      if (!active()) return;
+      if (['opened','restarted'].includes(result.state)) origin.close();
+      else status.textContent=result.message || '未完成重启，请手动重启千问办公。';
+    } catch(error) {
+      if (active()) status.textContent=String(error);
+    } finally {
+      restartingQwenWork=false;button.disabled=false;button.textContent='重启千问办公';
+    }
+  }
   const openToolMenus = () => document.querySelectorAll('.tool-menu[open], .tool-lifecycle-menu[open]');
   function closeToolMenusOutside(target) {
     openToolMenus().forEach(menu => { if (!target || !menu.contains(target)) menu.open = false; });
   }
   document.addEventListener('pointerdown', event => closeToolMenusOutside(event.target));
+  document.addEventListener('mousedown', event => {
+    // WebKit can focus the containing page instead of the clicked button.
+    // Keep focus in the disclosure until click runs, so focusin cannot close it first.
+    if (event.button === 0 && event.target.closest('.tool-menu[open] button, .tool-lifecycle-menu[open] button')) event.preventDefault();
+  });
   document.addEventListener('focusin', event => closeToolMenusOutside(event.target));
   document.addEventListener('keydown', event => {
     if (event.key !== 'Escape' || document.querySelector('dialog[open]')) return;
@@ -49,15 +108,41 @@
   function feedback(text, error = false) { message.textContent = text; message.classList.toggle('error', error); const detailMessage = detailRoot.querySelector('.tool-operation-status'); if (detailMessage) { detailMessage.textContent = text; detailMessage.classList.toggle('error', error); } }
   const resultDialog = document.createElement('dialog');
   resultDialog.className = 'tool-result-dialog';
-  resultDialog.innerHTML = '<h3></h3><p class="tool-result-detail" role="status"></p><div class="tool-actions"><button class="primary result-close" type="button">知道了</button></div>';
+  resultDialog.innerHTML = '<h3></h3><p class="tool-result-detail" role="status"></p><p class="dumate-restart-status error" role="alert"></p><form method="dialog" class="tool-actions"><button class="primary restart-dumate" type="button" hidden>重启搭子</button><button class="primary restart-qwenwork" type="button" hidden>重启千问办公</button><button class="result-close" type="submit">知道了</button></form>';
   document.body.append(resultDialog);
-  resultDialog.querySelector('.result-close').onclick = () => resultDialog.close();
-  function showResult(title, detail) {
+  resultDialog.addEventListener('close',()=>{
+    const status=resultDialog.querySelector('.dumate-restart-status');
+    if (status._restartToken) { status._restartToken=null;closeRestartConfirmation(); }
+  });
+  resultDialog.querySelector('.restart-dumate').onclick=()=>restartDuMate(resultDialog.querySelector('.restart-dumate'),resultDialog.querySelector('.dumate-restart-status'));
+  resultDialog.querySelector('.restart-qwenwork').onclick=()=>restartQwenWork(resultDialog.querySelector('.restart-qwenwork'),resultDialog.querySelector('.dumate-restart-status'));
+  function showResult(title, detail, canRestartDuMate=false, canRestartQwenWork=false) {
     resultDialog.querySelector('h3').textContent = title;
     resultDialog.querySelector('.tool-result-detail').textContent = detail;
+    resultDialog.querySelector('.restart-dumate').hidden=!canRestartDuMate;
+    resultDialog.querySelector('.restart-qwenwork').hidden=!canRestartQwenWork;
+    resultDialog.querySelector('.dumate-restart-status')._restartToken=null;
+    resultDialog.querySelector('.dumate-restart-status').textContent='';
+    resultDialog.querySelector('.result-close').textContent=canRestartDuMate ? '稍后手动重启搭子' : canRestartQwenWork ? '稍后手动重启千问办公' : '知道了';
     if (!resultDialog.open) resultDialog.showModal();
   }
   function showConnectFailure() { feedback(''); showResult('接入失败', '请联系管理员。'); }
+  async function duMateSavedStatus() {
+    try {
+      const running=await invoke('is_dumate_running');
+      return {canRestart:running===true,notice:running===true ? '已保存，重启搭子后生效。' : '已保存，下次启动搭子时生效。'};
+    } catch {
+      return {canRestart:false,notice:'已保存，下次启动搭子时生效。暂时无法确认搭子是否运行，若正在运行，请完全退出后重新打开。'};
+    }
+  }
+  async function qwenWorkSavedStatus() {
+    try {
+      const running=await invoke('is_qwenwork_running');
+      return {canRestart:running===true,notice:running===true ? '已保存，重启千问办公后生效。重启时请在千问办公中确认退出。' : '已保存，下次启动千问办公时生效。'};
+    } catch {
+      return {canRestart:false,notice:'已保存，下次启动千问办公时生效。暂时无法确认千问办公是否运行，若正在运行，请完全退出后重新打开。'};
+    }
+  }
   function text(tag, value, className) {
     const element = document.createElement(tag);
     element.textContent = value;
@@ -309,6 +394,7 @@
   async function connect(entry) {
     const current = generation;
     try {
+      if (entry.id === 'dumate') { await openDuMateModels(entry); return; }
       if (entry.connection) { await beginReconnect(entry); return; }
       await invoke('prepare_tool_connect', {tool:entry.id});
       if (!authenticated || current !== generation) return;
@@ -373,7 +459,7 @@
       notice.append(text('h3', connectionLabel(entry)));
       const note = connection.state === 'environment_mismatch' ? '当前工具使用其他环境的连接，尚未接入当前环境，测试已停用。请通过“管理连接 → 重新接入”切换到当前环境。' : connection.state === 'configuration_changed' ? '当前配置与接入记录不一致，测试已停用。请检查配置或重新接入。' : connection.state === 'test_passed' ? window.TokenMarketConnectionTests.scope : connection.state === 'test_failed' ? `未通过接口文本测试。请检查权限、余额与模型可用性后重试。${window.TokenMarketConnectionTests.scope}` : '配置已保存，尚未发起模型测试。可以先打开工具；需要时再确认费用并测试。';
       notice.append(text('p', note)); nextDetail.append(notice);
-    } else nextDetail.append(text('p', entry.id === 'dumate-enterprise' ? '企业管理员需开放自定义模型与模型选择权限。先在 DuMate 登录企业版并完全退出，再接入；将使用当前企业登录态查询权限。导入后在此选择一个模型并确认费用测试，通过后重新打开 DuMate 并在会话中选择。' : entry.id === 'dumate' ? 'DuMate 个人版一次配置一个模型。请先在 DuMate 登录个人版，再完全退出应用后接入；重新打开后生效。' : entry.installed ? '工具已安装，接入后即可使用 Token Market 模型。' : '先安装工具，再返回检查更新和接入。', 'notice'));
+    } else nextDetail.append(text('p', entry.id === 'dumate-enterprise' ? '企业管理员需开放自定义模型与模型选择权限。先在 DuMate 登录企业版并完全退出，再接入；将使用当前企业登录态查询权限。导入后在此选择一个模型并确认费用测试，通过后重新打开 DuMate 并在会话中选择。' : entry.id === 'dumate' ? 'DuMate 个人版一次配置一个模型。接入、重新接入、切换模型或取消接入后，都需要完全退出并重新打开搭子后生效。' : entry.installed ? '工具已安装，接入后即可使用 Token Market 模型。' : '先安装工具，再返回检查更新和接入。', 'notice'));
     nextDetail.append(actions(entry, true));
     nextDetail.append(installationDetails(entry));
     const update = updates.get(entry.id);
@@ -390,12 +476,17 @@
     if (connection?.models?.length) {
       connection.models.forEach(model => { const item = text('div', '', 'tool-model-entry'); item.append(text('code', model), text('span', '已配置', 'tool-model-tag')); models.append(item); });
     } else models.append(text('p', '接入后会显示该连接的可用模型。'));
+    if (entry.id === 'dumate' && connection?.keyId) {
+      models.append(actionButton('切换模型', 'tool-switch-model', () => openDuMateModels(entry, true),
+        loading || connecting || disconnecting || installing || batching || checking || Boolean(window.TokenMarketConnectionTests?.busy) || testBlocked(entry)));
+      models.append(text('p', '切换只保存所选模型，下次启动搭子时生效。若搭子正在运行，请重启后生效。'));
+    }
     left.append(models);
     if (connection?.testResult) {
       const result = text('section', '', 'sheet'); result.append(text('h2', '最近一次接口文本测试'), detailRow('测试模型', connection.testResult.model), detailRow('测试时间', connection.testResult.testedAt), text('p', connection.testResult.detail), text('p', window.TokenMarketConnectionTests.scope, 'test-history-scope')); left.append(result);
     }
-    const guidance = text('section', '', 'sheet'); guidance.append(text('h2', '使用前提醒'), text('p', '配置完成后，请完全退出并重新打开已有工具会话。'));
-    if (entry.id === 'qwenwork') guidance.append(text('p', '接入或取消接入前，请完全退出千问办公；接入后重新打开，在模型列表中选择 Token Market 模型。'));
+    const guidance = text('section', '', 'sheet'); guidance.append(text('h2', '使用前提醒'), text('p', entry.id === 'dumate' && connection ? '配置保存后，下次启动搭子时生效。若搭子正在运行，请重启；重启前会提示任务中断与定时任务调度的影响。' : '配置完成后，请完全退出并重新打开已有工具会话。'));
+    if (entry.id === 'qwenwork') guidance.append(text('p', '接入或取消接入会保存配置，下次启动千问办公时生效。若千问办公正在运行，可等待当前任务完成后再重启；接入后在模型列表中选择 Token Market 模型。'));
     if (entry.id === 'openclaw') guidance.append(text('p', 'OpenClaw 需要重启 Gateway 或会话，已有模型白名单仍可能限制可选模型。'));
     if (entry.id === 'opencode') guidance.append(text('p', '项目或运行时配置可能覆盖全局模型设置。'));
     left.append(guidance);
@@ -479,7 +570,7 @@
     if (firstLoad) render();
     let success = false;
     try {
-      const next = await invoke('desktop_tool_inventory');
+      const next = (await invoke('desktop_tool_inventory')).filter(entry => isVisibleTool(entry.id));
       if (authenticated && current === generation) {
         changed = JSON.stringify(entries) !== JSON.stringify(next);
         if (changed) entries = next;
@@ -541,8 +632,17 @@
       } else {
         await refresh(true);
         if (!authenticated || current !== generation) return;
-        const detail = `${entry.name} 已取消接入。`;
-        feedback(detail); showResult('取消接入完成', detail);
+        if (entry.id === 'dumate') {
+          const {notice,canRestart}=await duMateSavedStatus();
+          if (!authenticated || current !== generation) return;
+          feedback(notice);showResult('取消接入配置已保存',notice,canRestart);
+        } else if (entry.id === 'qwenwork') {
+          const {notice,canRestart}=await qwenWorkSavedStatus();
+          if (!authenticated || current !== generation) return;
+          feedback(notice);showResult('取消接入配置已保存',notice,false,canRestart);
+        } else {
+          const detail=`${entry.name} 已取消接入。`;feedback(detail);showResult('取消接入完成',detail);
+        }
       }
     } catch (error) { if (authenticated && current === generation) { feedback(String(error), true); showResult('取消接入未完成', String(error)); } }
     finally { disconnecting = false; if (authenticated && current === generation) render(); }
@@ -577,9 +677,9 @@
     await window.TokenMarketWorkspace.refresh();
     if (!authenticated || current !== generation) return;
     const context = window.TokenMarketWorkspace.current;
-    if (!context) { showConnectFailure(); return; }
+    if (!context?.owner_user_id || !context.current_workspace?.id) { showConnectFailure(); return; }
     connectDialog.querySelector('h3').textContent = `接入 ${supportedConnections[tool]}`;
-    pendingConnect = {tool,ownerId:context.user.id,workspaceId:context.current_workspace.id};
+    pendingConnect = {tool,ownerId:context.owner_user_id,workspaceId:context.current_workspace.id};
     connectDialog.querySelector('.connect-target').textContent = `账号：${context.user.display_name || context.user.user_name} · 计费空间：${context.current_workspace.name}`;
     connectDialog.showModal();
   }
@@ -589,17 +689,116 @@
     const pending = pendingConnect; pendingConnect = null; connectDialog.close();
     const context = window.TokenMarketWorkspace.current;
     if (!pending || !context) return;
-    if (context.user.id !== pending.ownerId || context.current_workspace.id !== pending.workspaceId) { showResult('账号或空间已改变', '请重新确认接入归属。'); return; }
+    if (context.owner_user_id !== pending.ownerId || context.current_workspace.id !== pending.workspaceId) { showResult('账号或空间已改变', '请重新确认接入归属。'); return; }
     runConnect(pending.tool);
   };
   window.addEventListener('current-workspace-changed', () => { pendingConnect = null; if (connectDialog.open) connectDialog.close(); });
+  const dumateDialog = document.createElement('dialog'); dumateDialog.className = 'dumate-model-dialog';
+  dumateDialog.innerHTML = '<h3></h3><p class="dumate-model-target"></p><p class="dumate-model-note">配置在下次启动搭子时生效。若搭子正在运行，请重启后生效。保存不会自动退出搭子，也不会发起模型测试。</p><label>选择模型 <select class="dumate-model-select" aria-label="搭子使用的模型"></select></label><p class="dumate-model-status" role="status" aria-live="polite"></p><div class="tool-actions"><button class="dumate-model-cancel">取消</button><button class="dumate-model-retry">重新加载</button><button class="primary dumate-model-confirm">确认接入</button></div>';
+  document.body.append(dumateDialog);
+  let pendingDuMate = null;
+  const dumateSelect = dumateDialog.querySelector('select');
+  const dumateConfirm = dumateDialog.querySelector('.dumate-model-confirm');
+  const dumateRetry = dumateDialog.querySelector('.dumate-model-retry');
+  function closeDuMateModels() { pendingDuMate = null; if (dumateDialog.open) dumateDialog.close(); }
+  dumateDialog.querySelector('.dumate-model-cancel').onclick = closeDuMateModels;
+  dumateDialog.addEventListener('cancel', event => { if (pendingDuMate?.saving) event.preventDefault(); else pendingDuMate = null; });
+  window.addEventListener('current-workspace-changed', closeDuMateModels);
+  async function openDuMateModels(entry, preserveBinding = false) {
+    if (restartingDuMate) {feedback('搭子正在重启，请稍后再修改配置。',true);return;}
+    if (!authenticated || connecting || disconnecting || window.TokenMarketConnectionTests?.busy) return;
+    const current = generation;
+    await window.TokenMarketWorkspace.refresh();
+    if (!authenticated || current !== generation) return;
+    const context = window.TokenMarketWorkspace.current;
+    if (!context?.owner_user_id || !context.current_workspace?.id) { showResult('无法确认当前账号', '请刷新账号与空间后重新选择模型。'); return; }
+    const pending = {entry,preserveBinding,generation:current,target:{expectedKeyId:entry.connection?.keyId || null,
+      expectedOwnerId:context.owner_user_id,expectedWorkspaceId:context.current_workspace.id,preserveBinding,recovery:null}};
+    pendingDuMate = pending;
+    dumateDialog.querySelector('h3').textContent = preserveBinding ? '切换搭子模型' : entry.connection ? '重新接入百度搭子' : '接入百度搭子';
+    dumateDialog.querySelector('.dumate-model-note').textContent = `${preserveBinding ? '保留当前密钥和计费空间。切换' : '接入'}只保存配置，下次启动搭子时生效。若搭子正在运行，请重启后生效。不会自动发起模型测试。`;
+    dumateConfirm.textContent = preserveBinding ? '确认切换模型' : entry.connection ? '确认重新接入' : '确认接入';
+    const owner = preserveBinding ? entry.connection.owner?.name : context.user.display_name || context.user.user_name;
+    const space = preserveBinding ? entry.connection.boundWorkspace?.name : context.current_workspace.name;
+    dumateDialog.querySelector('.dumate-model-target').textContent = `账号：${owner} · 计费空间：${space}`;
+    dumateDialog.showModal();
+    await loadDuMateModels(pending);
+  }
+  function duMateModelError(error, pending, resume) {
+    if (error?.recovery) {
+      dumateDialog.close();
+      pendingRecovery = {tool:'dumate',target:error.recovery,generation:pending.generation,resume:() => {
+        if (pendingDuMate !== pending) return;
+        pending.target.recovery = error.recovery; dumateDialog.showModal(); void resume();
+      }};
+      recoveryDialog.querySelector('.recovery-scope').textContent = `账号：${error.recovery.ownerName} · 计费空间：${error.recovery.workspaceName}`;
+      recoveryDialog.showModal();
+    } else dumateDialog.querySelector('.dumate-model-status').textContent = error?.message || String(error);
+  }
+  async function loadDuMateModels(pending) {
+    if (connecting || !authenticated || pendingDuMate !== pending) return;
+    connecting = true; render(); dumateSelect.replaceChildren(); dumateSelect.disabled = true;
+    dumateConfirm.disabled = true; dumateRetry.hidden = true;
+    dumateDialog.querySelector('.dumate-model-status').textContent = '正在加载可用模型…';
+    try {
+      const result = await invoke('prepare_dumate_models', {target:pending.target});
+      if (!authenticated || pending.generation !== generation || pendingDuMate !== pending) return;
+      result.models.forEach(model => { const option = text('option', model); option.value = model; dumateSelect.append(option); });
+      const preferred = pending.entry.connection?.models?.[0];
+      dumateSelect.value = result.models.includes(preferred) ? preferred : result.selectedModel;
+      dumateSelect.disabled = false; dumateConfirm.disabled = !dumateSelect.value;
+      dumateDialog.querySelector('.dumate-model-status').textContent = result.models.length ? `可选 ${result.models.length} 个模型` : '当前连接没有可用模型，请稍后重新加载。';
+    } catch (error) {
+      if (authenticated && pending.generation === generation && pendingDuMate === pending) duMateModelError(error, pending, () => loadDuMateModels(pending));
+    } finally {
+      connecting = false;
+      if (authenticated && pendingDuMate === pending) { dumateRetry.hidden = false; render(); }
+    }
+  }
+  dumateRetry.onclick = () => { if (pendingDuMate) void loadDuMateModels(pendingDuMate); };
+  async function saveDuMateModel(pending, model) {
+    if (!authenticated || restartingDuMate || connecting || disconnecting || pendingDuMate !== pending || !model) return;
+    connecting = true; pending.saving = true; render(); dumateConfirm.disabled = true; dumateRetry.disabled = true;
+    dumateSelect.disabled = true; dumateDialog.querySelector('.dumate-model-cancel').disabled = true;
+    dumateDialog.querySelector('.dumate-model-status').textContent = '正在保存所选模型…';
+    try {
+      const outcome = await invoke('configure_dumate_model', {target:pending.target,model});
+      if (!authenticated || pending.generation !== generation || pendingDuMate !== pending) return;
+      closeDuMateModels(); await refresh(true);
+      if (!authenticated || pending.generation !== generation) return;
+      const {notice,canRestart}=await duMateSavedStatus();
+      if (!authenticated || pending.generation !== generation) return;
+      launchTool='dumate';
+      dialog.querySelector('h3').textContent=pending.preserveBinding ? '模型切换配置已保存' : pending.entry.connection ? '重新接入配置已保存' : '接入配置已保存';
+      dialog.querySelector('.restart-notice').textContent=`所选模型：${model}。${notice}`;
+      dialog.querySelector('.launch').hidden=true;
+      dialog.querySelector('.restart-dumate').hidden=!canRestart;
+      dialog.querySelector('.restart-qwenwork').hidden=true;
+      dialog.querySelector('.close').textContent=canRestart ? '稍后手动重启搭子' : '完成';
+      dialog.querySelector('.launch-error')._restartToken=null;dialog.querySelector('.launch-error').textContent='';dialog.showModal();
+
+    } catch (error) {
+      if (authenticated && pending.generation === generation && pendingDuMate === pending) duMateModelError(error, pending, () => saveDuMateModel(pending, model));
+    } finally {
+      connecting = false; pending.saving = false; dumateRetry.disabled = false; dumateSelect.disabled = false;
+      dumateDialog.querySelector('.dumate-model-cancel').disabled = false; dumateConfirm.disabled = !dumateSelect.value;
+      if (authenticated && pending.generation === generation) render();
+    }
+  }
+  dumateConfirm.onclick = () => { if (pendingDuMate) void saveDuMateModel(pendingDuMate, dumateSelect.value); };
   const supportedConnections = {'claude-code':'Claude Code', codex:'Codex', 'deepseek-harness':'DeepSeek Harness',workbuddy:'WorkBuddy',openclaw:'OpenClaw',opencode:'OpenCode','grok-build':'Grok Build',hermes:'Hermes',pi:'Pi','minimax-code':'MiniMax Code','oh-my-pi':'Oh My Pi','kimi-code':'Kimi Code',dumate:'百度搭子 DuMate（个人版）','dumate-enterprise':'百度搭子 DuMate（企业版）',qwenwork:'千问办公'};
   let launchTool = 'claude-code';
   const dialog = document.createElement('dialog');
-  dialog.innerHTML = '<h3></h3><p class="restart-notice"></p><div class="tool-actions"><button class="primary launch">打开终端运行 Claude Code</button><button class="close">完成</button></div><p class="launch-error" role="status"></p>';
+  dialog.className = 'tool-connect-result-dialog';
+  dialog.innerHTML = '<h3></h3><p class="restart-notice"></p><p class="launch-error error" role="alert"></p><form method="dialog" class="tool-actions"><button class="primary restart-dumate" type="button" hidden>重启搭子</button><button class="primary restart-qwenwork" type="button" hidden>重启千问办公</button><button class="primary launch" type="button">打开终端运行 Claude Code</button><button class="close" type="submit">完成</button></form>';
   document.body.append(dialog);
   document.body.append(disconnectDialog);
-  dialog.querySelector('.close').onclick = () => dialog.close();
+  dialog.addEventListener('close',()=>{
+    const status=dialog.querySelector('.launch-error');
+    if (status._restartToken) { status._restartToken=null;closeRestartConfirmation(); }
+  });
+  dialog.querySelector('.restart-dumate').onclick=()=>restartDuMate(dialog.querySelector('.restart-dumate'),dialog.querySelector('.launch-error'));
+  dialog.querySelector('.restart-qwenwork').onclick=()=>restartQwenWork(dialog.querySelector('.restart-qwenwork'),dialog.querySelector('.launch-error'));
   dialog.querySelector('.launch').onclick = async () => {
     try { await invoke('launch_connected_tool', {tool:launchTool}); dialog.close(); }
     catch(error) { dialog.querySelector('.launch-error').textContent = '打开失败，请联系管理员。'; }
@@ -607,16 +806,17 @@
   window.addEventListener('tokenmarket-connect-request', event => {
     const tool = event.detail.tool;
     if (!supportedConnections[tool]) return;
+    if (tool === 'dumate') { event.preventDefault(); const entry = entries.find(item => item.id === tool); if (entry) void openDuMateModels(entry); return; }
     event.preventDefault(); confirmInitialConnect(tool).catch(() => { if (authenticated) showConnectFailure(); });
   });
   const recoveryDialog = document.createElement('dialog'); recoveryDialog.className = 'recovery-dialog';
   recoveryDialog.innerHTML = '<h3>确认恢复连接</h3><p>本机保存的连接信息已丢失。确认后将重新建立此工具的连接，并在接入成功后替换对应的旧凭证。</p><p class="recovery-scope"></p><p>其他账号、空间和工具的连接不受影响。</p><div class="tool-actions"><button class="recovery-cancel">暂不恢复</button><button class="primary recovery-confirm">确认恢复并接入</button></div>';
   document.body.append(recoveryDialog);
-  recoveryDialog.querySelector('.recovery-cancel').onclick = () => { pendingRecovery = null; recoveryDialog.close(); };
-  recoveryDialog.addEventListener('cancel', () => { pendingRecovery = null; });
+  recoveryDialog.querySelector('.recovery-cancel').onclick = () => { if (pendingRecovery?.resume) closeDuMateModels(); pendingRecovery = null; recoveryDialog.close(); };
+  recoveryDialog.addEventListener('cancel', () => { if (pendingRecovery?.resume) closeDuMateModels(); pendingRecovery = null; });
   recoveryDialog.querySelector('.recovery-confirm').onclick = () => {
     const pending = pendingRecovery; pendingRecovery = null; recoveryDialog.close();
-    if (pending && authenticated && pending.generation === generation) void runConnect(pending.tool, pending.replacement, pending.target);
+    if (pending && authenticated && pending.generation === generation) { if (pending.resume) pending.resume(); else void runConnect(pending.tool, pending.replacement, pending.target); }
   };
   window.addEventListener('current-workspace-changed', () => { pendingRecovery = null; if (recoveryDialog.open) recoveryDialog.close(); });
   async function runConnect(tool, replacement = null, recovery = null) {
@@ -635,11 +835,22 @@
       await refresh(true);
       if (!authenticated || actionGeneration !== generation) return;
       feedback('');
+      const qwenworkStatus=tool==='qwenwork' ? await qwenWorkSavedStatus() : null;
+      if (!authenticated || actionGeneration !== generation) return;
       launchTool = tool;
+      dialog.querySelector('.launch-error')._restartToken=null;
+      dialog.querySelector('.restart-dumate').hidden=true;
+      dialog.querySelector('.restart-qwenwork').hidden=!qwenworkStatus?.canRestart;
+      dialog.querySelector('.launch').hidden=false;
+      dialog.querySelector('.close').textContent='完成';
       dialog.querySelector('h3').textContent = `${name} 已接入`;
+      if (tool==='qwenwork') {
+        dialog.querySelector('h3').textContent=replacement ? '重新接入配置已保存' : '接入配置已保存';
+        dialog.querySelector('.close').textContent=qwenworkStatus.canRestart ? '稍后手动重启千问办公' : '完成';
+      }
       const guidance = {
         'deepseek-harness':'请重新打开所选 profile。',
-        qwenwork:'请重新打开千问办公，在模型列表中选择 Token Market 模型。',
+        qwenwork:qwenworkStatus ? `${qwenworkStatus.notice}打开后，在模型列表中选择 Token Market 模型。` : '',
         workbuddy:'请完全退出并重新打开 WorkBuddy，在模型列表中选择 Token Market 模型。',
         openclaw:'请重启 OpenClaw Gateway 并重新打开会话。',
         opencode:'请重新打开 OpenCode，在模型列表中选择 Token Market 模型。',
@@ -653,6 +864,7 @@
         hermes:'请重新启动 Hermes，通过 /model 选择 Token Market 模型。',
       };
       dialog.querySelector('.restart-notice').textContent = guidance[tool] || `请重新启动 ${name}。`;
+      dialog.querySelector('.launch').hidden = tool==='qwenwork';
       dialog.querySelector('.launch').textContent = ['deepseek-harness','workbuddy','dumate','dumate-enterprise','qwenwork'].includes(tool) ? `打开 ${name}` : `打开工具 / 终端运行 ${name}`;
       dialog.querySelector('.launch-error').textContent = ''; dialog.showModal();
     } catch(error) {
@@ -755,7 +967,7 @@
         const success = await refresh(true);
         if (!authenticated || current !== generation) return;
         if (!success) throw Error('本机工具检测失败，请稍后重试');
-        const result = await invoke('check_tool_updates');
+        const result = (await invoke('check_tool_updates')).filter(update => isVisibleTool(update.tool));
         if (!authenticated || current !== generation) return;
         updates = new Map(result.map(update => [update.tool, update]));
         const installed = result.filter(update => update.state !== 'not_installed');
@@ -784,6 +996,7 @@
       root.hidden = !value;
       if (value === authenticated) return;
       authenticated = value; generation += 1;
+      closeRestartConfirmation();
       if (!value && installDialog.open) installDialog.close();
       if (uninstallDialog.open) uninstallDialog.close();
       window.dispatchEvent(new CustomEvent('tokenmarket-tools-auth', {detail:{authenticated:value}}));
@@ -791,7 +1004,7 @@
       if (upgradeConfirm.open) upgradeConfirm.close();
       batchStop = true; if (batchDialog.open) batchDialog.close();
       if (value) void checkUpdates();
-      else { pendingRecovery = null; if (recoveryDialog.open) recoveryDialog.close(); if (disconnectConfirm.open) disconnectConfirm.close(); if (resultDialog.open) resultDialog.close(); if (reconnectDialog.open) reconnectDialog.close(); pendingReconnect = null; if (dialog.open) dialog.close(); if (disconnectDialog.open) disconnectDialog.close(); pendingDisconnect = null; entries = []; selectedTool = null; detailRoot.replaceChildren(); pendingConnect = null; if (connectDialog.open) connectDialog.close(); list.replaceChildren(); feedback(''); }
+      else { closeDuMateModels(); pendingRecovery = null; if (recoveryDialog.open) recoveryDialog.close(); if (disconnectConfirm.open) disconnectConfirm.close(); if (resultDialog.open) resultDialog.close(); if (reconnectDialog.open) reconnectDialog.close(); pendingReconnect = null; if (dialog.open) dialog.close(); if (disconnectDialog.open) disconnectDialog.close(); pendingDisconnect = null; entries = []; selectedTool = null; detailRoot.replaceChildren(); pendingConnect = null; if (connectDialog.open) connectDialog.close(); list.replaceChildren(); feedback(''); }
     },
   };
 })();

@@ -11,10 +11,27 @@ pub(super) struct QwenWorkConfig {
     dotenv: PathBuf,
     env_before: Option<Vec<u8>>,
     runtime: Option<crate::qwenwork_runtime::RuntimeInstallation>,
+    route_path: Option<PathBuf>,
 }
 impl QwenWorkConfig {
     pub fn set_runtime(&mut self, runtime: crate::qwenwork_runtime::RuntimeInstallation) {
         self.runtime = Some(runtime);
+    }
+    pub fn preserve_route(&mut self, previous: Option<&super::ConnectionRecord>) {
+        self.route_path = previous
+            .and_then(|record| {
+                record.receipts.iter().find(|receipt| {
+                    receipt
+                        .path
+                        .to_string_lossy()
+                        .ends_with(".tokenmarket.json")
+                        && receipt
+                            .fields
+                            .iter()
+                            .any(|field| !field.retired && field.pointer == "/capability")
+                })
+            })
+            .map(|receipt| receipt.path.clone());
     }
     pub fn credential(&self, gateway: &str) -> Result<Option<String>> {
         let endpoint = format!("{}/v1/chat/completions", gateway.trim_end_matches('/'));
@@ -81,6 +98,7 @@ impl QwenWorkConfig {
             dotenv,
             env_before,
             runtime: None,
+            route_path: None,
         })
     }
 
@@ -175,25 +193,104 @@ impl QwenWorkConfig {
             retired: false,
         });
         env["QW_QODER_WORKER_RUNTIME_PATH"] = json!(worker);
-        let env_bytes = crate::qwenwork::render_dotenv(
-            self.env_before.as_deref(),
-            &env,
-            &[
-                "/ALLOW_CUSTOM_BYOK".into(),
-                "/QW_QODER_WORKER_RUNTIME_PATH".into(),
-            ],
-        )?;
+        let route_path = self.route_path.clone().unwrap_or_else(|| {
+            self.dotenv
+                .with_file_name("tokenmarket-desktop.tokenmarket.json")
+        });
+        let route_before = super::configuration_io::read(&route_path)?;
+        let route_before_value: Value = route_before
+            .as_deref()
+            .and_then(|bytes| serde_json::from_slice(bytes).ok())
+            .unwrap_or(json!({}));
+        let available: std::collections::BTreeSet<_> = models
+            .iter()
+            .filter_map(|model| model["id"].as_str())
+            .collect();
+        let default = option_env!("TOKEN_MARKET_BUILD_DESKTOP_DEFAULT_MODEL").unwrap_or("glm-5.3");
+        // Keep the selected auxiliary model across refreshes. API catalogue
+        // ordering must not silently change model behavior or billing.
+        let auxiliary = route_before_value["default_model"]
+            .as_str()
+            .filter(|model| available.contains(model))
+            .or_else(|| available.get(default).copied())
+            .or_else(|| available.first().copied())
+            .context("千问办公缺少可用模型")?;
+        let port = std::net::TcpListener::bind("127.0.0.1:0")?
+            .local_addr()?
+            .port();
+        let route = crate::qwenwork_runtime::HostRoute {
+            fingerprint: crate::qwenwork_runtime::fingerprint(key),
+            default_model: auxiliary.into(),
+            port,
+            capability: crate::auth::create_pkce().code_verifier,
+        };
+        route.validate()?;
+        let route_value = serde_json::to_value(&route)?;
+        let mut touched = vec![
+            "/ALLOW_CUSTOM_BYOK".into(),
+            "/QW_QODER_WORKER_RUNTIME_PATH".into(),
+        ];
+        for (name, value) in [
+            (
+                "ENGINE_MAAS_MINT_URL",
+                format!("{}/api/desktop-sessions", route.base_url()),
+            ),
+            (
+                crate::qwenwork_runtime::ROUTE_ENV,
+                route_path.to_str().context("本地路由路径无效")?.into(),
+            ),
+            // An unpatched native ProcessTransport fallback must fail closed.
+            // Login/account APIs use a different endpoint and are unaffected.
+            (
+                "QODERCN_SERVER_ENDPOINT",
+                "https://tokenmarket.local.invalid".into(),
+            ),
+        ] {
+            let pointer = format!("/{name}");
+            env_fields.push(FieldReceipt {
+                pointer: pointer.clone(),
+                before: env.get(name).cloned().filter(|value| {
+                    !value
+                        .as_str()
+                        .is_some_and(|s| crate::qwenwork_runtime::is_managed_env_value(name, s))
+                }),
+                applied: json!(value),
+                retired: false,
+            });
+            env[name] = json!(value);
+            touched.push(pointer);
+        }
+        let env_bytes = crate::qwenwork::render_dotenv(self.env_before.as_deref(), &env, &touched)?;
         Ok(PreparedConfiguration {
             bytes: serde_json::to_vec(&self.value)?,
             fields,
             created_containers: vec![],
-            additional_files: vec![PreparedFile {
-                path: self.dotenv.clone(),
-                before: self.env_before.clone(),
-                bytes: env_bytes,
-                fields: env_fields,
-                created_containers: vec![],
-            }],
+            additional_files: vec![
+                PreparedFile {
+                    path: self.dotenv.clone(),
+                    before: self.env_before.clone(),
+                    bytes: env_bytes,
+                    fields: env_fields,
+                    created_containers: vec![],
+                },
+                PreparedFile {
+                    path: route_path,
+                    before: route_before,
+                    bytes: serde_json::to_vec_pretty(&route)?,
+                    fields: route_value
+                        .as_object()
+                        .unwrap()
+                        .iter()
+                        .map(|(name, applied)| FieldReceipt {
+                            pointer: format!("/{name}"),
+                            before: route_before_value.get(name).cloned(),
+                            applied: applied.clone(),
+                            retired: false,
+                        })
+                        .collect(),
+                    created_containers: vec![],
+                },
+            ],
             protocol: "OPENAI_CHAT_COMPLETIONS",
         })
     }

@@ -1,0 +1,51 @@
+{
+  "date": "2026-11-06",
+  "status": "cross-compiled-native-device-validation-pending",
+  "platform": "Windows x64",
+  "vendor_version": "1.0.89.447",
+  "vendor_artifact": "https://dumate-app-public.cdn.bcebos.com/release-info/artifacts-update/DuMate-Setup-1.0.89-x64.exe",
+  "vendor_sha512_base64": "tPeZQ3mTubmQhMFP5AtYqCDD/KWOkLYNpfPyYUU/lohXoXtd1HMnsrtCb7VDePdzQ35C67HprDMVpgr52FEBbw==",
+  "vendor_static_evidence": {
+    "installer_hash_verified": true,
+    "package_identity": "qianfan-desktop-app",
+    "version": "1.0.89",
+    "buildVersion": "447",
+    "global_task_endpoint": "GET /sandbox/has-active-session; SessionStatus.listAll(), before directory middleware",
+    "electron_window_close": "hides instead of quitting",
+    "engine_environment": "same launch credentials and account scope as macOS"
+  },
+  "implementation": {
+    "configuration_save": "unchanged, separate from restart",
+    "dialogs": "same restart/later and force/cancel flow",
+    "identity": "same user SID, executable path, parent PID, process creation time, account configuration and runtime mode",
+    "task_query": "authenticated loopback global endpoint; no proxy, redirect, secret logging or credential file",
+    "shutdown": "Windows Restart Manager; exact PID+creation time registration; affected set must be a subset; flags=0; no RmForceShutdown",
+    "completion": "wait captured handles and known app/backend processes; never open replacement while running",
+    "failure": "manual restart; saved configuration retained",
+    "engine_shutdown": "Authenticated POST /global/shutdown before Restart Manager; abort host sessions and close DB using vendor contract."
+  },
+  "verification": {
+    "host_restart_contract_and_loopback_http_tests": 8,
+    "desktop_dumate_tests": 13,
+    "windows_core_test_binary": "linked with native fixture tests included; not executed on Windows",
+    "windows_desktop_check": "passed",
+    "windows_cli_check": "passed",
+    "native_fixture": "opt-in test closes only its own temporary window; pending Windows execution",
+    "core_configuration_integration_tests": 80,
+    "isolated_macos_engine_native_probe": {
+      "official_engine_shutdown_api_exit_verified": true,
+      "official_engine_idle_busy_idle_verified": true,
+      "global_check_includes_other_projects": true,
+      "external_network": "denied",
+      "real_user_data": "denied",
+      "real_app_restarted": false
+    },
+    "windows_installer": "Tauri NSIS cross-bundling succeeded; final payload validation recorded with build"
+  },
+  "limitations": [
+    "No Windows device or VM available in this session.",
+    "No real DuMate process restarted or task interrupted.",
+    "No paid model request.",
+    "Only verified personal local engine runtime 1.0.89.447; other modes or versions use manual guidance."
+  ]
+}

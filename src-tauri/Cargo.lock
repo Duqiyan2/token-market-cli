@@ -4529,6 +4529,7 @@ dependencies = [
  "tokio",
  "toml_edit 0.23.10+spec-1.0.0",
  "url",
+ "windows-sys 0.61.2",
  "winreg 0.55.0",
 ]
 

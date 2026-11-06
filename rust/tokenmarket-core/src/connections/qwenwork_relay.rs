@@ -16,9 +16,13 @@ use tokio::{
 
 const MAX_BODY: usize = 16 * 1024 * 1024;
 const MAX_HEADERS: usize = 16 * 1024;
+mod host;
 
 pub fn is_invocation() -> bool {
-    std::env::args().nth(1).as_deref() == Some("__qwenwork-relay")
+    matches!(
+        std::env::args().nth(1).as_deref(),
+        Some("__qwenwork-relay" | "__qwenwork-host-relay")
+    )
 }
 pub fn run_blocking() -> Result<()> {
     tokio::runtime::Builder::new_multi_thread()
@@ -28,6 +32,9 @@ pub fn run_blocking() -> Result<()> {
 }
 pub async fn run_stdio() -> Result<()> {
     let args: Vec<_> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("__qwenwork-host-relay") {
+        return host::run(&args).await;
+    }
     if args.len() != 3 || args[2].len() != 64 || !args[2].bytes().all(|c| c.is_ascii_hexdigit()) {
         bail!("本地代理参数无效")
     }
@@ -57,6 +64,7 @@ fn active_record(manager: &ConnectionManager, expected: &str) -> Result<Connecti
     if record.credential().is_empty()
         || !manager.matches_environment(&record)
         || qwenwork_runtime::fingerprint(record.credential()) != expected
+        || super::restore::verify_applied(&record).is_err()
     {
         bail!("千问办公连接已改变，请重新接入")
     }
@@ -82,6 +90,9 @@ async fn serve(
     mut stop: tokio::sync::oneshot::Receiver<()>,
 ) -> Result<()> {
     let host = listener.local_addr()?.to_string();
+    // Saved changes take effect on restart. Existing workers keep the
+    // connection they loaded; fresh relays still validate current saved state.
+    let record = Arc::new(active_record(&manager, &fingerprint)?);
     let client = reqwest::Client::builder()
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
@@ -101,10 +112,10 @@ async fn serve(
                     Ok(permit) => permit,
                     Err(_) => { let _=error(&mut socket,429,"Local relay is busy").await; continue }
                 };
-                let (manager, fingerprint, token, host, client) = (manager.clone(),fingerprint.clone(),token.clone(),host.clone(),client.clone());
+                let (record, token, host, client) = (record.clone(),token.clone(),host.clone(),client.clone());
                 tasks.spawn(async move {
                     let _permit = permit;
-                    let _ = handle(&mut socket, &manager, &fingerprint, &token, &host, &client).await;
+                    let _ = handle(&mut socket, &record, &token, &host, &client).await;
                 });
             }
         }
@@ -120,6 +131,8 @@ fn same_secret(actual: &[u8], expected: &[u8]) -> bool {
             == 0
 }
 struct Request {
+    method: String,
+    path: String,
     headers: Vec<(String, String)>,
     body: Vec<u8>,
 }
@@ -144,9 +157,16 @@ async fn request(socket: &mut TcpStream) -> Result<Request> {
     }
     let text = std::str::from_utf8(&bytes[..end])?;
     let mut lines = text.split("\r\n");
-    if lines.next() != Some("POST /v1/chat/completions HTTP/1.1") {
-        bail!("unsupported route")
+    let parts: Vec<_> = lines
+        .next()
+        .context("missing request line")?
+        .split(' ')
+        .collect();
+    if parts.len() != 3 || parts[2] != "HTTP/1.1" {
+        bail!("unsupported request")
     }
+    let method = parts[0].to_owned();
+    let path = parts[1].to_owned();
     let mut headers = vec![];
     for line in lines {
         let (name, value) = line.split_once(':').context("invalid header")?;
@@ -162,9 +182,9 @@ async fn request(socket: &mut TcpStream) -> Result<Request> {
     let length = headers
         .iter()
         .find(|(k, _)| k == "content-length")
-        .context("missing length")?
-        .1
-        .parse::<usize>()?;
+        .map(|h| h.1.parse::<usize>())
+        .transpose()?
+        .unwrap_or(0);
     if length > MAX_BODY {
         bail!("request too large")
     }
@@ -180,7 +200,12 @@ async fn request(socket: &mut TcpStream) -> Result<Request> {
         }
         body.extend_from_slice(&buffer[..n]);
     }
-    Ok(Request { headers, body })
+    Ok(Request {
+        method,
+        path,
+        headers,
+        body,
+    })
 }
 
 async fn error(socket: &mut TcpStream, status: u16, message: &str) -> Result<()> {
@@ -191,8 +216,7 @@ async fn error(socket: &mut TcpStream, status: u16, message: &str) -> Result<()>
 
 async fn handle(
     socket: &mut TcpStream,
-    manager: &ConnectionManager,
-    fingerprint: &str,
+    record: &ConnectionRecord,
     token: &str,
     host: &str,
     client: &reqwest::Client,
@@ -201,6 +225,9 @@ async fn handle(
         Ok(Ok(r)) => r,
         _ => return error(socket, 400, "Invalid local relay request").await,
     };
+    if request.method != "POST" || request.path != "/v1/chat/completions" {
+        return error(socket, 404, "Unsupported local model route").await;
+    }
     let header = |name: &str| {
         request
             .headers
@@ -217,10 +244,6 @@ async fn handle(
     {
         return error(socket, 403, "Local relay authorization failed").await;
     }
-    let record = match active_record(manager, fingerprint) {
-        Ok(record) => record,
-        Err(_) => return error(socket, 409, "Connection changed; reconnect the tool").await,
-    };
     let body: Value = match serde_json::from_slice(&request.body) {
         Ok(value) => value,
         Err(_) => return error(socket, 400, "Invalid model request").await,
@@ -233,16 +256,25 @@ async fn handle(
     {
         return error(socket, 403, "Model is outside this connection").await;
     }
-    let endpoint = format!(
-        "{}/v1/chat/completions",
-        record.gateway_url.trim_end_matches('/')
-    );
-    let outbound = client
+    forward(socket, record, request.body, client, "/v1/chat/completions").await
+}
+
+async fn forward(
+    socket: &mut TcpStream,
+    record: &ConnectionRecord,
+    body: Vec<u8>,
+    client: &reqwest::Client,
+    path: &str,
+) -> Result<()> {
+    let endpoint = format!("{}{path}", record.gateway_url.trim_end_matches('/'));
+    let mut outbound = client
         .post(endpoint)
         .bearer_auth(record.credential())
-        .header("Content-Type", "application/json")
-        .body(request.body)
-        .send();
+        .header("Content-Type", "application/json");
+    if path == "/v1/messages" {
+        outbound = outbound.header("anthropic-version", "2023-06-01");
+    }
+    let outbound = outbound.body(body).send();
     // An aborted SDK request must also drop the upstream operation, including
     // while it is waiting for headers or the next stream event.
     let mut extra = [0u8; 1];
@@ -360,13 +392,15 @@ mod tests {
             Ok(())
         }
     }
-    fn seed(directory: &std::path::Path, gateway: &str) -> Arc<ConnectionManager> {
+    pub(super) fn seed(directory: &std::path::Path, gateway: &str) -> Arc<ConnectionManager> {
         let manager = Arc::new(ConnectionManager::with_credentials(
             directory.into(),
             "https://console.fixture".into(),
             gateway.into(),
             Arc::new(Vault::default()),
         ));
+        let proof = directory.join("proof.json");
+        std::fs::write(&proof, br#"{"model":"fixture-model"}"#).unwrap();
         let record = ConnectionRecord {
             version: 2,
             connection_id: "fixture".into(),
@@ -388,7 +422,18 @@ mod tests {
             platform_url: "https://console.fixture".into(),
             created_at: "fixture".into(),
             configuration_location: None,
-            receipts: vec![],
+            receipts: vec![super::super::FileReceipt {
+                path: proof,
+                existed: false,
+                backup_path: None,
+                created_containers: vec![],
+                fields: vec![super::super::FieldReceipt {
+                    pointer: "/model".into(),
+                    before: None,
+                    applied: json!("fixture-model"),
+                    retired: false,
+                }],
+            }],
             api_key: "sk-platform-key-never-given-to-qwen".into(),
         };
         manager
@@ -413,27 +458,29 @@ mod tests {
         }
     }
     #[tokio::test]
-    async fn only_the_trusted_upstream_receives_the_key_and_revoked_connections_stop() {
+    async fn saved_disconnect_preserves_running_worker_but_prevents_fresh_relays() {
         let upstream = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let gateway = format!("http://{}", upstream.local_addr().unwrap());
         let hits = Arc::new(AtomicUsize::new(0));
         let hit_count = hits.clone();
         let fixture = tokio::spawn(async move {
-            let (mut stream, _) = upstream.accept().await.unwrap();
-            let received = request(&mut stream).await.unwrap();
-            assert_eq!(
-                received
-                    .headers
-                    .iter()
-                    .find(|(n, _)| n == "authorization")
-                    .unwrap()
-                    .1,
-                "Bearer sk-platform-key-never-given-to-qwen"
-            );
-            assert!(!String::from_utf8_lossy(&received.body).contains("sk-platform-key"));
-            hit_count.fetch_add(1, Ordering::SeqCst);
-            let body="data: {\"content\":\"OK sk-platform-key-never-given-to-qwen\"}\n\ndata: [DONE]\n\n";
-            stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
+            for _ in 0..2 {
+                let (mut stream, _) = upstream.accept().await.unwrap();
+                let received = request(&mut stream).await.unwrap();
+                assert_eq!(
+                    received
+                        .headers
+                        .iter()
+                        .find(|(n, _)| n == "authorization")
+                        .unwrap()
+                        .1,
+                    "Bearer sk-platform-key-never-given-to-qwen"
+                );
+                assert!(!String::from_utf8_lossy(&received.body).contains("sk-platform-key"));
+                hit_count.fetch_add(1, Ordering::SeqCst);
+                let body="data: {\"content\":\"OK sk-platform-key-never-given-to-qwen\"}\n\ndata: [DONE]\n\n";
+                stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
+            }
         });
         let temp = tempfile::tempdir().unwrap();
         let manager = seed(temp.path(), &gateway);
@@ -493,7 +540,6 @@ mod tests {
         let output = response.text().await.unwrap();
         assert!(output.contains("OK [REDACTED]"));
         assert!(!output.contains("sk-platform-key"));
-        fixture.await.unwrap();
         assert_eq!(hits.load(Ordering::SeqCst), 1);
         manager
             .private
@@ -508,8 +554,15 @@ mod tests {
                 .await
                 .unwrap()
                 .status(),
-            409
+            200
         );
+        fixture.await.unwrap();
+        assert_eq!(hits.load(Ordering::SeqCst), 2);
+        assert!(active_record(
+            &manager,
+            &qwenwork_runtime::fingerprint("sk-platform-key-never-given-to-qwen")
+        )
+        .is_err());
         stop.send(()).unwrap();
         relay.await.unwrap().unwrap();
     }

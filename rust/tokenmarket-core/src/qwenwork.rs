@@ -82,11 +82,11 @@ pub(crate) fn require_ready(home: &Path, platform: HostPlatform) -> Result<()> {
     }
     let status: Value = serde_json::from_slice(
         &fs::read(home.join(".qwenworkcn/.status.json"))
-            .context("请先打开千问办公并登录，再完全退出后接入")?,
+            .context("请先打开千问办公并登录，再返回接入")?,
     )
     .context("千问办公登录状态无法确认，请重新登录后接入")?;
     if status["logged_in"] != true || status["product"] != "qwenworkcn" {
-        bail!("请先在千问办公完成登录，再完全退出后接入")
+        bail!("请先在千问办公完成登录，再返回接入")
     }
     let db = database_path(home, platform);
     if db.with_file_name("agents.identity-v2.db").exists()
@@ -98,44 +98,6 @@ pub(crate) fn require_ready(home: &Path, platform: HostPlatform) -> Result<()> {
         )
     }
     read_snapshot(&db)?;
-    Ok(())
-}
-
-/// Never stop a user's running app. Fixtures in a separate home have no live cache.
-pub(crate) fn require_stopped(database: &Path) -> Result<()> {
-    let platform = if cfg!(target_os = "macos") {
-        HostPlatform::MacOs
-    } else if cfg!(windows) {
-        HostPlatform::Windows
-    } else {
-        HostPlatform::Unix
-    };
-    if database != database_path(&crate::config::home_dir(), platform) {
-        return Ok(());
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let status = std::process::Command::new("/usr/bin/pgrep")
-            .args(["-f", "/QwenWorkCN.app/Contents/"])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .context("无法确认千问办公是否已退出")?;
-        if status.code() != Some(1) {
-            bail!("请先完全退出千问办公（含后台进程），再接入或取消接入")
-        }
-    }
-    #[cfg(windows)]
-    {
-        let status = std::process::Command::new("powershell.exe").args([
-            "-NoProfile", "-NonInteractive", "-Command",
-            "$ErrorActionPreference='Stop'; if (Get-Process -Name QwenWorkCN -ErrorAction SilentlyContinue) { exit 2 }; exit 0",
-        ]).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status()
-            .context("无法确认千问办公是否已退出")?;
-        if !status.success() {
-            bail!("请先完全退出千问办公，再接入或取消接入")
-        }
-    }
     Ok(())
 }
 
@@ -158,11 +120,59 @@ fn open(path: &Path, write: bool) -> Result<Connection> {
     let db = Connection::open_with_flags(path, flags)
         .context("无法打开千问办公数据库，请先登录初始化客户端")?;
     db.busy_timeout(Duration::from_secs(5))?;
-    let columns: Vec<String> = db
-        .prepare("PRAGMA table_info(byok_custom_models)")?
-        .query_map([], |r| r.get(1))?
+    let columns: Vec<(String, String, bool, Option<String>, i64, i64)> = db
+        .prepare("PRAGMA table_xinfo(byok_custom_models)")?
+        .query_map([], |r| {
+            Ok((
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+                r.get(6)?,
+            ))
+        })?
         .collect::<rusqlite::Result<_>>()?;
-    if columns != COLUMNS {
+    let known_compatible = COLUMNS.iter().all(|name| {
+        columns.iter().any(|(column, kind, _, _, pk, hidden)| {
+            let kind = kind.to_ascii_uppercase();
+            let integer = matches!(
+                *name,
+                "is_vl"
+                    | "is_reasoning"
+                    | "max_input_tokens"
+                    | "max_output_tokens"
+                    | "created_at"
+                    | "updated_at"
+            );
+            column == name
+                && *hidden == 0
+                && (*name != "key" || *pk == 1)
+                && if integer {
+                    kind.contains("INT")
+                } else {
+                    kind.contains("CHAR") || kind.contains("CLOB") || kind.contains("TEXT")
+                }
+        })
+    });
+    let extra_compatible = columns
+        .iter()
+        .all(|(name, _, required, default, pk, hidden)| {
+            if *pk > 0 && name != "key" {
+                return false;
+            }
+            COLUMNS.contains(&name.as_str())
+                || *hidden >= 2
+                || !required
+                || default.as_ref().is_some_and(|value| {
+                    !value
+                        .trim()
+                        .trim_matches(['(', ')'])
+                        .trim()
+                        .eq_ignore_ascii_case("null")
+                })
+        });
+    if !known_compatible || !extra_compatible {
         bail!(
             "{}（模型数据库结构已改变）",
             crate::qwenwork_runtime::ADAPTATION_REQUIRED
@@ -208,7 +218,6 @@ pub(crate) fn read_snapshot(path: &Path) -> Result<Vec<u8>> {
 /// Compare and apply the row delta while holding SQLite's write transaction.
 /// Other tables and unchanged providers never receive UPDATE/DELETE statements.
 pub(crate) fn write_snapshot(path: &Path, expected: &[u8], after: &[u8]) -> Result<()> {
-    require_stopped(path)?;
     let before: Value = serde_json::from_slice(expected)?;
     let after: Value = serde_json::from_slice(after)?;
     let old = before["models"]
@@ -275,9 +284,7 @@ pub(crate) fn parse_dotenv(bytes: Option<&[u8]>) -> Result<Value> {
         }
         if let Some((name, content)) = line.split_once('=') {
             let name = name.trim();
-            if matches!(name, "ALLOW_CUSTOM_BYOK" | "QW_QODER_WORKER_RUNTIME_PATH")
-                && value.contains_key(name)
-            {
+            if managed_env(name) && value.contains_key(name) {
                 bail!("千问办公 .env 存在重复 BYOK 开关，请先合并配置")
             }
             value.insert(name.into(), json!(content.trim()));
@@ -302,7 +309,7 @@ pub(crate) fn render_dotenv(
         let key = pointer
             .strip_prefix('/')
             .context("千问办公 .env 恢复字段无效")?;
-        if !matches!(key, "ALLOW_CUSTOM_BYOK" | "QW_QODER_WORKER_RUNTIME_PATH") {
+        if !managed_env(key) {
             bail!("拒绝修改其他千问办公环境变量")
         }
         if value
@@ -350,9 +357,150 @@ pub(crate) fn render_dotenv(
     Ok(text.into_bytes())
 }
 
+pub(crate) fn managed_env(name: &str) -> bool {
+    matches!(
+        name,
+        "ALLOW_CUSTOM_BYOK"
+            | "QW_QODER_WORKER_RUNTIME_PATH"
+            | "ENGINE_MAAS_MINT_URL"
+            | "TOKENMARKET_QWENWORK_ROUTE"
+            | "QODERCN_SERVER_ENDPOINT"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wal_readers_can_continue_while_connection_changes_are_saved() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("agents.db");
+        let mut native = Connection::open(&path).unwrap();
+        native.pragma_update(None, "journal_mode", "WAL").unwrap();
+        native
+            .execute_batch(include_str!("../tests/fixtures/qwenwork-schema.sql"))
+            .unwrap();
+        native.execute("INSERT INTO byok_custom_models(key,display_name,model) VALUES ('byok-user','User','local')",[]).unwrap();
+        let before = read_snapshot(&path).unwrap();
+        let mut after: Value = serde_json::from_slice(&before).unwrap();
+        let mut row = after["models"]["byok-user"].clone();
+        row["key"] = json!("byok-tokenmarket-fixture");
+        after["models"]["byok-tokenmarket-fixture"] = row;
+        let reader = native.transaction().unwrap();
+        assert_eq!(
+            reader
+                .query_row("SELECT count(*) FROM byok_custom_models", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        write_snapshot(&path, &before, &serde_json::to_vec(&after).unwrap()).unwrap();
+        assert_eq!(
+            reader
+                .query_row("SELECT count(*) FROM byok_custom_models", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        reader.commit().unwrap();
+        assert_eq!(
+            native
+                .query_row("SELECT count(*) FROM byok_custom_models", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+        write_snapshot(&path, &serde_json::to_vec(&after).unwrap(), &before).unwrap();
+        assert_eq!(
+            native
+                .query_row("SELECT count(*) FROM byok_custom_models", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn additive_and_reordered_schemas_preserve_native_fields() {
+        for case in ["nullable", "defaulted", "reordered"] {
+            let root = tempfile::tempdir().unwrap();
+            let path = root.path().join("agents.db");
+            let db = Connection::open(&path).unwrap();
+            let mut schema = include_str!("../tests/fixtures/qwenwork-schema.sql").to_owned();
+            if case == "reordered" {
+                schema = schema.replace("\t`legacy_key` text,\n", "").replace(
+                    "\t`updated_at` integer\n",
+                    "\t`updated_at` integer,\n\t`legacy_key` text\n",
+                );
+            }
+            db.execute_batch(&schema).unwrap();
+            db.execute_batch(if case == "defaulted" {
+                "ALTER TABLE byok_custom_models ADD COLUMN native_metadata TEXT NOT NULL DEFAULT 'native-default'"
+            } else { "ALTER TABLE byok_custom_models ADD COLUMN native_metadata TEXT" }).unwrap();
+            db.execute("INSERT INTO byok_custom_models(key,display_name,model,native_metadata) VALUES ('byok-user','User','local','user-owned')",[]).unwrap();
+            let before = read_snapshot(&path).unwrap();
+            let mut after: Value = serde_json::from_slice(&before).unwrap();
+            let mut managed = after["models"]["byok-user"].clone();
+            managed["key"] = json!("byok-tokenmarket-fixture");
+            after["models"]["byok-tokenmarket-fixture"] = managed;
+            write_snapshot(&path, &before, &serde_json::to_vec(&after).unwrap()).unwrap();
+            db.execute("UPDATE byok_custom_models SET native_metadata='native-owned' WHERE key='byok-tokenmarket-fixture'",[]).unwrap();
+            let before = read_snapshot(&path).unwrap();
+            let mut after: Value = serde_json::from_slice(&before).unwrap();
+            after["models"]["byok-tokenmarket-fixture"]["model"] = json!("updated-model");
+            write_snapshot(&path, &before, &serde_json::to_vec(&after).unwrap()).unwrap();
+            assert_eq!(
+                db.query_row(
+                    "SELECT native_metadata FROM byok_custom_models WHERE key='byok-user'",
+                    [],
+                    |r| r.get::<_, String>(0)
+                )
+                .unwrap(),
+                "user-owned"
+            );
+            assert_eq!(db.query_row("SELECT native_metadata FROM byok_custom_models WHERE key='byok-tokenmarket-fixture'",[],|r|r.get::<_,String>(0)).unwrap(),"native-owned");
+        }
+    }
+
+    #[test]
+    fn generated_native_columns_follow_model_updates_without_being_written() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("agents.db");
+        let db = Connection::open(&path).unwrap();
+        db.execute_batch(include_str!("../tests/fixtures/qwenwork-schema.sql"))
+            .unwrap();
+        db.execute_batch("ALTER TABLE byok_custom_models ADD COLUMN native_metadata TEXT GENERATED ALWAYS AS (model || '-native') VIRTUAL").unwrap();
+        db.execute("INSERT INTO byok_custom_models(key,display_name,model) VALUES ('byok-user','User','local')",[]).unwrap();
+        let before = read_snapshot(&path).unwrap();
+        let mut after: Value = serde_json::from_slice(&before).unwrap();
+        let mut row = after["models"]["byok-user"].clone();
+        row["key"] = json!("byok-tokenmarket-fixture");
+        row["model"] = json!("fixture-model");
+        after["models"]["byok-tokenmarket-fixture"] = row;
+        write_snapshot(&path, &before, &serde_json::to_vec(&after).unwrap()).unwrap();
+        assert_eq!(db.query_row("SELECT native_metadata FROM byok_custom_models WHERE key='byok-tokenmarket-fixture'",[],|r|r.get::<_,String>(0)).unwrap(),"fixture-model-native");
+    }
+
+    #[test]
+    fn incompatible_required_fields_types_and_keys_are_rejected_before_writes() {
+        let original = include_str!("../tests/fixtures/qwenwork-schema.sql");
+        for schema in [
+            format!("{original}\nALTER TABLE byok_custom_models ADD COLUMN required_native TEXT NOT NULL"),
+            format!("{original}\nALTER TABLE byok_custom_models ADD COLUMN required_native TEXT NOT NULL DEFAULT NULL"),
+            original.replace("`model` text NOT NULL", "`model` blob NOT NULL"),
+            original.replace("`model` text NOT NULL", "`renamed_model` text NOT NULL"),
+            original.replace("`key` text PRIMARY KEY NOT NULL", "`key` text NOT NULL")
+                .replace("`updated_at` integer\n", "`updated_at` integer,\n PRIMARY KEY(key,legacy_key)\n"),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let path = root.path().join("agents.db");
+            let db = Connection::open(&path).unwrap();
+            db.execute_batch(&schema).unwrap();
+            assert!(read_snapshot(&path).unwrap_err().to_string().contains("结构已改变"));
+            assert_eq!(db.query_row("SELECT count(*) FROM byok_custom_models",[],|r|r.get::<_,i64>(0)).unwrap(),0);
+        }
+    }
 
     #[test]
     fn sqlite_delta_is_atomic_and_never_updates_an_unowned_provider() {

@@ -16,6 +16,38 @@ use contract::{Contract, DISPATCH};
 
 pub const MODEL_ENDPOINT: &str = "https://tokenmarket.local.invalid/v1/chat/completions";
 pub const CREDENTIAL_PREFIX: &str = "tokenmarket-local-v2:";
+pub const ROUTE_ENV: &str = "TOKENMARKET_QWENWORK_ROUTE";
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct HostRoute {
+    pub fingerprint: String,
+    pub default_model: String,
+    pub port: u16,
+    pub capability: String,
+}
+impl HostRoute {
+    pub fn base_url(&self) -> String {
+        format!(
+            "http://127.0.0.1:{}/tokenmarket/{}",
+            self.port, self.capability
+        )
+    }
+    pub fn validate(&self) -> Result<()> {
+        if self.port == 0
+            || self.default_model.is_empty()
+            || self.fingerprint.len() != 64
+            || !self.fingerprint.bytes().all(|c| c.is_ascii_hexdigit())
+            || !(40..=128).contains(&self.capability.len())
+            || !self
+                .capability
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || b"-_".contains(&c))
+        {
+            bail!("千问办公本地路由无效，请重新接入")
+        }
+        Ok(())
+    }
+}
 const SDK_PATH: &str = "app.asar.unpacked/node_modules/@qoder-ai/qoder-agent-sdk";
 
 #[derive(Clone)]
@@ -43,6 +75,24 @@ pub(crate) fn is_managed_worker(path: &str) -> bool {
     .any(|prefix| path.contains(prefix))
 }
 
+pub(crate) fn is_managed_env_value(name: &str, value: &str) -> bool {
+    match name {
+        "QW_QODER_WORKER_RUNTIME_PATH" => is_managed_worker(value),
+        ROUTE_ENV => {
+            value.replace('\\', "/").contains("/.qwenworkcn/")
+                && value.ends_with(".tokenmarket.json")
+        }
+        "QODERCN_SERVER_ENDPOINT" => value == "https://tokenmarket.local.invalid",
+        "ENGINE_MAAS_MINT_URL" => url::Url::parse(value).is_ok_and(|url| {
+            url.scheme() == "http"
+                && url.host_str() == Some("127.0.0.1")
+                && url.path().starts_with("/tokenmarket/")
+                && url.path().ends_with("/api/desktop-sessions")
+        }),
+        _ => false,
+    }
+}
+
 pub fn fingerprint(key: &str) -> String {
     format!("{:x}", Sha256::digest(key.as_bytes()))
 }
@@ -60,6 +110,13 @@ pub fn render_worker(source: &str, bridge: &Path, gateway: &str) -> Result<Strin
         quote(CREDENTIAL_PREFIX)
     );
     let assembly = format!("o=({allowed})?\"openai\":{}(t.provider,t.style??r?.custom_model_style),s=({allowed})?t.url:{}(t.provider,t.url);",contract.style,contract.url);
+    // Host-job-token restoration needs official account/control APIs before any
+    // inference dispatch. The managed blocking origin must apply to inference,
+    // not authentication. Preserve SDK defaults/election and explicit user origins.
+    let endpoint_override = contract.endpoint_override.replace(
+        "if(n)return",
+        "if(n&&!(globalThis.__tmQwenRoute&&n===\"https://tokenmarket.local.invalid\"&&(A===\"openapi\"||A===\"center\")))return",
+    );
     // Legacy rows must fail before their credential can enter any cloud payload.
     let legacy_needle = &contract.legacy_needle;
     let reject_legacy = format!("if(t&&(t.url==={}||t.url==={}&&!({allowed})))throw new Error(\"Token Market configuration must be reconnected for local credential isolation\");{legacy_needle}", quote(&legacy),quote(MODEL_ENDPOINT));
@@ -76,10 +133,24 @@ pub fn render_worker(source: &str, bridge: &Path, gateway: &str) -> Result<Strin
         .replace("__BUILD_REQUEST__", &contract.builder)
         .replace("__OPEN_STREAM__", &contract.stream)
         .replace("__EMPTY_THINKING__", &contract.thinking);
-    Ok(source
-        .replace(&contract.assembly, &assembly)
-        .replace(legacy_needle, &reject_legacy)
-        .replace(DISPATCH, &format!("{bridge_js}{DISPATCH}")))
+    let bootstrap = include_str!("qwenwork/host-bootstrap.mjs")
+        .replace(
+            "__BRIDGE_BINARY__",
+            &quote(bridge.to_str().context("本地代理路径无效")?),
+        )
+        .replace("__GATEWAY__", &quote(gateway))
+        .replace(
+            "__CONSOLE__",
+            &quote(&crate::config::console_api_base_url()),
+        );
+    Ok(format!(
+        "{bootstrap}\n{}",
+        source
+            .replace(&contract.endpoint_override, &endpoint_override)
+            .replace(&contract.assembly, &assembly)
+            .replace(legacy_needle, &reject_legacy)
+            .replace(DISPATCH, &format!("{bridge_js}{DISPATCH}"))
+    ))
 }
 
 pub fn render_probe_worker(source: &str, bridge: &Path, gateway: &str) -> Result<String> {
@@ -88,48 +159,59 @@ pub fn render_probe_worker(source: &str, bridge: &Path, gateway: &str) -> Result
 
 /// SDK compatibility alone is insufficient if the app removes its worker override.
 /// Read its packaged loader without modifying the archive or application signature.
+fn packaged_main(resources: &Path) -> Result<Vec<u8>> {
+    let mut archive = fs::File::open(resources.join("app.asar"))?;
+    let mut first = [0u8; 8];
+    archive.read_exact(&mut first)?;
+    let header_size = u32::from_le_bytes(first[4..8].try_into().unwrap()) as usize;
+    if !(8..=16 * 1024 * 1024).contains(&header_size) {
+        bail!(ADAPTATION_REQUIRED)
+    }
+    let mut header = vec![0; header_size];
+    archive.read_exact(&mut header)?;
+    let json_size = u32::from_le_bytes(header[4..8].try_into().unwrap()) as usize;
+    let index: serde_json::Value =
+        serde_json::from_slice(header.get(8..8 + json_size).context(ADAPTATION_REQUIRED)?)?;
+    let entry = &index["files"]["out"]["files"]["main"]["files"]["main.js"];
+    let size = entry["size"].as_u64().context(ADAPTATION_REQUIRED)?;
+    if size > 48 * 1024 * 1024 {
+        bail!(ADAPTATION_REQUIRED)
+    }
+    let script = if entry["unpacked"] == true {
+        fs::read(resources.join("app.asar.unpacked/out/main/main.js"))?
+    } else {
+        let offset = entry["offset"]
+            .as_str()
+            .context(ADAPTATION_REQUIRED)?
+            .parse::<u64>()?;
+        let start = 8u64 + header_size as u64;
+        let end = start
+            .checked_add(offset)
+            .and_then(|v| v.checked_add(size))
+            .context(ADAPTATION_REQUIRED)?;
+        if end > archive.metadata()?.len() {
+            bail!(ADAPTATION_REQUIRED)
+        }
+        archive.seek(SeekFrom::Start(start + offset))?;
+        let mut bytes = vec![0; size as usize];
+        archive.read_exact(&mut bytes)?;
+        bytes
+    };
+    Ok(script)
+}
+
 fn require_worker_override(resources: &Path) -> Result<()> {
     let check = || -> Result<()> {
-        let mut archive = fs::File::open(resources.join("app.asar"))?;
-        let mut first = [0u8; 8];
-        archive.read_exact(&mut first)?;
-        let header_size = u32::from_le_bytes(first[4..8].try_into().unwrap()) as usize;
-        if !(8..=16 * 1024 * 1024).contains(&header_size) {
-            bail!(ADAPTATION_REQUIRED)
-        }
-        let mut header = vec![0; header_size];
-        archive.read_exact(&mut header)?;
-        let json_size = u32::from_le_bytes(header[4..8].try_into().unwrap()) as usize;
-        let index: serde_json::Value =
-            serde_json::from_slice(header.get(8..8 + json_size).context(ADAPTATION_REQUIRED)?)?;
-        let entry = &index["files"]["out"]["files"]["main"]["files"]["main.js"];
-        let size = entry["size"].as_u64().context(ADAPTATION_REQUIRED)?;
-        if size > 48 * 1024 * 1024 {
-            bail!(ADAPTATION_REQUIRED)
-        }
-        let script = if entry["unpacked"] == true {
-            fs::read(resources.join("app.asar.unpacked/out/main/main.js"))?
-        } else {
-            let offset = entry["offset"]
-                .as_str()
-                .context(ADAPTATION_REQUIRED)?
-                .parse::<u64>()?;
-            let start = 8u64 + header_size as u64;
-            let end = start
-                .checked_add(offset)
-                .and_then(|v| v.checked_add(size))
-                .context(ADAPTATION_REQUIRED)?;
-            if end > archive.metadata()?.len() {
+        let script = packaged_main(resources)?;
+        for marker in [
+            "QW_QODER_WORKER_RUNTIME_PATH",
+            "ENGINE_MAAS_MINT_URL",
+            "serverProvidedBaseUrl",
+            "baseUrl:getEngineMaasApiBaseUrl()",
+        ] {
+            if !script.windows(marker.len()).any(|v| v == marker.as_bytes()) {
                 bail!(ADAPTATION_REQUIRED)
             }
-            archive.seek(SeekFrom::Start(start + offset))?;
-            let mut bytes = vec![0; size as usize];
-            archive.read_exact(&mut bytes)?;
-            bytes
-        };
-        let marker = b"QW_QODER_WORKER_RUNTIME_PATH";
-        if !script.windows(marker.len()).any(|v| v == marker) {
-            bail!(ADAPTATION_REQUIRED)
         }
         Ok(())
     };
@@ -181,6 +263,7 @@ fn verify_contract(application: &Path, home: &Path, source: &str, gateway: &str)
         .env("ELECTRON_RUN_AS_NODE", "1")
         .env_remove("NODE_OPTIONS")
         .env_remove("NODE_PATH")
+        .env_remove(ROUTE_ENV)
         .stdin(Stdio::null())
         .stdout(fs::File::create(&output)?)
         .stderr(fs::File::create(&diagnostics)?)
@@ -345,6 +428,40 @@ impl RuntimeInstaller for NativeRuntimeInstaller {
 mod tests {
     use super::*;
     #[test]
+    fn desktop_bootstrap_auxiliary_failure_preserves_primary_local_routing() {
+        let app = Path::new("/Applications/QwenWorkCN.app");
+        if !app.is_dir() {
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        let bootstrap = root.path().join("bootstrap.mjs");
+        fs::write(
+            &bootstrap,
+            include_str!("qwenwork/host-bootstrap.mjs")
+                .replace("__BRIDGE_BINARY__", "\"fixture-native-bridge\"")
+                .replace("__GATEWAY__", "\"https://gateway.fixture\"")
+                .replace("__CONSOLE__", "\"https://console.fixture\""),
+        )
+        .unwrap();
+        let output = Command::new(app.join("Contents/MacOS/QwenWorkCN"))
+            .env("ELECTRON_RUN_AS_NODE", "1")
+            .env_remove("NODE_OPTIONS")
+            .env_remove("NODE_PATH")
+            .arg(
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../tests/helpers/qwenwork-host-bootstrap-probe.mjs"),
+            )
+            .arg(bootstrap)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("PASS:"));
+    }
+    #[test]
     fn reconnect_rebuilds_damaged_external_assets_from_the_current_installation() {
         let app = Path::new("/Applications/QwenWorkCN.app");
         if !app.is_dir() {
@@ -440,6 +557,16 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("联系管理员适配"));
+            let broken_endpoint = source.replace(
+                "reason:\"cn_server_endpoint_env\"",
+                "reason:\"changed_endpoint_contract\"",
+            );
+            assert!(render_worker(
+                &broken_endpoint,
+                Path::new("fixture-bridge"),
+                "https://gateway.fixture"
+            )
+            .is_err());
             println!("PASS compatible worker: {}", path.display());
         }
     }

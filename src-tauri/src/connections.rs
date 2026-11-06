@@ -234,6 +234,137 @@ pub async fn connect_tool(
         .map_err(|error| connection_error(error, &owner, &space))
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DuMateModelTarget {
+    expected_key_id: Option<String>,
+    expected_owner_id: String,
+    expected_workspace_id: String,
+    preserve_binding: bool,
+    recovery: Option<RecoveryTarget>,
+}
+fn dumate_context(
+    app: &AppHandle,
+    target: &DuMateModelTarget,
+) -> Result<
+    (
+        ConnectContext,
+        tokenmarket_core::desktop::DesktopIdentity,
+        tokenmarket_core::desktop::DesktopIdentity,
+    ),
+    String,
+> {
+    let (session, mut workspace) = current_context(app)?;
+    if session.user.id != target.expected_owner_id || workspace.id != target.expected_workspace_id {
+        return Err("账号或当前空间已改变，请重新选择模型".into());
+    }
+    let mut context = ConnectContext {
+        session_token: session.session_token,
+        owner_id: session.user.id.clone(),
+        workspace_id: workspace.id.clone(),
+    };
+    if target.preserve_binding {
+        let expected = target
+            .expected_key_id
+            .as_deref()
+            .ok_or("连接已改变，请刷新后重试")?;
+        let manager = app.state::<ConnectionManager>();
+        context = manager
+            .dumate_model_context(context, expected)
+            .map_err(|e| e.to_string())?;
+        workspace = manager
+            .list()
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .find(|r| {
+                r.tool == tokenmarket_core::ToolId::DuMate
+                    && r.key_id == expected
+                    && r.owner.id == context.owner_id
+                    && r.bound_workspace.id == context.workspace_id
+            })
+            .ok_or("连接已改变，请刷新后重试")?
+            .bound_workspace;
+    }
+    if let Some(recovery) = &target.recovery {
+        if recovery.owner_id != context.owner_id || recovery.workspace_id != context.workspace_id {
+            return Err("连接归属已改变，请重新确认".into());
+        }
+    }
+    Ok((context, session.user, workspace))
+}
+#[tauri::command]
+pub async fn prepare_dumate_models(
+    app: AppHandle,
+    target: DuMateModelTarget,
+) -> Result<tokenmarket_core::connections::ConnectionModels, ConnectFailure> {
+    let (context, owner, workspace) = dumate_context(&app, &target)?;
+    let inventory = ToolInventory::current();
+    app.state::<ConnectionManager>()
+        .prepare_dumate_models(
+            context,
+            &inventory,
+            inventory.config_path(tokenmarket_core::ToolId::DuMate),
+            target.expected_key_id.as_deref(),
+            target.recovery.as_ref().map(|r| r.key_id.as_str()),
+            target.preserve_binding,
+        )
+        .await
+        .map_err(|error| connection_error(error, &owner, &workspace))
+}
+#[tauri::command]
+pub async fn configure_dumate_model(
+    app: AppHandle,
+    target: DuMateModelTarget,
+    model: String,
+) -> Result<ReconnectOutcome, ConnectFailure> {
+    let (context, owner, workspace) = dumate_context(&app, &target)?;
+    let inventory = ToolInventory::current();
+    app.state::<ConnectionManager>()
+        .configure_dumate_model(
+            context,
+            &inventory,
+            inventory.config_path(tokenmarket_core::ToolId::DuMate),
+            target.expected_key_id.as_deref(),
+            target.recovery.as_ref().map(|r| r.key_id.as_str()),
+            &model,
+            target.preserve_binding,
+        )
+        .await
+        .map_err(|error| connection_error(error, &owner, &workspace))
+}
+
+#[tauri::command]
+pub async fn is_dumate_running() -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(tokenmarket_core::dumate_restart::is_running)
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn restart_dumate(
+    force: bool,
+) -> Result<tokenmarket_core::dumate_restart::RestartOutcome, String> {
+    tokenmarket_core::dumate_restart::restart_current(force)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn is_qwenwork_running() -> Result<bool, String> {
+    tokenmarket_core::qwenwork_restart::is_running()
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn restart_qwenwork() -> Result<tokenmarket_core::qwenwork_restart::RestartOutcome, String>
+{
+    tokenmarket_core::qwenwork_restart::restart_current()
+        .await
+        .map_err(|error| error.to_string())
+}
+
 /// Paid testing uses only the saved connection, independent of the desktop session.
 #[tauri::command]
 pub async fn test_tool_connection(

@@ -434,13 +434,15 @@ fn release_source(
             )
         }
         ToolId::DeepSeekHarness => {
+            // Desktop app-update.yml uses the nightly channel under feeds/;
+            // bin/ contains installers, not release metadata.
             let (platform, feed) = if platform == HostPlatform::MacOs {
-                ("mac-arm64", "latest-mac.yml")
+                ("mac-arm64", "nightly-mac.yml")
             } else {
-                ("win-x64", "latest.yml")
+                ("win-x64", "nightly.yml")
             };
             (
-                format!("https://download.deepseek.com/dsh-desk/bin/{platform}/{feed}"),
+                format!("https://download.deepseek.com/dsh-desk/feeds/{platform}/{feed}"),
                 "yaml",
             )
         }
@@ -545,6 +547,40 @@ fn parse_release(format: &str, body: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn harness_desktop_uses_official_nightly_feeds_and_cli_keeps_npm() {
+        for (platform, arch, expected) in [
+            (
+                HostPlatform::MacOs,
+                "aarch64",
+                "https://download.deepseek.com/dsh-desk/feeds/mac-arm64/nightly-mac.yml",
+            ),
+            (
+                HostPlatform::Windows,
+                "x86_64",
+                "https://download.deepseek.com/dsh-desk/feeds/win-x64/nightly.yml",
+            ),
+            (
+                HostPlatform::MacOs,
+                "x86_64",
+                "https://registry.npmjs.org/@deepseek-ai%2Fdsh/latest",
+            ),
+            (
+                HostPlatform::Unix,
+                "aarch64",
+                "https://registry.npmjs.org/@deepseek-ai%2Fdsh/latest",
+            ),
+        ] {
+            let (url, format) = release_source(ToolId::DeepSeekHarness, platform, arch);
+            assert_eq!(url, expected);
+            let body = if format == "yaml" {
+                "version: 0.2.2-rc.1\nfiles: []"
+            } else {
+                r#"{"version":"0.2.2-rc.1"}"#
+            };
+            assert_eq!(parse_release(format, body).unwrap(), "0.2.2-rc.1");
+        }
+    }
     #[test]
     fn versions_are_numeric_and_prerelease_aware() {
         for (a, b) in [

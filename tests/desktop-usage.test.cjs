@@ -11,7 +11,7 @@ async function open(options={}){const f=await fixture(browser,options);await f.p
 test('summary covers all historical keys while detail pages do not refetch buckets',async()=>{
  const f=await open();try{const p=f.page;await p.locator('#usage-rows [data-request-id="usage-0"]').waitFor();
  assert.equal(await p.locator('#usage-requests').textContent(),'21');assert.equal(await p.locator('#usage-total-count').textContent(),'共 21 条');assert.equal(await p.locator('#usage-rows tr').count(),20);
- assert.equal(await p.locator('#usage-cost').textContent(),'2.100000');assert.equal(await p.locator('#usage-cache').textContent(),'80.0%');
+ assert.equal(await p.locator('#usage-cost').textContent(),'2.10');assert.equal(await p.locator('#usage-cache').textContent(),'80.0%');
  assert.match(await p.locator('#usage-key-count').textContent(),/2 个历史 Key/);assert.equal(await p.locator('#usage-rows [data-request-id="usage-0"]').count(),1);assert.equal(await p.locator('#usage-rows [data-request-id="usage-1"]').count(),1);
  const firstRow=p.locator('#usage-rows tr').first();assert.equal(await firstRow.locator('td').nth(3).textContent(),'0.100000');assert.equal(await firstRow.locator('td').nth(4).textContent(),'100');assert.match(await firstRow.locator('td').nth(7).textContent(),/成功 200/);
  const buckets=(await calls(p,'desktop_usage_buckets')).length;await p.locator('#usage-next').click();await p.locator('#usage-rows [data-request-id="usage-20"]').waitFor();
@@ -148,7 +148,7 @@ test('a rolling 24-hour range uses hourly slots across midnight including the fi
  await p.locator('[data-page="usage"]').click();await p.locator('#usage-chart svg').waitFor();
  await p.locator('#usage-range-trigger').click();await p.locator('[data-range-preset="24h"]').click();
  await p.locator('#usage-chart-title').filter({hasText:'Tokens · 按小时'}).waitFor();
- assert.equal(await p.locator('#usage-chart svg rect').count(),24);assert.equal(await p.locator('#usage-requests').textContent(),'4');assert.equal(await p.locator('#usage-cost').textContent(),'0.400000');
+ assert.equal(await p.locator('#usage-chart svg rect').count(),24);assert.equal(await p.locator('#usage-requests').textContent(),'4');assert.equal(await p.locator('#usage-cost').textContent(),'0.40');
  await p.locator('[data-usage-metric="requestCount"]').click();
  const tips=await p.locator('#usage-chart svg rect title').allTextContents();
  for(const index of [0,1,10,23])assert.match(tips[index],/请求数：1$/);
@@ -189,29 +189,85 @@ test('idle usage never refreshes on a timer and the refresh button reads immedia
  assert.equal((await calls(p,'desktop_usage_buckets')).length,before+1);assert.equal((await calls(p,'desktop_usage_logs')).length,before+1);assert.deepEqual(f.errors,[]);
  }finally{await f.close();}
 });
-test('usage shares lifecycle synchronization and refreshes on activation and page return within 30 seconds',async()=>{
- const f=await open();try{const p=f.page;await p.locator('#usage-rows [data-request-id="usage-0"]').waitFor();
+test('usage ignores focus, visibility and native activation but refreshes on page return',async()=>{
+ const f=await open();try{const p=f.page;await p.locator('#usage-rows [data-request-id="usage-0"]').waitFor();await p.clock.install();
  const commands=['desktop_usage_logs','desktop_usage_buckets','refresh_desktop_session','desktop_workspace_context'];
  const before=await Promise.all(commands.map(command=>calls(p,command).then(rows=>rows.length)));
- await p.evaluate(()=>{window.__fixture.usageRows.push({...window.__fixture.usageRows[0],requestId:'activated-new',startedAt:Date.now()});window.dispatchEvent(new Event('focus'));document.dispatchEvent(new Event('visibilitychange'));window.__fixture.emit('desktop-activated');});
- await p.getByText('共 22 条',{exact:true}).waitFor();assert.deepEqual(await Promise.all(commands.map(command=>calls(p,command).then(rows=>rows.length))),before.map(n=>n+1));
- const updates=(await calls(p,'check_tool_updates')).length;
- await p.locator('.primary-nav [data-page="account"]').click();await p.waitForFunction(n=>window.__fixture.calls.filter(c=>c.command==='check_tool_updates').length===n+1,updates);
- assert.equal((await calls(p,'desktop_usage_buckets')).length,before[1]+1);
+ for(const event of ['focus','visibilitychange','desktop-activated','pageshow']){
+   await p.evaluate(event=>{if(event==='desktop-activated')window.__fixture.emit(event);else if(event==='visibilitychange')document.dispatchEvent(new Event(event));else window.dispatchEvent(event==='pageshow'?new PageTransitionEvent(event,{persisted:true}):new Event(event));},event);
+   await p.clock.runFor(200);
+ }
+ assert.equal((await calls(p,'desktop_usage_buckets')).length,before[1]);assert.equal((await calls(p,'desktop_usage_logs')).length,before[0]);
+ assert.equal((await calls(p,'refresh_desktop_session')).length,before[2]+4);assert.equal((await calls(p,'desktop_workspace_context')).length,before[3]+4);
+ await p.locator('.primary-nav [data-page="account"]').click();await p.clock.runFor(200);
  await p.evaluate(()=>{window.__fixture.usageRows.push({...window.__fixture.usageRows[0],requestId:'returned-new',startedAt:Date.now()});});
- await p.locator('.primary-nav [data-page="usage"]').click();await p.getByText('共 23 条',{exact:true}).waitFor();
- assert.equal((await calls(p,'desktop_usage_buckets')).length,before[1]+2);assert.equal((await calls(p,'desktop_usage_logs')).length,before[0]+2);assert.deepEqual(f.errors,[]);
+ await p.locator('.primary-nav [data-page="usage"]').click();await p.clock.runFor(200);await p.getByText('共 22 条',{exact:true}).waitFor();
+ assert.equal((await calls(p,'desktop_usage_buckets')).length,before[1]+1);assert.equal((await calls(p,'desktop_usage_logs')).length,before[0]+1);assert.deepEqual(f.errors,[]);
  }finally{await f.close();}
 });
-test('lifecycle events during slow usage queries merge into one follow-up without blocking other page synchronization',async()=>{
+test('activation during slow manual usage refresh does not queue another usage query',async()=>{
  const f=await open();try{const p=f.page;await p.locator('#usage-rows [data-request-id="usage-0"]').waitFor();await p.clock.install();
  const before=(await calls(p,'desktop_usage_buckets')).length,workspace=(await calls(p,'desktop_workspace_context')).length;
- await p.evaluate(()=>{window.__fixture.deferUsage=true;window.__fixture.emit('desktop-activated');});await p.clock.runFor(200);await p.waitForFunction(()=>window.__fixture.usageDeferred.length===2);
- await p.evaluate(()=>{window.__fixture.usageRows.push({...window.__fixture.usageRows[0],requestId:'slow-new',startedAt:Date.now()});window.dispatchEvent(new Event('focus'));document.dispatchEvent(new Event('visibilitychange'));window.__fixture.emit('desktop-activated');});await p.clock.runFor(200);
- assert.equal((await calls(p,'desktop_workspace_context')).length,workspace+2);assert.equal((await calls(p,'desktop_usage_buckets')).length,before+1);
- await p.evaluate(()=>{window.__fixture.deferUsage=false;window.__fixture.usageDeferred.splice(0).forEach(resolve=>resolve());});await p.getByText('共 22 条',{exact:true}).waitFor();
- assert.equal((await calls(p,'desktop_usage_buckets')).length,before+2);assert.equal((await calls(p,'desktop_usage_logs')).length,before+2);
- await p.clock.fastForward(60*1000);assert.equal((await calls(p,'desktop_usage_buckets')).length,before+2);assert.deepEqual(f.errors,[]);
+ await p.evaluate(()=>{window.__fixture.deferUsage=true;void window.TokenMarketUsage.refresh(true);});await p.waitForFunction(()=>window.__fixture.usageDeferred.length===2);
+ await p.evaluate(()=>{window.dispatchEvent(new Event('focus'));document.dispatchEvent(new Event('visibilitychange'));window.__fixture.emit('desktop-activated');});await p.clock.runFor(200);
+ assert.equal((await calls(p,'desktop_workspace_context')).length,workspace+1);
+ await p.evaluate(()=>{window.__fixture.deferUsage=false;window.__fixture.usageDeferred.splice(0).forEach(resolve=>resolve());});
+ await p.waitForFunction(()=>!document.querySelector('#usage-refresh').disabled);await p.clock.fastForward(60*1000);
+ assert.equal((await calls(p,'desktop_usage_buckets')).length,before+1);assert.equal((await calls(p,'desktop_usage_logs')).length,before+1);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+test('refresh keeps chart, table, focus and layout while waiting and patches fresh values in place',async()=>{
+ const f=await open();try{const p=f.page;await p.locator('#usage-rows [data-request-id="usage-0"]').waitFor();
+ await p.locator('#usage-rows [data-request-id="usage-0"] button').focus();
+ await p.evaluate(()=>{
+   const chart=document.querySelector('#usage-chart'),rows=document.querySelector('#usage-rows');
+   window.__usageStable={svg:chart.querySelector('svg'),bar:[...chart.querySelectorAll('rect')].find(n=>Number(n.getAttribute('height'))>0),row:rows.firstElementChild,button:document.activeElement,table:document.querySelector('.usage-table-scroll'),heading:document.querySelector('.usage-log-heading').getBoundingClientRect().y,height:chart.getBoundingClientRect().height};
+   window.__fixture.deferUsage=true;window.__usageRefresh=window.TokenMarketUsage.refresh(true);
+ });
+ await p.waitForFunction(()=>window.__fixture.usageDeferred.length===2);
+ assert.equal(await p.locator('#usage-cost').textContent(),'2.10');assert.equal(await p.locator('#usage-rows tr').count(),20);
+ assert.equal(await p.evaluate(()=>{const s=window.__usageStable;return s.svg.isConnected&&s.row.isConnected&&s.button===document.activeElement&&document.querySelector('#usage-chart').getBoundingClientRect().height===s.height&&document.querySelector('.usage-log-heading').getBoundingClientRect().y===s.heading;}),true);
+ await p.evaluate(async()=>{window.__fixture.usageRows[0].costMicro='250000';window.__fixture.usageRows[0].totalTokens=240;window.__fixture.usageDeferred.splice(0).forEach(resolve=>resolve());await window.__usageRefresh;});
+ assert.equal(await p.locator('#usage-cost').textContent(),'2.25');assert.equal(await p.locator('#usage-rows tr').first().locator('td').nth(3).textContent(),'0.250000');
+ assert.equal(await p.evaluate(()=>{const s=window.__usageStable;return s.svg.isConnected&&s.bar.isConnected&&s.row.isConnected&&s.button===document.activeElement&&document.querySelector('.usage-log-heading').getBoundingClientRect().y===s.heading;}),true);
+ assert.match(await p.evaluate(()=>getComputedStyle(window.__usageStable.bar).transitionProperty),/height/);
+ await p.locator('#usage-rows tr').first().locator('td').nth(2).click();assert.equal(await p.locator('[data-detail-field="cost"]').textContent(),'0.250000');
+ assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+
+test('failed refresh retains successful data and pagination, while workspace changes clear it immediately',async()=>{
+ const f=await open();try{const p=f.page;await p.locator('#usage-rows [data-request-id="usage-0"]').waitFor();
+ await p.locator('#usage-next').click();await p.locator('#usage-rows [data-request-id="usage-20"]').waitFor();
+ const original=(await calls(p,'desktop_usage_logs')).at(-1).args.request;
+ await p.evaluate(async()=>{
+   const invoke=window.__TAURI__.core.invoke;window.__fixture.failUsage=true;
+   window.__TAURI__.core.invoke=(command,args)=>window.__fixture.failUsage&&['desktop_usage_logs','desktop_usage_buckets'].includes(command)?Promise.reject(new Error('fixture refresh failure')):invoke(command,args);
+   window.__retainedUsage=[document.querySelector('#usage-chart svg'),document.querySelector('#usage-rows tr')];
+   await window.TokenMarketUsage.refresh(true);
+ });
+ assert.equal(await p.locator('#usage-cost').textContent(),'2.10');assert.equal(await p.locator('#usage-page-label').textContent(),'第 2 页');assert.equal(await p.locator('#usage-rows [data-request-id="usage-20"]').count(),1);
+ assert.equal(await p.evaluate(()=>window.__retainedUsage.every(n=>n.isConnected)),true);assert.match(await p.locator('#usage-feedback').textContent(),/fixture refresh failure/);
+ await p.evaluate(()=>{window.__fixture.failUsage=false;});await p.locator('#usage-prev').click();await p.locator('#usage-rows [data-request-id="usage-0"]').waitFor();
+ assert.equal((await calls(p,'desktop_usage_logs')).at(-1).args.request.endTime,original.endTime);
+ await p.evaluate(async()=>{window.__fixture.deferUsage=true;window.__fixture.current=window.__fixture.team;await window.TokenMarketWorkspace.refresh();});
+ assert.equal(await p.locator('#usage-cost').textContent(),'—');assert.equal(await p.locator('#usage-rows [data-request-id]').count(),0);
+ await p.waitForFunction(()=>window.__fixture.usageDeferred.length===2);
+ await p.evaluate(()=>{window.__fixture.usageDeferred.splice(0).forEach(resolve=>resolve());});await p.locator('#usage-rows [data-request-id="team-only"]').waitFor();assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+test('pending range changes keep the old chart snapshot until success and rolling hourly bars retain their nodes',async()=>{
+ const f=await open();try{const p=f.page;await p.locator('#usage-chart svg').waitFor();
+ const oldCount=await p.locator('#usage-chart rect').count();await p.evaluate(()=>{window.__fixture.deferUsage=true;});
+ await p.locator('#usage-range-trigger').click();await p.locator('[data-range-preset="24h"]').click();await p.waitForFunction(()=>window.__fixture.usageDeferred.length===2);
+ await p.locator('[data-usage-metric="requestCount"]').click();await p.setViewportSize({width:1280,height:900});
+ assert.equal(await p.locator('#usage-chart-title').textContent(),'请求数 · 按天');assert.equal(await p.locator('#usage-chart rect').count(),oldCount);
+ await p.evaluate(()=>{window.__fixture.usageDeferred.splice(0).forEach(resolve=>resolve());});await p.locator('#usage-chart-title').filter({hasText:'按小时'}).waitFor();
+ await p.evaluate(()=>{window.__hourlyBars=[...document.querySelectorAll('#usage-chart rect')];});
+ await p.clock.setFixedTime(Date.now()+60000);
+ await p.evaluate(()=>{window.__fixture.deferUsage=false;return window.TokenMarketUsage.refresh(true);});
+ assert.equal(await p.evaluate(()=>window.__hourlyBars.every(n=>n.isConnected)),true);assert.equal(await p.locator('#usage-chart rect').count(),24);
+ await p.emulateMedia({reducedMotion:'reduce'});assert.equal(await p.locator('#usage-chart rect').first().evaluate(n=>getComputedStyle(n).transitionProperty),'none');assert.deepEqual(f.errors,[]);
  }finally{await f.close();}
 });
 
@@ -236,9 +292,9 @@ test('request details support keyboard opening, Escape, focus restoration and ou
  await trigger.click();await p.mouse.click(10,200);assert.equal(await p.locator('#usage-request-detail').isVisible(),false);assert.equal(await p.locator('#usage-detail-body').textContent(),'');assert.deepEqual(f.errors,[]);
  }finally{await f.close();}
 });
-test('an open request survives event refreshes, updates its record, and clears immediately on workspace or login changes',async()=>{
+test('an open request survives manual refreshes, updates its record, and clears immediately on workspace or login changes',async()=>{
  const f=await open();try{const p=f.page;await p.locator('#usage-rows [data-request-id="usage-0"] button').click();
- await p.evaluate(()=>{window.__fixture.usageRows[0].costMicro='250000';window.__fixture.emit('desktop-activated');});await p.locator('[data-detail-field="cost"]').filter({hasText:'0.250000'}).waitFor();assert.equal(await p.locator('#usage-request-detail').isVisible(),true);
+ await p.evaluate(()=>{window.__fixture.usageRows[0].costMicro='250000';void window.TokenMarketUsage.refresh(true);});await p.locator('[data-detail-field="cost"]').filter({hasText:'0.250000'}).waitFor();assert.equal(await p.locator('#usage-request-detail').isVisible(),true);
  await p.locator('#usage-detail-close').click();assert.equal(await p.locator('#usage-rows [data-request-id="usage-0"] button').evaluate(n=>n===document.activeElement),true);
  await p.locator('#usage-rows [data-request-id="usage-0"] button').click();await p.evaluate(async()=>{window.__fixture.current=window.__fixture.team;await window.TokenMarketWorkspace.refresh();});
  assert.equal(await p.locator('#usage-request-detail').isVisible(),false);assert.equal(await p.locator('#usage-detail-body').textContent(),'');

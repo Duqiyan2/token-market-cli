@@ -21,7 +21,9 @@ pub mod usage;
 
 pub mod connections;
 mod dumate;
+pub use dumate::restart as dumate_restart;
 mod qwenwork;
+pub mod qwenwork_restart;
 pub mod qwenwork_runtime;
 mod workbuddy;
 mod yaml;

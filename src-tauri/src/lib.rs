@@ -237,6 +237,9 @@ pub fn run() {
         .on_window_event(window_lifecycle::on_window_event)
         .setup(|app| {
             client_update::setup(app.handle());
+            if let Err(error) = tokenmarket_core::dumate_restart::cleanup_legacy_extensions() {
+                eprintln!("旧版搭子接管扩展未能完整清理：{error}");
+            }
             window_lifecycle::setup(app.handle());
             let api_base = tokenmarket_core::config::console_api_base_url();
             app.manage(DesktopState {
@@ -275,6 +278,12 @@ pub fn run() {
             workspace::switch_desktop_workspace,
             workspace::open_desktop_account_page,
             connections::connect_tool,
+            connections::prepare_dumate_models,
+            connections::configure_dumate_model,
+            connections::restart_dumate,
+            connections::is_dumate_running,
+            connections::restart_qwenwork,
+            connections::is_qwenwork_running,
             connections::prepare_tool_reconnect,
             connections::reconnect_tool,
             connections::disconnect_tool,

@@ -63,9 +63,11 @@
 .tool-menu { margin-left: auto; position: relative; }
 .tool-menu summary { min-width: 44px; min-height: 44px; padding: 10px 12px; list-style: none; cursor: pointer; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); }
 .tool-menu-options { position: absolute; z-index: 6; right: 0; top: calc(100% + 6px); padding: 6px; min-width: 180px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); box-shadow: 0 10px 30px var(--shadow); }
-.tool-menu-options button { display: block; width: 100%; border: 0; text-align: left; }
+.tool-menu-options button { display: block; width: 100%; text-align: left; user-select: none; }
+.tool-menu-options button + button { margin-top: 4px; }
 .disconnect-conflicts label { display: grid; gap: 8px; margin: 14px 0; }
 .tool-result-detail { white-space: pre-line; overflow-wrap: anywhere; }
+.launch-error:empty, .dumate-restart-status:empty { display: none; }
 .connection-test-dialog .test-context { padding: 14px; border: 1px solid var(--line); border-radius: 7px; background: var(--subtle); overflow-wrap: anywhere; }
 .connection-test-dialog .test-model-label { margin: 18px 0; }
 .connection-test-dialog .test-feedback { min-height: 28px; margin-top: 18px; }
@@ -175,3 +177,10 @@
 .tool-location-version { font-size: 12px; color: var(--muted); }
 .tool-title-heading { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .tool-uninstall-metadata { display: flex; align-items: center; gap: 10px; margin-top: 6px; color: var(--muted); font-size: 12px; }
+
+.dumate-model-dialog { width: min(560px, calc(100vw - 36px)); }
+.dumate-model-dialog label { display: grid; gap: 8px; margin: 18px 0; }
+.dumate-model-dialog select { width: 100%; min-width: 0; }
+.dumate-model-target, .dumate-model-status { overflow-wrap: anywhere; }
+.dumate-model-status { min-height: 24px; }
+.tool-switch-model { margin-top: 14px; }

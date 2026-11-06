@@ -14,6 +14,21 @@ fn write(path: &Path, value: &Value) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, serde_json::to_vec_pretty(value).unwrap()).unwrap();
 }
+fn managed_provider(path: &Path) -> Value {
+    let value: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    assert!(
+        value["customLLMProvider"].is_null(),
+        "native override must stay off for official media"
+    );
+    let policy = path
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("opencode/tokenmarket-unified.json");
+    serde_json::from_slice::<Value>(&std::fs::read(policy).unwrap()).unwrap()["unified"]["provider"]
+        .clone()
+}
 fn data(home: &Path) -> PathBuf {
     home.join("Library/Application Support/qianfan-desktop-app")
 }
@@ -202,16 +217,10 @@ async fn personal_connection_prefers_default_restores_provider_and_never_tests_i
     assert_eq!(connection.models, ["glm-5.3"]);
     assert_eq!(connection.protocol, "OPENAI_CHAT_COMPLETIONS");
     let mut configured: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-    assert_eq!(
-        configured["customLLMProvider"]["baseURL"],
-        format!("{url}/v1")
-    );
-    assert_eq!(
-        configured["customLLMProvider"]["apiKey"],
-        "sk-dumate-fixture"
-    );
-    assert_eq!(configured["customLLMProvider"]["contextLimit"], 200000);
-    assert_eq!(configured["customLLMProvider"]["futureOption"], true);
+    assert_eq!(managed_provider(&path)["baseURL"], format!("{url}/v1"));
+    assert_eq!(managed_provider(&path)["apiKey"], "sk-dumate-fixture");
+    assert_eq!(managed_provider(&path)["contextLimit"], 200000);
+    assert_eq!(managed_provider(&path)["futureOption"], true);
     let replaced = manager
         .reconnect(
             context(),
@@ -365,7 +374,7 @@ async fn wrong_account_version_or_malformed_preferences_fail_before_key_issuance
         .replace("1.0.89", "2.0.0");
     std::fs::write(plist, text).unwrap();
     assert!(manager
-        .connect(context(), ToolId::DuMate, &inventory, path)
+        .connect(context(), ToolId::DuMate, &inventory, path.clone())
         .await
         .unwrap_err()
         .to_string()
@@ -786,7 +795,7 @@ async fn unavailable_default_preserves_a_valid_existing_model() {
     let (url, _, task) = server(catalog).await;
     let manager = support::manager(root.path().join("state"), url.clone(), url);
     let connection = manager
-        .connect(context(), ToolId::DuMate, &inventory, path)
+        .connect(context(), ToolId::DuMate, &inventory, path.clone())
         .await
         .unwrap();
     assert_eq!(connection.models, ["existing"]);
@@ -803,8 +812,7 @@ async fn reconnect_to_another_origin_selects_its_default_model() {
         .unwrap();
     assert!(!result.key_reused);
     assert_eq!(result.connection.models, ["glm-5.3"]);
-    let configured: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-    assert_eq!(configured["customLLMProvider"]["model"], "glm-5.3");
+    assert_eq!(managed_provider(&path)["model"], "glm-5.3");
     assert_eq!(
         second_manager.summaries().unwrap()[0].1.state,
         "configured_untested"
@@ -965,4 +973,469 @@ async fn enterprise_checks_only_the_selected_model_and_removes_a_new_file_on_dis
         task.abort();
         permission_task.abort();
     }
+}
+
+#[tokio::test]
+async fn model_choices_and_switching_preserve_key_billing_and_original_preferences() {
+    let root = tempfile::tempdir().unwrap();
+    let inventory = fixture(root.path());
+    let path = inventory.config_path(ToolId::DuMate);
+    let original = json!({"theme":"dark","customLLMProvider":{"model":"before","baseURL":"https://before.invalid/v1","apiKey":"before-secret","contextLimit":65536,"outputLimit":4096,"custom":true}});
+    write(&path, &original);
+    let plugin = path
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("opencode/plugins/tokenmarket-dumate.js");
+    std::fs::create_dir_all(plugin.parent().unwrap()).unwrap();
+    std::fs::write(
+        &plugin,
+        b"// Token Market DuMate 1.0.89 bridge.\n// old trial fixture\n",
+    )
+    .unwrap();
+    let (url, requests, task) = server(catalogue()).await;
+    let manager = support::manager(root.path().join("state"), url.clone(), url);
+    let choices = manager
+        .prepare_dumate_models(context(), &inventory, path.clone(), None, None, false)
+        .await
+        .unwrap();
+    assert_eq!(choices.models, ["glm-5.3", "existing"]);
+    assert_eq!(choices.selected_model, "glm-5.3");
+    assert!(manager.list().unwrap().is_empty());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&std::fs::read(&path).unwrap()).unwrap(),
+        original
+    );
+    let initial = manager
+        .configure_dumate_model(
+            context(),
+            &inventory,
+            path.clone(),
+            None,
+            None,
+            "existing",
+            false,
+        )
+        .await
+        .unwrap();
+    assert!(!plugin.exists(), "saving retires the old extension");
+    assert!(initial.key_reused);
+    assert_eq!(initial.connection.models, ["existing"]);
+    assert_eq!(managed_provider(&path)["contextLimit"], 65536);
+    assert_eq!(managed_provider(&path)["outputLimit"], 4096);
+    manager
+        .test_connection(
+            ToolId::DuMate,
+            &initial.connection.key_id,
+            ConnectionTestRequest {
+                confirmed: true,
+                model: Some("existing".into()),
+            },
+        )
+        .await
+        .unwrap();
+    let mut other_workspace = context();
+    other_workspace.workspace_id = "another-workspace".into();
+    let bound_context = manager
+        .dumate_model_context(other_workspace, &initial.connection.key_id)
+        .unwrap();
+    assert_eq!(bound_context.workspace_id, "42");
+    let bound_choices = manager
+        .prepare_dumate_models(
+            bound_context.clone(),
+            &inventory,
+            path.clone(),
+            Some(&initial.connection.key_id),
+            None,
+            true,
+        )
+        .await
+        .unwrap();
+    assert!(bound_choices.models.contains(&"existing".to_string()));
+
+    let changed = manager
+        .configure_dumate_model(
+            bound_context,
+            &inventory,
+            path.clone(),
+            Some(&initial.connection.key_id),
+            None,
+            "glm-5.3",
+            true,
+        )
+        .await
+        .unwrap();
+    assert!(changed.key_reused);
+    assert_eq!(changed.connection.key_id, initial.connection.key_id);
+    assert_eq!(
+        changed.connection.bound_workspace,
+        initial.connection.bound_workspace
+    );
+    assert_eq!(changed.connection.models, ["glm-5.3"]);
+    assert!(changed.connection.test_result.is_none());
+    assert_eq!(
+        manager.summaries().unwrap()[0].1.state,
+        "configured_untested"
+    );
+    assert_eq!(managed_provider(&path)["contextLimit"], 200000);
+    assert_eq!(managed_provider(&path)["outputLimit"], 128000);
+    assert_eq!(managed_provider(&path)["custom"], true);
+    assert_eq!(managed_provider(&path)["apiKey"], "sk-dumate-fixture");
+    assert_eq!(
+        requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|r| r.starts_with("POST /api/desktop/connections/keys "))
+            .count(),
+        1
+    );
+    assert_eq!(
+        requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|r| r.starts_with("POST /v1/chat/completions "))
+            .count(),
+        1
+    );
+    manager
+        .disconnect(
+            ToolId::DuMate,
+            &initial.connection.key_id,
+            None,
+            DisconnectRequest::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::from_slice::<Value>(&std::fs::read(&path).unwrap()).unwrap(),
+        original
+    );
+    assert!(
+        !plugin.exists(),
+        "switching or cancellation must never reinstall the extension"
+    );
+    task.abort();
+}
+
+/// Exercise the production-home guard in a child with an isolated home. The installed
+/// engine is only read for its on-disk compatibility hash; no real DuMate is started.
+#[cfg(target_os = "macos")]
+#[tokio::test]
+#[ignore = "requires the supported official macOS DuMate installation"]
+async fn live_runtime_identity_does_not_block_saved_model_configuration() {
+    const TEST: &str = "live_runtime_identity_does_not_block_saved_model_configuration";
+    const SCOPE: &str = "TOKEN_MARKET_DUMATE_SAVE_FIXTURE";
+    let Some(home) = std::env::var_os(SCOPE) else {
+        let root = tempfile::tempdir().unwrap();
+        fixture(root.path());
+        let engine = root.path().join("Applications/DuMate.app/Contents/Resources/extra-resource/opencode/bin/dumate-opencode");
+        std::fs::create_dir_all(engine.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(
+            "/Applications/DuMate.app/Contents/Resources/extra-resource/opencode/bin/dumate-opencode",
+            engine,
+        ).unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", TEST, "--ignored", "--nocapture"])
+            .env(SCOPE, root.path())
+            .env("HOME", root.path())
+            .status()
+            .unwrap();
+        assert!(
+            status.success(),
+            "isolated production-home save path failed"
+        );
+        return;
+    };
+    let home = PathBuf::from(home);
+    assert_eq!(tokenmarket_core::config::home_dir(), home);
+    let inventory = fixture(&home);
+    let path = inventory.config_path(ToolId::DuMate);
+    let original = json!({"theme":"keep","customLLMProvider":null});
+    write(&path, &original);
+    // A live process whose runtime/account cannot be inspected must not gate saving.
+    let pidfile = data(&home).join("log/opencode/opencode.pid");
+    std::fs::create_dir_all(pidfile.parent().unwrap()).unwrap();
+    std::fs::write(&pidfile, std::process::id().to_string()).unwrap();
+    let (url, requests, task) = server(catalogue()).await;
+    let manager = support::manager(home.join("state"), url.clone(), url);
+    let choices = manager
+        .prepare_dumate_models(context(), &inventory, path.clone(), None, None, false)
+        .await
+        .expect("live runtime identity must not block choosing models");
+    assert!(choices.models.contains(&"glm-5.3".to_string()));
+    let initial = manager
+        .configure_dumate_model(
+            context(),
+            &inventory,
+            path.clone(),
+            None,
+            None,
+            "existing",
+            false,
+        )
+        .await
+        .expect("live runtime identity must not block saving configuration");
+    let switched = manager
+        .configure_dumate_model(
+            context(),
+            &inventory,
+            path.clone(),
+            Some(&initial.connection.key_id),
+            None,
+            "glm-5.3",
+            true,
+        )
+        .await
+        .expect("live runtime identity must not block switching models");
+    assert_eq!(switched.connection.key_id, initial.connection.key_id);
+    assert_eq!(managed_provider(&path)["model"], "glm-5.3");
+    let reconnected = manager
+        .configure_dumate_model(
+            context(),
+            &inventory,
+            path.clone(),
+            Some(&initial.connection.key_id),
+            None,
+            "existing",
+            false,
+        )
+        .await
+        .expect("live runtime identity must not block reconnecting");
+    assert_eq!(reconnected.connection.key_id, initial.connection.key_id);
+    assert_eq!(managed_provider(&path)["model"], "existing");
+    manager
+        .disconnect(
+            ToolId::DuMate,
+            &initial.connection.key_id,
+            None,
+            DisconnectRequest::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::from_slice::<Value>(&std::fs::read(&path).unwrap()).unwrap(),
+        original
+    );
+    assert_eq!(
+        std::fs::read_to_string(pidfile).unwrap(),
+        std::process::id().to_string()
+    );
+    assert!(!requests
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|r| r.starts_with("POST /v1/chat/completions ")));
+    task.abort();
+}
+
+#[tokio::test]
+async fn selecting_unavailable_or_ineligible_models_never_falls_back_or_changes_files() {
+    let root = tempfile::tempdir().unwrap();
+    let inventory = fixture(root.path());
+    let path = inventory.config_path(ToolId::DuMate);
+    let mut models = catalogue();
+    models["data"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"id":"no-limits","model_types":["TEXT_GENERATION"]}));
+    let (url, requests, task) = server(models).await;
+    let manager = support::manager(root.path().join("state"), url.clone(), url);
+    let choices = manager
+        .prepare_dumate_models(context(), &inventory, path.clone(), None, None, false)
+        .await
+        .unwrap();
+    assert_eq!(choices.models, ["glm-5.3", "existing"]);
+    for model in ["missing", "embed", "no-limits", ""] {
+        assert!(manager
+            .configure_dumate_model(
+                context(),
+                &inventory,
+                path.clone(),
+                None,
+                None,
+                model,
+                false
+            )
+            .await
+            .is_err());
+        assert!(!path.exists());
+        assert!(manager.list().unwrap().is_empty());
+    }
+    assert!(!requests
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|r| r.starts_with("POST /v1/chat/completions ")));
+    task.abort();
+}
+
+#[tokio::test]
+async fn legacy_file_only_connection_migrates_in_place_and_restores_original_on_cancel() {
+    let root = tempfile::tempdir().unwrap();
+    let inventory = fixture(root.path());
+    let path = inventory.config_path(ToolId::DuMate);
+    let original = json!({"theme":"keep","customLLMProvider":{"baseURL":"https://before.invalid/v1","apiKey":"before-secret","model":"before","contextLimit":65536,"outputLimit":4096}});
+    write(&path, &original);
+    let (url, requests, task) = server(catalogue()).await;
+    let directory = root.path().join("state");
+    let manager = support::manager(directory.clone(), url.clone(), url);
+    let first = manager
+        .connect(context(), ToolId::DuMate, &inventory, path.clone())
+        .await
+        .unwrap();
+    let account = path.parent().unwrap().parent().unwrap();
+    let plugin = account.join("opencode/plugins/tokenmarket-dumate-unified.js");
+    let policy = account.join("opencode/tokenmarket-unified.json");
+    let mut legacy = manager.list().unwrap();
+    let legacy_provider = managed_provider(&path);
+    let mut legacy_preference = original.clone();
+    legacy_preference["customLLMProvider"] = legacy_provider.clone();
+    write(&path, &legacy_preference);
+    legacy[0].receipts.retain(|r| r.path == path);
+    legacy[0].receipts[0]
+        .fields
+        .iter_mut()
+        .find(|f| f.pointer == "/customLLMProvider")
+        .unwrap()
+        .applied = legacy_provider;
+    std::fs::remove_file(&plugin).unwrap();
+    std::fs::remove_file(&policy).unwrap();
+    // A real old client stored only the native provider receipt. This also exercises
+    // the supported legacy plaintext-record migration into the encrypted store.
+    std::fs::write(
+        directory.join("connections.json"),
+        serde_json::to_vec(&legacy).unwrap(),
+    )
+    .unwrap();
+    let changed = manager
+        .configure_dumate_model(
+            context(),
+            &inventory,
+            path.clone(),
+            Some(&first.key_id),
+            None,
+            "existing",
+            true,
+        )
+        .await
+        .unwrap();
+    assert_eq!(changed.connection.key_id, first.key_id);
+    assert!(changed.key_reused);
+    assert_eq!(manager.list().unwrap()[0].receipts.len(), 3);
+    let source = std::fs::read_to_string(&plugin).unwrap();
+    assert!(source.starts_with("// Token Market DuMate unified cold-start adapter v2."));
+    assert!(!source.contains("sk-dumate-fixture"));
+    let control = std::fs::read_to_string(&policy).unwrap();
+    assert!(control.contains("sk-dumate-fixture"));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&policy).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+    assert_eq!(
+        serde_json::from_str::<Value>(&control).unwrap()["unified"]["model"],
+        "existing"
+    );
+    manager
+        .disconnect(
+            ToolId::DuMate,
+            &first.key_id,
+            None,
+            DisconnectRequest::default(),
+        )
+        .await
+        .unwrap();
+    assert!(!plugin.exists());
+    assert!(!policy.exists());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&std::fs::read(&path).unwrap()).unwrap(),
+        original
+    );
+    assert_eq!(
+        requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|r| r.starts_with("POST /api/desktop/connections/keys "))
+            .count(),
+        1
+    );
+    assert!(!requests
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|r| r.starts_with("POST /v1/chat/completions ")));
+    task.abort();
+}
+
+#[tokio::test]
+async fn amended_unified_adapter_is_not_overwritten_and_is_backed_up_disabled_on_cancel() {
+    let root = tempfile::tempdir().unwrap();
+    let inventory = fixture(root.path());
+    let path = inventory.config_path(ToolId::DuMate);
+    write(&path, &json!({"theme":"keep"}));
+    let (url, _, task) = server(catalogue()).await;
+    let manager = support::manager(root.path().join("state"), url.clone(), url);
+    let first = manager
+        .connect(context(), ToolId::DuMate, &inventory, path.clone())
+        .await
+        .unwrap();
+    let config = path.parent().unwrap().parent().unwrap();
+    let plugin = config.join("opencode/plugins/tokenmarket-dumate-unified.js");
+    let mut amended = std::fs::read(&plugin).unwrap();
+    amended.extend_from_slice(b"\n// user amendment\n");
+    std::fs::write(&plugin, &amended).unwrap();
+    let before = std::fs::read(&path).unwrap();
+    let error = manager
+        .configure_dumate_model(
+            context(),
+            &inventory,
+            path.clone(),
+            Some(&first.key_id),
+            None,
+            "existing",
+            true,
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("配置") || error.to_string().contains("修改"),
+        "{error}"
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    assert_eq!(std::fs::read(&plugin).unwrap(), amended);
+    let cancelled = manager
+        .disconnect(
+            ToolId::DuMate,
+            &first.key_id,
+            None,
+            DisconnectRequest::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(cancelled.state, "disconnected");
+    assert!(!plugin.exists());
+    let backups = config.parent().unwrap().join("state/tokenmarket-dumate");
+    let backup = std::fs::read_dir(backups)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| {
+            p.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("retired-unified-")
+        })
+        .unwrap();
+    assert_eq!(std::fs::read(backup).unwrap(), amended);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&std::fs::read(path).unwrap()).unwrap(),
+        json!({"theme":"keep"})
+    );
+    task.abort();
 }

@@ -1,0 +1,504 @@
+{
+  "status": "superseded",
+  "superseded_by": "2026-11-05-dumate-restart-only.json",
+  "superseded_reason": "Returned to persisted native preferences with explicit optional restart; runtime mutation and routing extension removed.",
+  "date": "2026-11-05",
+  "version": "DuMate 1.0.89.447",
+  "platform": "macOS arm64",
+  "bridge_source_sha256": "e1c75a5bcb86b884ebd2576487e54a42ad039552b88852f88ea3e72d20b4c4c9",
+  "implementation": "Original persisted provider and connection binding retained; account-scoped engine extension synchronously selects local text route, drains active generations, updates native runtime, clamps outbound output and exposes authenticated revision status",
+  "native_acceptance": {
+    "version": "1.0.89.447",
+    "external_network": "denied",
+    "real_user_data": "denied",
+    "scenarios": [
+      {
+        "ai_assistant_enabled": true,
+        "production_bridge_used": true,
+        "same_backend_and_engine_processes": true,
+        "opencode_new_runtime": false,
+        "native_cloud_reply_not_tested": true,
+        "stages": [
+          {
+            "stage": "cold_start_body",
+            "body_model": "fixture-cold",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 131072,
+            "preference_output_limit": 4096,
+            "outbound_max_tokens": [
+              4096
+            ],
+            "outbound_output_limit_matches_preference": true
+          },
+          {
+            "stage": "concurrent_first_body_0",
+            "body_model": "fixture-cold",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 131072,
+            "preference_output_limit": 4096,
+            "outbound_max_tokens": [
+              4096
+            ],
+            "outbound_output_limit_matches_preference": true
+          },
+          {
+            "stage": "concurrent_first_body_7",
+            "body_model": "fixture-cold",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 131072,
+            "preference_output_limit": 4096,
+            "outbound_max_tokens": [
+              4096
+            ],
+            "outbound_output_limit_matches_preference": true
+          },
+          {
+            "stage": "concurrent_first_body_3",
+            "body_model": "fixture-cold",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 131072,
+            "preference_output_limit": 4096,
+            "outbound_max_tokens": [
+              4096
+            ],
+            "outbound_output_limit_matches_preference": true
+          },
+          {
+            "stage": "concurrent_first_body_5",
+            "body_model": "fixture-cold",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 131072,
+            "preference_output_limit": 4096,
+            "outbound_max_tokens": [
+              4096
+            ],
+            "outbound_output_limit_matches_preference": true
+          },
+          {
+            "stage": "concurrent_first_body_1",
+            "body_model": "fixture-cold",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 131072,
+            "preference_output_limit": 4096,
+            "outbound_max_tokens": [
+              4096
+            ],
+            "outbound_output_limit_matches_preference": true
+          },
+          {
+            "stage": "concurrent_first_body_2",
+            "body_model": "fixture-cold",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 131072,
+            "preference_output_limit": 4096,
+            "outbound_max_tokens": [
+              4096
+            ],
+            "outbound_output_limit_matches_preference": true
+          },
+          {
+            "stage": "concurrent_first_body_6",
+            "body_model": "fixture-cold",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 131072,
+            "preference_output_limit": 4096,
+            "outbound_max_tokens": [
+              4096
+            ],
+            "outbound_output_limit_matches_preference": true
+          },
+          {
+            "stage": "concurrent_first_body_4",
+            "body_model": "fixture-cold",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 131072,
+            "preference_output_limit": 4096,
+            "outbound_max_tokens": [
+              4096
+            ],
+            "outbound_output_limit_matches_preference": true
+          },
+          {
+            "stage": "concurrent_first_body_8",
+            "body_model": "fixture-cold",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 131072,
+            "preference_output_limit": 4096,
+            "outbound_max_tokens": [
+              4096
+            ],
+            "outbound_output_limit_matches_preference": true
+          },
+          {
+            "stage": "concurrent_first_body_9",
+            "body_model": "fixture-cold",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 131072,
+            "preference_output_limit": 4096,
+            "outbound_max_tokens": [
+              4096
+            ],
+            "outbound_output_limit_matches_preference": true
+          },
+          {
+            "stage": "concurrent_first_body_10",
+            "body_model": "fixture-cold",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 131072,
+            "preference_output_limit": 4096,
+            "outbound_max_tokens": [
+              4096
+            ],
+            "outbound_output_limit_matches_preference": true
+          },
+          {
+            "stage": "concurrent_first_body_11",
+            "body_model": "fixture-cold",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 131072,
+            "preference_output_limit": 4096,
+            "outbound_max_tokens": [
+              4096
+            ],
+            "outbound_output_limit_matches_preference": true
+          },
+          {
+            "stage": "concurrent_first_body_12",
+            "body_model": "fixture-cold",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 131072,
+            "preference_output_limit": 4096,
+            "outbound_max_tokens": [
+              4096
+            ],
+            "outbound_output_limit_matches_preference": true
+          },
+          {
+            "stage": "concurrent_first_body_13",
+            "body_model": "fixture-cold",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 131072,
+            "preference_output_limit": 4096,
+            "outbound_max_tokens": [
+              4096
+            ],
+            "outbound_output_limit_matches_preference": true
+          },
+          {
+            "stage": "concurrent_first_body_14",
+            "body_model": "fixture-cold",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 131072,
+            "preference_output_limit": 4096,
+            "outbound_max_tokens": [
+              4096
+            ],
+            "outbound_output_limit_matches_preference": true
+          },
+          {
+            "stage": "concurrent_first_body_15",
+            "body_model": "fixture-cold",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 131072,
+            "preference_output_limit": 4096,
+            "outbound_max_tokens": [
+              4096
+            ],
+            "outbound_output_limit_matches_preference": true
+          },
+          {
+            "stage": "concurrent_first_body_16",
+            "body_model": "fixture-cold",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 131072,
+            "preference_output_limit": 4096,
+            "outbound_max_tokens": [
+              4096
+            ],
+            "outbound_output_limit_matches_preference": true
+          },
+          {
+            "stage": "concurrent_first_body_17",
+            "body_model": "fixture-cold",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 131072,
+            "preference_output_limit": 4096,
+            "outbound_max_tokens": [
+              4096
+            ],
+            "outbound_output_limit_matches_preference": true
+          },
+          {
+            "stage": "concurrent_first_body_18",
+            "body_model": "fixture-cold",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 131072,
+            "preference_output_limit": 4096,
+            "outbound_max_tokens": [
+              4096
+            ],
+            "outbound_output_limit_matches_preference": true
+          },
+          {
+            "stage": "concurrent_first_body_19",
+            "body_model": "fixture-cold",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 131072,
+            "preference_output_limit": 4096,
+            "outbound_max_tokens": [
+              4096
+            ],
+            "outbound_output_limit_matches_preference": true
+          },
+          {
+            "stage": "concurrent_first_body_20",
+            "body_model": "fixture-cold",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 131072,
+            "preference_output_limit": 4096,
+            "outbound_max_tokens": [
+              4096
+            ],
+            "outbound_output_limit_matches_preference": true
+          },
+          {
+            "stage": "concurrent_first_body_21",
+            "body_model": "fixture-cold",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 131072,
+            "preference_output_limit": 4096,
+            "outbound_max_tokens": [
+              4096
+            ],
+            "outbound_output_limit_matches_preference": true
+          },
+          {
+            "stage": "concurrent_first_body_22",
+            "body_model": "fixture-cold",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 131072,
+            "preference_output_limit": 4096,
+            "outbound_max_tokens": [
+              4096
+            ],
+            "outbound_output_limit_matches_preference": true
+          },
+          {
+            "stage": "concurrent_first_body_23",
+            "body_model": "fixture-cold",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 131072,
+            "preference_output_limit": 4096,
+            "outbound_max_tokens": [
+              4096
+            ],
+            "outbound_output_limit_matches_preference": true
+          },
+          {
+            "stage": "in_flight_keeps_old_model",
+            "body_model": "fixture-cold",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 131072,
+            "preference_output_limit": 4096,
+            "outbound_max_tokens": [
+              4096
+            ],
+            "outbound_output_limit_matches_preference": true
+          },
+          {
+            "stage": "pending_new_task_uses_new_model",
+            "body_model": "fixture-switched",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 262144,
+            "preference_output_limit": 8192,
+            "outbound_max_tokens": [
+              8192
+            ],
+            "outbound_output_limit_matches_preference": true
+          },
+          {
+            "stage": "hot_switch_existing_session",
+            "body_model": "fixture-switched",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 262144,
+            "preference_output_limit": 8192,
+            "outbound_max_tokens": [
+              8192
+            ],
+            "outbound_output_limit_matches_preference": true
+          },
+          {
+            "stage": "hot_switch_new_session",
+            "body_model": "fixture-switched",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 262144,
+            "preference_output_limit": 8192,
+            "outbound_max_tokens": [
+              8192
+            ],
+            "outbound_output_limit_matches_preference": true
+          },
+          {
+            "stage": "hot_reconnect_existing_session",
+            "body_model": "fixture-reconnected",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 524288,
+            "preference_output_limit": 16384,
+            "outbound_max_tokens": [
+              16384
+            ],
+            "outbound_output_limit_matches_preference": true
+          },
+          {
+            "stage": "hot_reconnect_new_session",
+            "body_model": "fixture-reconnected",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 524288,
+            "preference_output_limit": 16384,
+            "outbound_max_tokens": [
+              16384
+            ],
+            "outbound_output_limit_matches_preference": true
+          },
+          {
+            "stage": "cancel_restores_original_routing",
+            "body_provider": "ai_assistant",
+            "custom_model_body_requests": 0
+          },
+          {
+            "stage": "reconnect_after_cancellation",
+            "body_model": "fixture-reconnected",
+            "complete_body": true,
+            "key_and_base_url_verified": true,
+            "live_input_capacity": 524288,
+            "preference_output_limit": 16384,
+            "outbound_max_tokens": [
+              16384
+            ],
+            "outbound_output_limit_matches_preference": true
+          },
+          {
+            "stage": "cancel_removes_provider_and_restores_native_routing",
+            "body_provider": "ai_assistant",
+            "custom_model_body_requests": 0
+          }
+        ]
+      }
+    ]
+  },
+  "runtime_failure": {
+    "version": "1.0.89.447",
+    "external_network": "denied",
+    "real_user_data": "denied",
+    "scenarios": [
+      {
+        "runtime_failure_preserves_saved_selection": true,
+        "new_body_blocked_instead_of_native_fallback": true
+      }
+    ]
+  },
+  "external_edit_conflict": {
+    "version": "1.0.89.447",
+    "external_network": "denied",
+    "real_user_data": "denied",
+    "scenarios": [
+      {
+        "external_provider_change_preserved": true,
+        "native_runtime_not_overwritten": true,
+        "state": "conflict"
+      }
+    ]
+  },
+  "unsupported_runtime_guard": {
+    "version": "1.0.89.447",
+    "external_network": "denied",
+    "real_user_data": "denied",
+    "scenarios": [
+      {
+        "unsupported_guard_verified": true,
+        "new_runtime": true,
+        "other_plugin": false
+      }
+    ]
+  },
+  "other_plugin_guard": {
+    "version": "1.0.89.447",
+    "external_network": "denied",
+    "real_user_data": "denied",
+    "scenarios": [
+      {
+        "unsupported_guard_verified": true,
+        "new_runtime": false,
+        "other_plugin": true
+      }
+    ]
+  },
+  "checks": {
+    "core_unit_passed": 9,
+    "isolated_rust_bridge_transaction_passed": true,
+    "core_integration_passed": 80,
+    "chromium_ui_passed": 84,
+    "webkit_dumate_ui_passed": 12,
+    "tauri_cargo_check": true,
+    "format_and_diff_checks": true
+  },
+  "security": {
+    "credentials_in_bridge_files": false,
+    "runtime_receipt_hmac_verified": true,
+    "pid_uid_and_bundle_identity_verified": true,
+    "control_without_inapp_key_rejected": true,
+    "wrong_launch_key_signature_rejected": true,
+    "loopback_clients_ignore_system_proxy": true,
+    "redirects_allowed": false,
+    "automatic_paid_tests": false,
+    "user_real_data_modified_by_acceptance": false,
+    "vendor_application_files_modified": false
+  },
+  "limits": [
+    "Text conversations and local text Agent execution only",
+    "OPENCODE_NEW_RUNTIME=0 or unset; new Sandbox Manager/VM runtime is explicitly unsupported",
+    "Other engine plugins are explicitly unsupported; none are removed",
+    "Image/cloud special flows are not claimed to be replaced",
+    "Real completed cloud conversation history migration and real desktop UI installation remain user acceptance",
+    "Windows full bridge is not verified",
+    "No Developer ID or notarization evidence"
+  ],
+  "commands": [
+    "CARGO_TARGET_DIR=<test-target> python3 tests/helpers/dumate-managed-native-probe.py --rust-auth --stress",
+    "python3 tests/helpers/dumate-managed-native-probe.py --backend-failure",
+    "python3 tests/helpers/dumate-managed-native-probe.py --external-conflict",
+    "python3 tests/helpers/dumate-managed-native-probe.py --unsupported-runtime",
+    "python3 tests/helpers/dumate-managed-native-probe.py --other-plugin"
+  ]
+}

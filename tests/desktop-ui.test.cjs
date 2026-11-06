@@ -2,9 +2,9 @@
 // these tests never load credentials, change tool files, launch tools or bill a model.
 const {test, before, after} = require('node:test');
 const assert = require('node:assert/strict');
-const {chromium} = require('playwright');
+const {chromium, webkit} = require('playwright');
 let browser;
-before(async () => { browser = await chromium.launch({headless:true, ...(process.env.TOKEN_MARKET_TEST_BROWSER_CHANNEL ? {channel:process.env.TOKEN_MARKET_TEST_BROWSER_CHANNEL} : {})}); });
+before(async () => { browser = await (process.env.TOKEN_MARKET_TEST_BROWSER_ENGINE === 'webkit' ? webkit : chromium).launch({headless:true, ...(process.env.TOKEN_MARKET_TEST_BROWSER_CHANNEL ? {channel:process.env.TOKEN_MARKET_TEST_BROWSER_CHANNEL} : {})}); });
 after(async () => { await browser?.close(); });
 const createFixture = require('./helpers/desktop-fixture.cjs');
 const openFixture = options => createFixture(browser, options);
@@ -518,7 +518,10 @@ test('other-environment connections require reconnect and cannot start a paid te
     assert.equal(await p.locator('.connection-test-dialog[open]').count(), 0);
     await manage(p);
     await p.locator('#tool-detail-region .tool-connect').click();
-    await p.locator('.reconnect-dialog[open]').waitFor();
+    await p.locator('.dumate-model-dialog[open] .dumate-model-select:enabled').waitFor();
+    const target=(await calls(p,'prepare_dumate_models'))[0].args.target;
+    assert.equal(target.preserveBinding,false);
+    assert.equal(target.expectedOwnerId,'user-fixture');
     assert.equal((await calls(p, 'test_tool_connection')).length, 0);
     assert.deepEqual(f.errors, []);
   } finally { await f.close(); }
@@ -535,9 +538,9 @@ test('DuMate personal installs separately, configures one model, and tests only 
     await detail(p,'dumate');
     assert.match(await p.locator('#tool-detail-region').innerText(),/一次配置一个模型/);
     await p.locator('#tool-detail-region .tool-connect').click();
-    await p.locator('.connect-confirm-dialog[open] .connect-confirm').click();
-    await p.getByRole('heading',{name:'百度搭子 DuMate（个人版） 已接入'}).waitFor();
-    assert.match(await p.locator('.restart-notice').innerText(),/完全退出并重新打开 DuMate/);
+    await p.locator('.dumate-model-dialog[open] .dumate-model-confirm').click();
+    await p.getByRole('heading',{name:'接入配置已保存'}).waitFor();
+    assert.match(await p.locator('.restart-notice').innerText(),/已保存，重启搭子后生效/);
     assert.equal((await calls(p,'test_tool_connection')).length,0);
     await p.locator('dialog[open] .close').click();
     await p.locator('#tool-detail-region .tool-test').click();
@@ -545,7 +548,8 @@ test('DuMate personal installs separately, configures one model, and tests only 
     assert.equal(await selector.isDisabled(),true);
     assert.equal(await selector.locator('option').count(),1);
     assert.equal((await calls(p,'test_tool_connection')).length,0);
-    assert.deepEqual((await calls(p,'connect_tool'))[0].args,{tool:'dumate',recovery:null});
+    assert.equal((await calls(p,'connect_tool')).length,0);
+    assert.equal((await calls(p,'configure_dumate_model'))[0].args.model,'fixture-model');
     assert.deepEqual(f.errors,[]);
   } finally { await f.close(); }
 });
@@ -897,7 +901,7 @@ test('activation during an in-flight sync is followed by one sync with the lates
     assert.equal((await calls(p,'check_tool_updates')).length,before+1);
     await p.evaluate(()=>{window.__fixture.deferUpdates=false;window.__fixture.resolveUpdates();});
     await p.waitForFunction(before=>window.__fixture.calls.filter(c=>c.command==='check_tool_updates').length===before+2,before);
-    await p.locator('[data-tool-filter="uninstalled"]').filter({hasText:'未安装 11'}).waitFor();
+    await p.locator('[data-tool-filter="uninstalled"]').filter({hasText:'未安装 10'}).waitFor();
     assert.deepEqual(f.errors,[]);
   }finally{await f.close();}
 });
@@ -946,22 +950,22 @@ test('inventory refresh retains content while waiting and after failure, then di
     await p.evaluate(async()=>{window.__fixture.deferInventory=false;window.__fixture.resolveInventory();await window.__inventoryRefresh;});
     assert.equal(await p.evaluate(()=>window.__inventoryRow===document.querySelector('[data-tool="codex"]')),true);
     await p.evaluate(async()=>{window.__fixture.inventoryError=true;await window.TokenMarketTools.refresh();});
-    assert.equal(await p.locator('.tool-row').count(),15);
+    assert.equal(await p.locator('.tool-row').count(),14);
     assert.equal(await p.evaluate(()=>window.__inventoryRow===document.querySelector('[data-tool="codex"]')),true);
     await p.evaluate(async()=>{window.__fixture.inventoryError=false;window.__fixture.entries.find(e=>e.id==='openclaw').installed=true;await window.TokenMarketTools.refresh();});
-    assert.equal(await p.locator('[data-tool-filter="uninstalled"]').innerText(),'未安装 11');
+    assert.equal(await p.locator('[data-tool-filter="uninstalled"]').innerText(),'未安装 10');
     assert.deepEqual(f.errors,[]);
   }finally{await f.close();}
 });
 
 test('real UI renders safe native summaries, searches, navigates and fits desktop/mobile', async () => {
   const f = await openFixture();try {
-    const p=f.page;assert.equal(await p.locator('.tool-row').count(),15);
+    const p=f.page;assert.equal(await p.locator('.tool-row').count(),14);
     assert.equal((await calls(p,'test_tool_connection')).length,0);
     assert.equal((await calls(p,'connect_tool')).length,0);
     await p.locator('.tools-search').fill('Codex');assert.equal(await p.locator('.tool-row').count(),1);
     await p.locator('.tools-search').fill('no-match');await p.getByRole('heading',{name:'没有匹配的工具'}).waitFor();
-    await p.getByRole('button',{name:'查看全部工具'}).click();assert.equal(await p.locator('.tool-row').count(),15);
+    await p.getByRole('button',{name:'查看全部工具'}).click();assert.equal(await p.locator('.tool-row').count(),14);
     await p.locator('[data-tool-filter="available"]').click();assert.equal(await p.locator('.tool-row').count(),1);
     await p.locator('[data-tool-filter="all"]').click();
     for(const width of [1440,900,375]) { await p.setViewportSize({width,height:width===1440?1000:760});assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);assert.equal(await p.locator('#signed-in').isVisible(),true); }
@@ -1095,27 +1099,21 @@ test('missing local credentials require scoped recovery confirmation and no clea
   } finally {await f.close();}
 });
 
-test('DuMate enterprise imports a catalogue with separate selection and DuMate check guidance', async () => {
-  const f=await openFixture();try {
-    const p=f.page; const row=p.locator('[data-tool="dumate-enterprise"]');
-    await row.locator('img').evaluate(image=>image.decode());
-    await row.locator('.tool-install').click();
-    await p.locator('.tool-install-status').filter({hasText:'安装完成'}).waitFor();
-    await p.locator('.tool-install-close').click();
-    await detail(p,'dumate-enterprise');
-    assert.match(await p.locator('#tool-detail-region').innerText(),/企业管理员/);
-    await p.locator('#tool-detail-region .tool-connect').click();
-    await p.locator('.connect-confirm-dialog[open] .connect-confirm').click();
-    await p.getByRole('heading',{name:'百度搭子 DuMate（企业版） 已接入'}).waitFor();
-    assert.match(await p.locator('.restart-notice').innerText(),/测试所选模型.*重新打开 DuMate/);
-    assert.equal((await calls(p,'test_tool_connection')).length,0);
-    assert.deepEqual((await calls(p,'connect_tool'))[0].args,{tool:'dumate-enterprise',recovery:null});
-    await p.locator('dialog[open] .close').click();
-    await p.locator('#tool-detail-region .tool-test').click();
-    const selector=p.locator('.connection-test-dialog select');
-    assert.match(await p.locator('.connection-test-dialog .test-scope').innerText(),/写回 DuMate/);
-    assert.equal(await selector.isDisabled(),false);
-    assert.equal(await selector.locator('option').count(),3);
+test('DuMate enterprise stays hidden from tools, search and update counts', async () => {
+  const f=await openFixture({installedTools:['dumate','dumate-enterprise'],upgradeTools:['dumate-enterprise']});try {
+    const p=f.page;
+    await p.getByRole('button',{name:'检查更新',exact:true}).waitFor();
+    assert.equal(await p.locator('[data-tool="dumate-enterprise"]').count(),0);
+    assert.equal(await p.locator('[data-tool="dumate"]').count(),1);
+    assert.equal(await p.locator('.tools-count').innerText(),'显示 14 个工具，共 14 个');
+    assert.match(await p.locator('.tools-updates-status').innerText(),/已检查 4 个已安装工具 · 0 个可升级/);
+    await p.locator('.tools-search').fill('企业版');
+    await p.getByRole('heading',{name:'没有匹配的工具'}).waitFor();
+    await p.locator('.tools-search').fill('百度搭子');
+    assert.equal(await p.locator('.tool-row').count(),1);
+    await p.locator('#detect-tools').click();
+    await p.getByRole('button',{name:'检查更新',exact:true}).waitFor();
+    assert.equal(await p.locator('[data-tool="dumate-enterprise"]').count(),0);
     assert.deepEqual(f.errors,[]);
   }finally {await f.close();}
 });
@@ -1267,7 +1265,7 @@ test('tool list keeps installation and connection separate without duplicated mi
     assert.equal(await missing.locator('.tool-state').textContent(),'—');assert.equal(await missing.locator('.tool-state').getAttribute('title'),'安装后可接入');
     assert.equal(await p.locator('[data-tool="workbuddy"] .tool-state').textContent(),'未接入');
     assert.equal(await p.locator('.tools-group').count(),0);
-    assert.equal(await p.locator('.tools-list > .tool-row').count(),15);
+    assert.equal(await p.locator('.tools-list > .tool-row').count(),14);
     assert.equal(await p.locator('[data-tool="openclaw"] .tool-model-summary').count(),0);assert.deepEqual(f.errors,[]);
   }finally{await f.close();}
 });
@@ -1337,7 +1335,7 @@ test('uninstalled tools describe the real installer and details distinguish prog
 test('uninstalled applications retain the planned installation caption in list and details', async () => {
   const f=await openFixture({missingGui:true});try {
     const p=f.page;
-    for (const id of ['workbuddy','deepseek-harness','dumate','dumate-enterprise']) {
+    for (const id of ['workbuddy','deepseek-harness','dumate']) {
       assert.equal(await p.locator(`[data-tool="${id}"] .tool-planned-method`).count(),1);
       assert.equal(await p.locator(`[data-tool="${id}"] .tool-install`).isEnabled(),true);
     }
@@ -1412,8 +1410,8 @@ test('a late startup event offers exact-version ignore and manual checks still s
 test('uninstalled filter counts missing tools and combines with search', async () => {
   const f=await openFixture();try {
     const p=f.page;await p.locator('[data-tool-filter="uninstalled"]').click();
-    assert.equal(await p.locator('[data-tool-filter="uninstalled"]').innerText(),'未安装 12');
-    assert.equal(await p.locator('.tool-row').count(),12);
+    assert.equal(await p.locator('[data-tool-filter="uninstalled"]').innerText(),'未安装 11');
+    assert.equal(await p.locator('.tool-row').count(),11);
     await p.locator('.tools-search').fill('OpenClaw');assert.equal(await p.locator('[data-tool="openclaw"]').count(),1);
     await p.locator('.tools-search').fill('Codex');assert.equal(await p.locator('.tool-row').count(),0);
     assert.deepEqual(f.errors,[]);
@@ -1425,16 +1423,18 @@ test('QwenWork connection shows only usage guidance and leaves no stale list fee
     const p=f.page;const row=p.locator('[data-tool="qwenwork"]');
     await row.locator('img').evaluate(image=>image.decode());
     await row.locator('.tool-connect').click();await p.locator('.connect-confirm-dialog[open]').waitFor();
-    await p.locator('.connect-confirm').click();await p.getByRole('heading',{name:'千问办公 已接入'}).waitFor();
+    await p.locator('.connect-confirm').click();await p.getByRole('heading',{name:'接入配置已保存'}).waitFor({timeout:2500});
     assert.deepEqual((await calls(p,'connect_tool'))[0].args,{tool:'qwenwork',recovery:null});
     const notice = await p.locator('dialog[open] .restart-notice').innerText();
-    assert.equal(notice,'请重新打开千问办公，在模型列表中选择 Token Market 模型。');
+    assert.match(notice,/已保存，重启千问办公后生效/);
+    assert.equal(await p.getByRole('button',{name:'重启千问办公',exact:true}).isVisible(),true);
+    assert.equal((await calls(p,'restart_qwenwork')).length,0);
     assert.doesNotMatch(await p.locator('dialog[open]').innerText(),/API Key|本地代理|修复配置|兼容模型|尚未测试|费用/);
     assert.equal((await calls(p,'test_tool_connection')).length,0);
     await p.locator('dialog[open] .close').click();
     assert.equal(await p.locator('#tools-region > .tools-feedback').textContent(),'');
     await detail(p,'qwenwork');
-    assert.match(await p.locator('#tool-detail-region').innerText(),/接入或取消接入前.*完全退出千问办公/);
+    assert.match(await p.locator('#tool-detail-region').innerText(),/接入或取消接入会保存配置，下次启动千问办公时生效/);
     assert.doesNotMatch(await p.locator('#tool-detail-region').innerText(),/API Key|本地代理|修复配置/);
     await manage(p);await p.locator('#tool-detail-region .tool-connect').filter({hasText:'重新接入'}).click();
     await p.locator('.reconnect-dialog[open]').waitFor();
@@ -1442,6 +1442,89 @@ test('QwenWork connection shows only usage guidance and leaves no stale list fee
     await p.locator('.reconnect-cancel').click();
     await p.locator('#tool-detail-region .tool-launch').click();
     assert.equal((await calls(p,'launch_connected_tool'))[0].args.tool,'qwenwork');assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+for (const action of ['connect','reconnect','disconnect']) test(`QwenWork stopped ${action} does not prompt for restart`, async () => {
+  const f=await openFixture({installedTools:['qwenwork'],qwenworkRunning:false});try {
+    const p=f.page;assert.equal((await calls(p,'is_qwenwork_running')).length,0);
+    await p.locator('[data-tool="qwenwork"] .tool-connect').click();await p.locator('.connect-confirm').click();
+    await p.getByRole('heading',{name:'接入配置已保存',exact:true}).waitFor();
+    if(action!=='connect') {
+      await p.locator('dialog[open] .close').click();await detail(p,'qwenwork');await manage(p);
+      if(action==='reconnect') {
+        await p.locator('#tool-detail-region .tool-connect').filter({hasText:'重新接入'}).click();await p.locator('.reconnect-confirm').click();
+      } else {
+        await p.locator('.tool-disconnect').click();await p.locator('.disconnect-confirm-dialog').getByRole('button',{name:'确认取消接入',exact:true}).click();
+      }
+    }
+    const title={connect:'接入配置已保存',reconnect:'重新接入配置已保存',disconnect:'取消接入配置已保存'}[action];
+    const popup=p.locator('dialog[open]').filter({has:p.getByRole('heading',{name:title,exact:true})});await popup.waitFor();
+    assert.equal(await popup.locator('.restart-qwenwork').isVisible(),false);
+    assert.match(await popup.innerText(),/已保存，下次启动千问办公时生效/);
+    assert.doesNotMatch(await popup.innerText(),/重启千问办公|确认退出/);
+    if(action!=='disconnect') assert.match(await popup.innerText(),/选择 Token Market 模型/);
+    assert.equal((await calls(p,'restart_qwenwork')).length,0);assert.equal((await calls(p,'test_tool_connection')).length,0);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('QwenWork process detection failure preserves saved configuration and hides restart actions', async () => {
+  const f=await openFixture({installedTools:['qwenwork'],qwenworkRunningError:true});try {
+    const p=f.page;await p.locator('[data-tool="qwenwork"] .tool-connect').click();await p.locator('.connect-confirm').click();
+    const popup=p.locator('.tool-connect-result-dialog');await popup.waitFor();
+    assert.match(await popup.innerText(),/无法确认千问办公是否运行/);assert.equal(await popup.locator('.restart-qwenwork').isVisible(),false);
+    assert.equal(await p.evaluate(()=>Boolean(window.__fixture.entries.find(t=>t.id==='qwenwork').connection)),true);
+    await popup.locator('.close').click();await detail(p,'qwenwork');await manage(p);await p.locator('.tool-disconnect').click();
+    await p.locator('.disconnect-confirm-dialog').getByRole('button',{name:'确认取消接入',exact:true}).click();
+    const result=p.locator('.tool-result-dialog');await result.waitFor();
+    assert.match(await result.innerText(),/无法确认千问办公是否运行/);assert.equal(await result.locator('.restart-qwenwork').isVisible(),false);
+    assert.equal(await p.evaluate(()=>window.__fixture.entries.find(t=>t.id==='qwenwork').connection),null);
+    assert.equal((await calls(p,'restart_qwenwork')).length,0);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('QwenWork connect reconnect and disconnect save without implicit restart', async () => {
+  const f=await openFixture({installedTools:['qwenwork']});try {
+    const p=f.page;await p.locator('[data-tool="qwenwork"] .tool-connect').click();
+    await p.locator('.connect-confirm').click();
+    await p.getByRole('heading',{name:'接入配置已保存',exact:true}).waitFor();
+    assert.equal((await calls(p,'restart_qwenwork')).length,0);
+    await p.getByRole('button',{name:'稍后手动重启千问办公',exact:true}).click();
+    await detail(p,'qwenwork');await manage(p);
+    await p.locator('#tool-detail-region .tool-connect').filter({hasText:'重新接入'}).click();
+    await p.locator('.reconnect-confirm').click();
+    await p.getByRole('heading',{name:'重新接入配置已保存',exact:true}).waitFor();
+    assert.equal((await calls(p,'restart_qwenwork')).length,0);
+    await p.getByRole('button',{name:'稍后手动重启千问办公',exact:true}).click();
+    await manage(p);await p.locator('.tool-disconnect').click();
+    await p.locator('.disconnect-confirm-dialog').getByRole('button',{name:'确认取消接入',exact:true}).click();
+    await p.getByRole('heading',{name:'取消接入配置已保存',exact:true}).waitFor();
+    assert.match(await p.locator('.tool-result-detail').innerText(),/重启千问办公后生效/);
+    assert.equal(await p.locator('.tool-result-dialog .restart-qwenwork').isVisible(),true);
+    assert.equal((await calls(p,'restart_qwenwork')).length,0);
+    await p.getByRole('button',{name:'稍后手动重启千问办公',exact:true}).click();
+    assert.equal(await p.evaluate(()=>window.__fixture.entries.find(t=>t.id==='qwenwork').connection),null);
+    assert.equal((await calls(p,'test_tool_connection')).length,0);assert.deepEqual(f.errors,[]);
+    assert.equal((await calls(p,'is_qwenwork_running')).length,3);
+  }finally{await f.close();}
+});
+
+test('QwenWork restart uses native confirmation and cancellation never undoes the saved configuration', async () => {
+  const f=await openFixture({installedTools:['qwenwork']});try {
+    const p=f.page;await p.locator('[data-tool="qwenwork"] .tool-connect').click();await p.locator('.connect-confirm').click();
+    await p.getByRole('heading',{name:'接入配置已保存',exact:true}).waitFor();
+    await p.evaluate(()=>{window.__fixture.qwenworkRestartError='千问办公尚未退出，请在千问中确认退出。';});
+    await p.getByRole('button',{name:'重启千问办公',exact:true}).click();
+    await p.locator('.launch-error').filter({hasText:'请在千问中确认退出'}).waitFor();
+    assert.equal(await p.locator('.tool-connect-result-dialog').isVisible(),true);
+    assert.equal((await calls(p,'connect_tool')).length,1);
+    assert.equal((await calls(p,'restart_dumate')).length,0);
+    assert.equal(await p.evaluate(()=>Boolean(window.__fixture.entries.find(t=>t.id==='qwenwork').connection)),true);
+    await p.evaluate(()=>{window.__fixture.qwenworkRestartError=null;});
+    await p.getByRole('button',{name:'重启千问办公',exact:true}).click();
+    await p.locator('.tool-connect-result-dialog').waitFor({state:'hidden'});
+    assert.deepEqual((await calls(p,'restart_qwenwork')).map(call=>call.args),[{},{}]);
+    assert.equal((await calls(p,'test_tool_connection')).length,0);assert.deepEqual(f.errors,[]);
   }finally{await f.close();}
 });
 
@@ -1490,7 +1573,7 @@ test('tool action menus dismiss outside, on Escape and navigation without leavin
     await p.keyboard.press('Escape');assert.equal(await connection.getAttribute('open'),null);
     assert.equal(await p.locator('#tool-detail-page').isVisible(),true);
     assert.equal(await connection.locator('summary').evaluate(node=>node===document.activeElement),true);
-    await more.locator('summary').click();await p.keyboard.press('Shift+Tab');
+    await more.locator('summary').focus();await p.keyboard.press('Enter');await p.keyboard.press('Shift+Tab');
     assert.equal(await more.getAttribute('open'),null);
     await more.locator('summary').click();await p.locator('#tool-detail-region h1').click();
     assert.equal(await more.getAttribute('open'),null);
@@ -1500,6 +1583,27 @@ test('tool action menus dismiss outside, on Escape and navigation without leavin
     await more.locator('summary').click();await more.locator('.tool-uninstall').click();
     await p.locator('.tool-uninstall-confirm[open]').waitFor();assert.equal(await more.getAttribute('open'),null);
     assert.equal((await calls(p,'start_tool_uninstall')).length,0);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('connection menu actions stay clickable after a detail refresh', async () => {
+  const f=await openFixture({colorScheme:'dark'});try {
+    const p=f.page;await p.locator('.tools-updates-status').filter({hasText:'已检查'}).waitFor();
+    await detail(p,'codex');
+    const menu=p.locator('#tool-detail-region .tool-menu');
+    await menu.locator('summary').click();
+    await p.evaluate(async()=>{window.__fixture.entries.find(e=>e.id==='codex').connection.models=['refreshed-model'];await window.TokenMarketTools.refresh(true);});
+    assert.equal(await menu.getAttribute('open'),'');
+    for(const [action,dialog] of [['.tool-connect','.reconnect-dialog'],['.tool-disconnect','.disconnect-confirm-dialog']]) {
+      if(await menu.getAttribute('open')===null)await menu.locator('summary').click();
+      const button=menu.locator(action);
+      assert.equal(await button.isEnabled(),true);
+      await button.click({timeout:2500});
+      assert.equal(await p.locator(dialog).isVisible(),true);
+      await p.keyboard.press('Escape');
+    }
+    for(const command of ['reconnect_tool','disconnect_tool'])assert.equal((await calls(p,command)).length,0);
+    assert.deepEqual(f.errors,[]);
   }finally{await f.close();}
 });
 
@@ -1534,5 +1638,323 @@ test('unknown uninstall channels display the manual reason without enabling exec
     const p=f.page;await p.locator('[data-tool="codex"] .tool-lifecycle-menu summary').click();await p.locator('[data-tool="codex"] .tool-uninstall').click();
     const dialog=p.locator('.tool-uninstall-confirm');await dialog.waitFor();assert.equal(await dialog.locator('.tool-uninstall-execute').isDisabled(),true);assert.match(await dialog.textContent(),/原安装器/);
     assert.equal((await calls(p,'start_tool_uninstall')).length,0);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+
+test('DuMate chooses a model on connect and switches it in details without changing billing', async () => {
+  const f=await openFixture({installedTools:['dumate']});try {
+    const p=f.page;await detail(p,'dumate');await p.locator('#tool-detail-region .tool-connect').click();
+    await p.locator('.dumate-model-select:enabled').waitFor();
+    assert.equal(await p.locator('.dumate-model-select option').count(),2);
+    assert.equal((await calls(p,'configure_dumate_model')).length,0);
+    await p.locator('.dumate-model-select').selectOption('other-model');await p.locator('.dumate-model-confirm').click();
+    await p.getByRole('heading',{name:'接入配置已保存'}).waitFor();
+    assert.equal((await calls(p,'configure_dumate_model'))[0].args.model,'other-model');
+    await p.locator('dialog[open] .close').click();
+    assert.match(await p.locator('.tool-model-entry').innerText(),/other-model/);
+    await p.locator('.primary-nav [data-page="account"]').click();await p.locator('.account-switch-action').click();
+    await p.locator('.workspace-switch-dialog [data-workspace-id="team"]').click();
+    await p.locator('.primary-nav [data-page="tools"]').click();await detail(p,'dumate');await p.locator('.tool-switch-model').click();
+    await p.locator('.dumate-model-select:enabled').waitFor();
+    assert.equal(await p.locator('.dumate-model-select').inputValue(),'other-model');
+    assert.match(await p.locator('.dumate-model-note').innerText(),/保留当前密钥和计费空间/);
+    assert.doesNotMatch(await p.locator('.dumate-model-note').innerText(),/请先完全退出/);
+    assert.match(await p.locator('.dumate-model-target').innerText(),/个人空间/);
+    await p.locator('.dumate-model-select').selectOption('fixture-model');await p.locator('.dumate-model-confirm').click();
+    await p.getByRole('heading',{name:'模型切换配置已保存'}).waitFor();
+    assert.match(await p.locator('.restart-notice').innerText(),/已保存，重启搭子后生效/);
+    assert.doesNotMatch(await p.locator('.restart-notice').innerText(),/普通聊天可能仍使用搭子原生模型/);
+    assert.doesNotMatch(await p.locator('.restart-notice').innerText(),/配置已生效/);
+    assert.equal((await calls(p,'restart_dumate')).length,0);
+    assert.equal(await p.locator('dialog[open] .restart-dumate').isVisible(),true);
+    const changed=(await calls(p,'configure_dumate_model')).at(-1).args;
+    assert.equal(changed.target.preserveBinding,true);assert.equal(changed.model,'fixture-model');
+    assert.equal(await p.evaluate(()=>window.__fixture.entries.find(t=>t.id==='dumate').connection.boundWorkspace.id),'personal');
+    assert.equal((await calls(p,'test_tool_connection')).length,0);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('DuMate model loading failure, cancellation and workspace changes cannot save a model', async () => {
+  const f=await openFixture({installedTools:['dumate'],dumateModelError:true});try {
+    const p=f.page;await detail(p,'dumate');await p.locator('#tool-detail-region .tool-connect').click();
+    await p.locator('.dumate-model-status').filter({hasText:'无法获取模型目录'}).waitFor();
+    assert.equal(await p.locator('.dumate-model-confirm').isDisabled(),true);
+    await p.evaluate(()=>{window.__fixture.dumateModelError=false;});
+    await p.locator('.dumate-model-retry').click();await p.locator('.dumate-model-select:enabled').waitFor();
+    await p.evaluate(async()=>{window.__fixture.current=window.__fixture.team;await window.TokenMarketWorkspace.refresh();});
+    assert.equal(await p.locator('.dumate-model-dialog').isVisible(),false);assert.equal((await calls(p,'configure_dumate_model')).length,0);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+  const delayed=await openFixture({installedTools:['dumate']});try {
+    const p=delayed.page;await p.evaluate(()=>window.__fixture.deferDuMateModels=true);
+    await detail(p,'dumate');await p.locator('#tool-detail-region .tool-connect').click();
+    await p.waitForFunction(()=>Boolean(window.__fixture.resolveDuMateModels));await p.locator('.dumate-model-cancel').click();
+    await p.evaluate(()=>{window.__fixture.resolveDuMateModels();});
+    assert.equal(await p.locator('.dumate-model-dialog').isVisible(),false);
+    assert.equal((await calls(p,'configure_dumate_model')).length,0);assert.deepEqual(delayed.errors,[]);
+  }finally{await delayed.close();}
+});
+
+
+test('DuMate recovers a missing credential before choosing and saving a model', async () => {
+  const f=await openFixture({installedTools:['dumate'],dumateCredentialLost:true});try {
+    const p=f.page;await detail(p,'dumate');await p.locator('#tool-detail-region .tool-connect').click();
+    await p.locator('.recovery-dialog[open]').waitFor();assert.equal((await calls(p,'configure_dumate_model')).length,0);
+    await p.locator('.recovery-confirm').click();await p.locator('.dumate-model-select:enabled').waitFor();
+    await p.locator('.dumate-model-select').selectOption('other-model');await p.locator('.dumate-model-confirm').click();
+    await p.getByRole('heading',{name:'接入配置已保存'}).waitFor();
+    const request=(await calls(p,'configure_dumate_model'))[0].args;
+    assert.equal(request.model,'other-model');assert.equal(request.target.recovery.keyId,'missing-dumate');assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+
+test('DuMate sends the workspace owner ID when the display profile has no ID', async () => {
+  const f=await openFixture({installedTools:['dumate']});try {
+    const p=f.page;await detail(p,'dumate');await p.locator('#tool-detail-region .tool-connect').click();
+    await p.waitForFunction(()=>window.__fixture.calls.some(call=>call.command==='prepare_dumate_models'));
+    const request=(await calls(p,'prepare_dumate_models'))[0].args;
+    assert.equal(request.target.expectedOwnerId,'user-fixture',await p.locator('.dumate-model-status').innerText());
+    await p.locator('.dumate-model-select:enabled').waitFor();
+    await p.locator('.dumate-model-confirm').click();await p.getByRole('heading',{name:'接入配置已保存'}).waitFor();
+    assert.equal((await calls(p,'configure_dumate_model'))[0].args.target.expectedOwnerId,'user-fixture');
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+
+
+
+for (const action of ['connect','reconnect','switch','disconnect']) test(`DuMate stopped ${action} does not prompt for restart`, async () => {
+  const f=await openFixture({installedTools:['dumate'],dumateRunning:false});try {
+    const p=f.page;await detail(p,'dumate');assert.equal((await calls(p,'is_dumate_running')).length,0);
+    await p.locator('#tool-detail-region .tool-connect').click();
+    await p.locator('.dumate-model-select:enabled').waitFor();await p.locator('.dumate-model-confirm').click();
+    await p.getByRole('heading',{name:'接入配置已保存',exact:true}).waitFor();
+    if (action!=='connect') {
+      await p.locator('dialog[open] .close').click();
+      if (action==='switch') await p.locator('.tool-switch-model').click();
+      else {
+        await manage(p);
+        if (action==='disconnect') await p.locator('.tool-disconnect').click();
+        else await p.locator('#tool-detail-region .tool-menu[open]').getByRole('button',{name:'重新接入',exact:true}).click();
+      }
+      if (action==='disconnect') await p.locator('.disconnect-confirm-dialog').getByRole('button',{name:'确认取消接入',exact:true}).click();
+      else {
+        await p.locator('.dumate-model-select:enabled').waitFor();await p.locator('.dumate-model-confirm').click();
+      }
+    }
+    const title={connect:'接入配置已保存',reconnect:'重新接入配置已保存',switch:'模型切换配置已保存',disconnect:'取消接入配置已保存'}[action];
+    const popup=p.locator('dialog[open]').filter({has:p.getByRole('heading',{name:title,exact:true})});await popup.waitFor();
+    assert.equal(await popup.locator('.restart-dumate').isVisible(),false);
+    assert.match(await popup.innerText(),/下次启动搭子时生效/);
+    assert.doesNotMatch(await popup.innerText(),/重启搭子/);
+    assert.equal((await calls(p,'restart_dumate')).length,0);
+    assert.equal((await calls(p,'test_tool_connection')).length,0);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('DuMate save reconnect switch and cancellation only save configuration until the user chooses restart', async () => {
+  const f=await openFixture({installedTools:['dumate']});try {
+    const p=f.page;await detail(p,'dumate');await p.locator('#tool-detail-region .tool-connect').click();
+    await p.locator('.dumate-model-select:enabled').waitFor();await p.locator('.dumate-model-confirm').click();
+    await p.getByRole('heading',{name:'接入配置已保存'}).waitFor();
+    assert.match(await p.locator('.restart-notice').innerText(),/已保存，重启搭子后生效/);
+    assert.equal(await p.getByRole('button',{name:'重启搭子',exact:true}).isVisible(),true);
+    assert.equal(await p.getByRole('button',{name:'稍后手动重启搭子',exact:true}).isVisible(),true);
+    assert.equal((await calls(p,'restart_dumate')).length,0);
+    await p.locator('dialog[open] .close').click();await p.locator('.tool-switch-model').click();
+    await p.locator('.dumate-model-select:enabled').waitFor();await p.locator('.dumate-model-select').selectOption('other-model');await p.locator('.dumate-model-confirm').click();
+    await p.getByRole('heading',{name:'模型切换配置已保存'}).waitFor();
+    assert.match(await p.locator('.restart-notice').innerText(),/other-model.*已保存，重启搭子后生效/);
+    assert.equal((await calls(p,'restart_dumate')).length,0);
+    await p.locator('dialog[open] .close').click();await manage(p);await p.locator('#tool-detail-region .tool-menu[open]').getByRole('button',{name:'重新接入',exact:true}).click();
+    await p.locator('.dumate-model-select:enabled').waitFor();await p.locator('.dumate-model-confirm').click();
+    await p.getByRole('heading',{name:'重新接入配置已保存'}).waitFor();
+    assert.equal((await calls(p,'restart_dumate')).length,0);
+    await p.locator('dialog[open] .close').click();await manage(p);await p.locator('.tool-disconnect').click();
+    await p.locator('.disconnect-confirm-dialog').getByRole('button',{name:'确认取消接入',exact:true}).click();
+    await p.getByRole('heading',{name:'取消接入配置已保存'}).waitFor();
+    assert.match(await p.locator('.tool-result-detail').innerText(),/已保存，重启搭子后生效/);
+    assert.equal(await p.locator('.tool-result-dialog[open] .restart-dumate').isVisible(),true);
+    assert.equal((await calls(p,'restart_dumate')).length,0);
+    assert.equal((await calls(p,'is_dumate_running')).length,4);assert.equal((await calls(p,'test_tool_connection')).length,0);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('DuMate process detection failure keeps the saved configuration and uses conditional guidance', async () => {
+  const f=await openFixture({installedTools:['dumate'],dumateRunningError:true});try {
+    const p=f.page;await detail(p,'dumate');await p.locator('#tool-detail-region .tool-connect').click();
+    await p.locator('.dumate-model-select:enabled').waitFor();await p.locator('.dumate-model-select').selectOption('other-model');await p.locator('.dumate-model-confirm').click();
+    const popup=p.locator('.tool-connect-result-dialog');await popup.waitFor();
+    assert.match(await popup.innerText(),/无法确认搭子是否运行/);
+    assert.equal(await popup.locator('.restart-dumate').isVisible(),false);
+    assert.deepEqual(await p.evaluate(()=>window.__fixture.entries.find(entry=>entry.id==='dumate').connection.models),['other-model']);
+    assert.equal((await calls(p,'restart_dumate')).length,0);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('DuMate restart always warns about running and scheduled tasks before confirmation', async () => {
+  const f=await openFixture({installedTools:['dumate']});try {
+    const p=f.page;await detail(p,'dumate');await p.locator('#tool-detail-region .tool-connect').click();
+    await p.locator('.dumate-model-select:enabled').waitFor();await p.locator('.dumate-model-confirm').click();
+    await p.getByRole('heading',{name:'接入配置已保存'}).waitFor();
+    await p.getByRole('button',{name:'重启搭子',exact:true}).click();
+    const confirmation=p.locator('.dumate-restart-confirm');await confirmation.waitFor({timeout:1000});
+    assert.match(await confirmation.innerText(),/所有正在运行的任务都将被中断，定时任务也将无法调度。/);
+    assert.equal((await calls(p,'restart_dumate')).some(call=>call.args.force===true),false);
+    await confirmation.getByRole('button',{name:'取消',exact:true}).click();
+    assert.equal(await p.locator('.tool-connect-result-dialog').isVisible(),true);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('DuMate process identity errors leave the saved model unchanged', async () => {
+  for(const error of ['无法确认搭子进程身份，未执行重启。请手动重启。']) {
+    const f=await openFixture({installedTools:['dumate'],dumateRestartError:error});try {
+      const p=f.page;await detail(p,'dumate');await p.locator('#tool-detail-region .tool-connect').click();
+      await p.locator('.dumate-model-select:enabled').waitFor();await p.locator('.dumate-model-select').selectOption('other-model');await p.locator('.dumate-model-confirm').click();
+      await p.getByRole('heading',{name:'接入配置已保存'}).waitFor();assert.equal((await calls(p,'restart_dumate')).length,0);
+      const snapshot=await p.evaluate(()=>JSON.stringify(window.__fixture.entries.find(entry=>entry.id==='dumate').connection));
+      await p.locator('dialog[open] .restart-dumate').click();await p.locator('.dumate-restart-confirm .force-restart-dumate').click();await p.locator('.launch-error').filter({hasText:'未执行重启'}).waitFor();
+      assert.equal(await p.evaluate(()=>JSON.stringify(window.__fixture.entries.find(entry=>entry.id==='dumate').connection)),snapshot);
+      assert.equal((await calls(p,'configure_dumate_model')).length,1);assert.equal((await calls(p,'restart_dumate')).length,2);
+      await p.evaluate(()=>{window.__fixture.dumateRestartError=null;});
+      await p.locator('dialog[open] .restart-dumate').click();await p.locator('.dumate-restart-confirm .force-restart-dumate').click();await p.locator('.tool-connect-result-dialog').waitFor({state:'hidden'});
+      assert.equal((await calls(p,'restart_dumate')).length,4);assert.equal((await calls(p,'test_tool_connection')).length,0);assert.deepEqual(f.errors,[]);
+    }finally{await f.close();}
+  }
+});
+
+test('DuMate restart remains available after cancellation removes its connection', async () => {
+  const f=await openFixture({installedTools:['dumate']});try {
+    const p=f.page;await detail(p,'dumate');await p.locator('#tool-detail-region .tool-connect').click();
+    await p.locator('.dumate-model-select:enabled').waitFor();await p.locator('.dumate-model-confirm').click();await p.getByRole('heading',{name:'接入配置已保存'}).waitFor();
+    await p.locator('dialog[open] .close').click();await manage(p);await p.locator('.tool-disconnect').click();
+    await p.locator('.disconnect-confirm-dialog').getByRole('button',{name:'确认取消接入',exact:true}).click();await p.getByRole('heading',{name:'取消接入配置已保存'}).waitFor();
+    assert.equal(await p.evaluate(()=>window.__fixture.entries.find(entry=>entry.id==='dumate').connection),null);
+    await p.locator('.tool-result-dialog[open] .restart-dumate').click();await p.locator('.dumate-restart-confirm .force-restart-dumate').click();await p.locator('.tool-result-dialog').waitFor({state:'hidden'});
+    assert.equal((await calls(p,'restart_dumate')).length,2);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+
+test('DuMate restart always asks once and requires explicit force after connect or cancellation', async () => {
+  for (const disconnect of [false,true]) {
+    const f=await openFixture({installedTools:['dumate'],dumateRestartBusy:true});try {
+      const p=f.page;await detail(p,'dumate');await p.locator('#tool-detail-region .tool-connect').click();
+      await p.locator('.dumate-model-select:enabled').waitFor();await p.locator('.dumate-model-confirm').click();
+      await p.getByRole('heading',{name:'接入配置已保存'}).waitFor();
+      if(disconnect) {
+        await p.getByRole('button',{name:'稍后手动重启搭子',exact:true}).click();
+        await manage(p);await p.locator('.tool-disconnect').click();
+        await p.locator('.disconnect-confirm-dialog').getByRole('button',{name:'确认取消接入',exact:true}).click();
+        await p.getByRole('heading',{name:'取消接入配置已保存'}).waitFor();
+      }
+      const snapshot=await p.evaluate(()=>JSON.stringify(window.__fixture.entries.find(entry=>entry.id==='dumate').connection));
+      const confirmation=p.locator('.dumate-restart-confirm');
+      await p.getByRole('button',{name:'重启搭子',exact:true}).click();await confirmation.waitFor();
+      assert.match(await confirmation.innerText(),/所有正在运行的任务都将被中断，定时任务也将无法调度。/);
+      assert.deepEqual((await calls(p,'restart_dumate')).map(call=>call.args.force),[false]);
+      assert.equal(await p.evaluate(()=>document.activeElement.textContent),'取消');
+      await confirmation.getByRole('button',{name:'取消',exact:true}).click();await confirmation.waitFor({state:'hidden'});
+      assert.equal((await calls(p,'restart_dumate')).length,1);
+      assert.equal(await p.evaluate(()=>JSON.stringify(window.__fixture.entries.find(entry=>entry.id==='dumate').connection)),snapshot);
+      await p.getByRole('button',{name:'重启搭子',exact:true}).click();await confirmation.waitFor();
+      await confirmation.getByRole('button',{name:'强制重启搭子',exact:true}).click();
+      await p.locator(disconnect?'.tool-result-dialog':'.tool-connect-result-dialog').waitFor({state:'hidden'});
+      assert.deepEqual((await calls(p,'restart_dumate')).map(call=>call.args.force),[false,false,true]);
+      assert.equal(await confirmation.isVisible(),false);
+      assert.equal(await p.evaluate(()=>JSON.stringify(window.__fixture.entries.find(entry=>entry.id==='dumate').connection)),snapshot);
+      assert.equal((await calls(p,'configure_dumate_model')).length,1);assert.equal((await calls(p,'test_tool_connection')).length,0);
+      assert.deepEqual(f.errors,[]);
+    }finally{await f.close();}
+  }
+});
+
+test('DuMate restart confirmation cancels on Escape or logout without a force request', async () => {
+  const f=await openFixture({installedTools:['dumate'],dumateRestartBusy:true});try {
+    const p=f.page;await detail(p,'dumate');await p.locator('#tool-detail-region .tool-connect').click();
+    await p.locator('.dumate-model-select:enabled').waitFor();await p.locator('.dumate-model-confirm').click();
+    await p.getByRole('heading',{name:'接入配置已保存'}).waitFor();
+    await p.getByRole('button',{name:'重启搭子',exact:true}).click();await p.locator('.dumate-restart-confirm').waitFor();
+    await p.keyboard.press('Escape');await p.locator('.dumate-restart-confirm').waitFor({state:'hidden'});
+    await p.getByRole('button',{name:'重启搭子',exact:true}).click();await p.locator('.dumate-restart-confirm').waitFor();
+    await p.evaluate(()=>window.TokenMarketTools.setAuthenticated(false));
+    await p.locator('.dumate-restart-confirm').waitFor({state:'hidden'});
+    assert.deepEqual((await calls(p,'restart_dumate')).map(call=>call.args.force),[false,false]);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+
+test('DuMate closing the saved popup during restart preparation cannot open a late force confirmation', async () => {
+  const f=await openFixture({installedTools:['dumate'],dumateRestartBusy:true});try {
+    const p=f.page;await detail(p,'dumate');await p.locator('#tool-detail-region .tool-connect').click();
+    await p.locator('.dumate-model-select:enabled').waitFor();await p.locator('.dumate-model-confirm').click();
+    await p.getByRole('heading',{name:'接入配置已保存'}).waitFor();
+    await p.evaluate(()=>{
+      const original=window.__TAURI__.core.invoke;
+      window.__TAURI__.core.invoke=(command,args)=>command==='restart_dumate'?new Promise(resolve=>{window.__fixture.releaseRestart=()=>resolve(original(command,args));}):original(command,args);
+    });
+    await p.getByRole('button',{name:'重启搭子',exact:true}).click();
+    await p.waitForFunction(()=>Boolean(window.__fixture.releaseRestart));
+    await p.getByRole('button',{name:'稍后手动重启搭子',exact:true}).click();
+    await p.evaluate(()=>window.__fixture.releaseRestart());
+    await p.getByRole('button',{name:'重启搭子',exact:true}).waitFor({state:'hidden'});
+    assert.equal(await p.locator('.dumate-restart-confirm').isVisible(),false);
+    assert.deepEqual((await calls(p,'restart_dumate')).map(call=>call.args.force),[false]);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('DuMate restart success closes the saved popup without an extra footer message', async () => {
+  for(const action of ['connect','switch','disconnect']) {
+    const f=await openFixture({installedTools:['dumate']});try {
+      const p=f.page;await detail(p,'dumate');await p.locator('#tool-detail-region .tool-connect').click();
+      await p.locator('.dumate-model-select:enabled').waitFor();await p.locator('.dumate-model-confirm').click();
+      await p.getByRole('heading',{name:'接入配置已保存',exact:true}).waitFor();
+      let title='接入配置已保存';
+      if(action!=='connect') {
+        await p.getByRole('button',{name:'稍后手动重启搭子',exact:true}).click();
+        if(action==='switch') {
+          await p.locator('.tool-switch-model').click();await p.locator('.dumate-model-select:enabled').waitFor();
+          await p.locator('.dumate-model-select').selectOption('other-model');await p.locator('.dumate-model-confirm').click();title='模型切换配置已保存';
+        } else {
+          await manage(p);await p.locator('.tool-disconnect').click();
+          await p.locator('.disconnect-confirm-dialog').getByRole('button',{name:'确认取消接入',exact:true}).click();title='取消接入配置已保存';
+        }
+      }
+      const popup=p.locator('dialog').filter({has:p.getByRole('heading',{name:title,exact:true,includeHidden:true})});await popup.waitFor();
+      await popup.getByRole('button',{name:'重启搭子',exact:true}).click();
+      await p.locator('.dumate-restart-confirm .force-restart-dumate').click();
+      await popup.waitFor({state:'hidden',timeout:1500});
+      assert.equal(await popup.locator('.tool-actions ~ p').count(),0);
+      assert.equal(await popup.locator('.launch-error,.dumate-restart-status').textContent(),'');
+      assert.equal((await calls(p,'restart_dumate')).length,2);assert.deepEqual(f.errors,[]);
+    }finally{await f.close();}
+  }
+});
+
+
+test('DuMate saved popup can be closed after a restart error or with Escape during a pending check', async () => {
+  const f=await openFixture({installedTools:['dumate'],dumateRestartError:'无法确认搭子进程身份，请手动重启搭子。'});try {
+    const p=f.page;await detail(p,'dumate');await p.locator('#tool-detail-region .tool-connect').click();
+    await p.locator('.dumate-model-select:enabled').waitFor();await p.locator('.dumate-model-confirm').click();
+    const popup=p.locator('.tool-connect-result-dialog');await popup.waitFor();
+    await popup.getByRole('button',{name:'重启搭子',exact:true}).click();
+    await p.locator('.dumate-restart-confirm .force-restart-dumate').click();
+    await popup.locator('.launch-error').filter({hasText:'无法确认'}).waitFor();
+    assert.equal(await popup.locator('.tool-actions ~ p').count(),0);
+    const error=await popup.locator('.launch-error').boundingBox(),actions=await popup.locator('.tool-actions').boundingBox();
+    assert.ok(error.y+error.height<=actions.y);
+    await popup.getByRole('button',{name:'稍后手动重启搭子',exact:true}).click();await popup.waitFor({state:'hidden'});
+    await p.locator('.tool-switch-model').click();await p.locator('.dumate-model-select:enabled').waitFor();
+    await p.locator('.dumate-model-confirm').click();await popup.waitFor();
+    await p.evaluate(()=>{
+      const original=window.__TAURI__.core.invoke;
+      window.__TAURI__.core.invoke=(command,args)=>command==='restart_dumate'?new Promise(resolve=>{window.__fixture.releaseRestart=()=>resolve({state:'restarted'});}):original(command,args);
+    });
+    await popup.getByRole('button',{name:'重启搭子',exact:true}).click();await p.keyboard.press('Escape');await popup.waitFor({state:'hidden'});
+    await p.evaluate(()=>window.__fixture.releaseRestart());
+    assert.equal(await p.locator('dialog[open]').count(),0);assert.deepEqual(f.errors,[]);
   }finally{await f.close();}
 });

@@ -1,0 +1,25 @@
+{
+  "date": "2026-11-06",
+  "status": "ui-verified",
+  "change": "DuMate restart success dismisses the save popup; no footer success text; native method=dialog close buttons; failure appears above actions.",
+  "regression_before_fix": "WebKit saved popup remains visible after successful restart; timeout waiting for dismissal.",
+  "verification": {
+    "webkit_dumate": {
+      "passed": 15,
+      "failed": 0
+    },
+    "scenarios": [
+      "connect, model switch, cancellation success auto-dismiss",
+      "unknown restart status leaves configuration saved and can be closed",
+      "busy force/cancel remains explicit",
+      "Escape works during pending restart check",
+      "late callback does not reopen a dismissed popup",
+      "no message after action row"
+    ],
+    "chromium_full": {
+      "passed": 87,
+      "failed": 0
+    }
+  },
+  "real_dumate_restarted": false
+}

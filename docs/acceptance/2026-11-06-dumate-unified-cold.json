@@ -1,0 +1,210 @@
+{
+  "date": "2026-11-06",
+  "status": "isolated-native-verified-windows-cross-compiled",
+  "implementation": "One cold-start text takeover. Native global customLLMProvider disabled to preserve official media. Private account text policy and engine adapter saved atomically with native preferences. Restart remains a separate user action.",
+  "migration": "Existing native-only connections migrate on the next explicit reconnect or model save. Switching retains key and billing binding. Disconnect restores managed preferences and removes executable adapter, preserving user amendments as disabled backup.",
+  "supported": {
+    "DuMate": "1.0.89.447 personal local engine; OPENCODE_NEW_RUNTIME absent or 0",
+    "protocol": "OpenAI Chat Completions text and tool tasks; image/video remain native official routes",
+    "engine_sha256": {
+      "macos_arm64": "e5f9eee34333afa45a2cdafcd634b7c1a583334f55e018f5126eb8387f7b6763",
+      "windows_x64": "4cf28953c1f38f56451f43eff55707eb7593e43aed6cb49a43d3384c44cc343d"
+    }
+  },
+  "native_probe": {
+    "command": "python3 tests/helpers/dumate-unified-native-probe.py",
+    "stages": [
+      {
+        "stage": "old_task_before_takeover",
+        "body_model": "fixture-old",
+        "actual_model_calls": 5,
+        "all_calls_pinned": false
+      },
+      {
+        "stage": "old_task_after_cold_takeover",
+        "body_model": "fixture-one",
+        "actual_model_calls": 4,
+        "all_calls_pinned": true
+      },
+      {
+        "stage": "new_task_after_cold_takeover",
+        "body_model": "fixture-one",
+        "actual_model_calls": 5,
+        "all_calls_pinned": true
+      },
+      {
+        "stage": "image_uses_native_official_route",
+        "official_model_calls": 2,
+        "platform_key_on_media": false
+      },
+      {
+        "stage": "video_uses_native_official_route",
+        "official_model_calls": 2,
+        "platform_key_on_media": false
+      },
+      {
+        "stage": "actual_subagent_tool_execution",
+        "body_model": "fixture-one",
+        "actual_model_calls": 8,
+        "all_calls_pinned": true
+      },
+      {
+        "stage": "explicit_summary",
+        "actual_model_calls": 3,
+        "all_calls_pinned": true
+      },
+      {
+        "stage": "saving_without_restart_keeps_active_snapshot",
+        "body_model": "fixture-one",
+        "actual_model_calls": 4,
+        "all_calls_pinned": true
+      },
+      {
+        "stage": "upstream_failure_no_official_fallback",
+        "actual_model_calls": 3,
+        "all_calls_pinned": true
+      },
+      {
+        "stage": "old_task_after_model_switch_restart",
+        "body_model": "fixture-two",
+        "actual_model_calls": 4,
+        "all_calls_pinned": true
+      },
+      {
+        "stage": "newer_task_after_model_switch_restart",
+        "body_model": "fixture-two",
+        "actual_model_calls": 4,
+        "all_calls_pinned": true
+      },
+      {
+        "stage": "remote_classifier_old_task_is_local",
+        "body_model": "fixture-two",
+        "actual_model_calls": 2,
+        "all_calls_pinned": true
+      },
+      {
+        "stage": "remote_classifier_new_task_is_local",
+        "body_model": "fixture-two",
+        "actual_model_calls": 3,
+        "all_calls_pinned": true
+      },
+      {
+        "stage": "scheduler_remapped_preflight_is_local",
+        "body_model": "fixture-two",
+        "actual_model_calls": 2,
+        "all_calls_pinned": true
+      },
+      {
+        "stage": "old_task_after_reconnect_restart",
+        "body_model": "fixture-reconnected",
+        "actual_model_calls": 4,
+        "all_calls_pinned": true
+      },
+      {
+        "stage": "new_task_after_reconnect_restart",
+        "body_model": "fixture-reconnected",
+        "actual_model_calls": 5,
+        "all_calls_pinned": true
+      },
+      {
+        "stage": "cancelled_after_restart_restores_original",
+        "body_model": "fixture-old",
+        "actual_model_calls": 4,
+        "all_calls_pinned": false
+      },
+      {
+        "stage": "invalid_policy_fails_closed",
+        "actual_model_calls": 0,
+        "all_calls_pinned": true
+      }
+    ],
+    "synthetic_completed_cloud_text_history_preserved": true,
+    "observed_agents": [
+      "build",
+      "compaction",
+      "explore",
+      "title"
+    ],
+    "external_network": "denied",
+    "real_user_data": "denied",
+    "real_app_restarted": false
+  },
+  "verification": {
+    "core_full": {
+      "passed": 360,
+      "failed": 0,
+      "ignored": 2
+    },
+    "latest_compatibility_unit_tests": {
+      "passed": 10,
+      "failed": 0
+    },
+    "migration_restore_tests": {
+      "passed": 16,
+      "failed": 0
+    },
+    "desktop_ui_and_adapter": {
+      "passed": 95,
+      "failed": 0,
+      "source": "Frozen package source; 87 UI and 8 adapter tests"
+    },
+    "latest_adapter_tests": {
+      "passed": 8,
+      "failed": 0
+    },
+    "windows_tauri_cargo_xwin_check": "passed",
+    "windows_release_and_nsis": "built and payload verified",
+    "macos_release_dmg": "built, signed, DMG payload verified"
+  },
+  "protection": [
+    "Adapter script contains no credential. Private text policy uses existing secure writer (0600 on macOS); record/backups use existing encrypted store.",
+    "Native global custom provider is disabled so it cannot capture model-mm. Original preference restored on disconnect.",
+    "No Baidu Cookie or in-app credential forwarded to text platform. Platform key never attached to official media calls.",
+    "Text model, base URL, authentication and output limit selected at outbound boundary.",
+    "Text failures and unsupported text protocols do not fall back to official text models.",
+    "Image/video generation endpoints, image/video message parts and native multimodal alias keep native model and authentication.",
+    "Text redirects rejected; text upstream uses node:http(s) directly.",
+    "Current process retains startup text snapshot until restart.",
+    "Unknown engine rejected before replacing configuration."
+  ],
+  "limitations": [
+    "No real paid model requests or real user configuration/task changes.",
+    "Synthetic completed cloud text history only; real full cloud workflow migration has not been accepted.",
+    "Windows native execution and device acceptance remain pending.",
+    "No compatibility promise for arbitrary future DuMate versions or cloud-specific tools.",
+    "Non-model login, skill synchronization and search traffic is outside this model takeover.",
+    "Image/video native routing verified against fake media endpoints, not real paid official generation or recognition."
+  ],
+  "related_restart_acceptance": [
+    "2026-11-06-dumate-restart-confirmation.json",
+    "2026-11-06-dumate-dialog-close.json",
+    "2026-11-06-dumate-windows-restart.json"
+  ],
+  "artifact_verification": {
+    "latest_adapter_embedded": {
+      "macos_app": true,
+      "macos_cli": true,
+      "windows_app": true,
+      "windows_cli": true
+    },
+    "macos": {
+      "codesign_verified": true,
+      "dmg_payload_matches_signed_app": true,
+      "notarized": false
+    },
+    "windows": {
+      "app_pe": {
+        "machine": "x86_64",
+        "subsystem": 2
+      },
+      "cli_pe": {
+        "machine": "x86_64",
+        "subsystem": 3
+      },
+      "installer_payload_matches_app_except_tauri_bundle_tag": true,
+      "native_restart_manager_import": true,
+      "signed": false,
+      "device_tested": false
+    }
+  }
+}
