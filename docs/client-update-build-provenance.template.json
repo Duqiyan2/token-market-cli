@@ -1,0 +1,21 @@
+{
+  "schema_version": 2,
+  "fixture": false,
+  "provenance_kind": "local-native-build",
+  "source_commit": "",
+  "version": "",
+  "target": "",
+  "artifacts": [],
+  "prepared_sha256": "",
+  "signing_identity": "",
+  "compiled": {
+    "endpoint": "",
+    "recovery_url": "",
+    "public_key_sha256": ""
+  },
+  "native_host": "",
+  "recipe": "",
+  "configuration_sha256": "",
+  "started_at": "",
+  "completed_at": ""
+}

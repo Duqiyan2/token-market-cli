@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "source_root": "",
+  "version": "",
+  "public_base_url": "",
+  "manifest_key": "",
+  "recovery_key": "",
+  "candidate_key": "",
+  "public_key_file": "",
+  "private_key_file": "",
+  "private_key_password_file": "",
+  "output_dir": "",
+  "tools": {
+    "signer": "",
+    "verifier": ""
+  },
+  "oss": {
+    "region": "",
+    "endpoint": "",
+    "bucket": "",
+    "prefix": "",
+    "config_file": "",
+    "profile": "",
+    "ossutil": ""
+  },
+  "native": {
+    "macos_identity_dir": "",
+    "tauri_cli_js": "",
+    "windows_certificate_sha1": "",
+    "windows_timestamp_url": "",
+    "windows_signtool": ""
+  }
+}

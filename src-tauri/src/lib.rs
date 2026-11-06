@@ -1,3 +1,7 @@
+#[cfg(all(windows, debug_assertions, feature = "windows-update-fixtures"))]
+pub mod client_update;
+#[cfg(not(all(windows, debug_assertions, feature = "windows-update-fixtures")))]
+mod client_update;
 mod connections;
 mod installation;
 mod usage;
@@ -226,11 +230,13 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(tokenmarket_core::connections::ConnectionManager::current())
         .manage(tokenmarket_core::installation::InstallationManager::current())
         .manage(workspace::WorkspaceState::new())
         .on_window_event(window_lifecycle::on_window_event)
         .setup(|app| {
+            client_update::setup(app.handle());
             window_lifecycle::setup(app.handle());
             let api_base = tokenmarket_core::config::console_api_base_url();
             app.manage(DesktopState {
@@ -295,6 +301,14 @@ pub fn run() {
             window_lifecycle::acknowledge_desktop_close,
             window_lifecycle::cancel_desktop_close,
             window_lifecycle::quit_desktop_app,
+            client_update::desktop_client_update_status,
+            client_update::check_client_update,
+            client_update::download_client_update,
+            client_update::install_client_update,
+            client_update::open_client_update_recovery,
+            client_update::acknowledge_client_update_failure,
+            client_update::defer_client_update,
+            client_update::ignore_client_update_version,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -307,4 +321,16 @@ pub fn run() {
                 window_lifecycle::show_main_window(_app);
             }
         });
+}
+
+/// Run an isolated updater guardian before any Tauri or session initialization.
+pub fn run_client_update_helper() -> Option<i32> {
+    #[cfg(windows)]
+    {
+        return client_update::windows::try_run_guardian();
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
 }

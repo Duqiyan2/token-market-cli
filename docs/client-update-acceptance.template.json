@@ -1,0 +1,322 @@
+{
+  "schema_version": 2,
+  "fixture": false,
+  "release": {
+    "source_commit": "",
+    "version": "",
+    "artifacts": [],
+    "manifest_sha256": ""
+  },
+  "routes": {
+    "public_base_url": "",
+    "candidate_manifest_url": "",
+    "production_manifest_url": "",
+    "recovery_url": "",
+    "public_key_sha256": ""
+  },
+  "evidence": {
+    "automated": {
+      "status": "pending",
+      "evidence": []
+    },
+    "native_signing": {
+      "status": "pending",
+      "evidence": []
+    },
+    "deployment_readback": {
+      "status": "pending",
+      "evidence": []
+    }
+  },
+  "devices": {
+    "darwin-aarch64": {
+      "actual_device": false,
+      "fixture": false,
+      "operator": "",
+      "tested_at": "",
+      "os_version": "",
+      "architecture": "arm64",
+      "starting_version": "",
+      "starting_updater_enabled": false,
+      "starting_install_path": "",
+      "installed_upgrade": {
+        "status": "pending",
+        "evidence": []
+      },
+      "startup": {
+        "status": "pending",
+        "evidence": [],
+        "version": "",
+        "executable": "",
+        "artifact_sha256": ""
+      },
+      "build_provenance_sha256": "",
+      "prepared_sha256": "",
+      "signing_identity": "",
+      "compiled": {
+        "endpoint": "",
+        "recovery_url": "",
+        "public_key_sha256": ""
+      },
+      "checks": {
+        "signed_out": {
+          "status": "pending",
+          "evidence": []
+        },
+        "zero_balance": {
+          "status": "pending",
+          "evidence": []
+        },
+        "automatic_discovery": {
+          "status": "pending",
+          "evidence": []
+        },
+        "manual_discovery": {
+          "status": "pending",
+          "evidence": []
+        },
+        "release_notes": {
+          "status": "pending",
+          "evidence": []
+        },
+        "download_consent": {
+          "status": "pending",
+          "evidence": []
+        },
+        "install_consent": {
+          "status": "pending",
+          "evidence": []
+        },
+        "later_process_restart": {
+          "status": "pending",
+          "evidence": []
+        },
+        "ignore_process_restart": {
+          "status": "pending",
+          "evidence": []
+        },
+        "ignored_manual_discovery": {
+          "status": "pending",
+          "evidence": []
+        },
+        "newer_version_reminder": {
+          "status": "pending",
+          "evidence": []
+        },
+        "desktop_busy_refusal_retry": {
+          "status": "pending",
+          "evidence": []
+        },
+        "cli_mutation_refusal_retry": {
+          "status": "pending",
+          "evidence": []
+        },
+        "guard_transition_race": {
+          "status": "pending",
+          "evidence": []
+        },
+        "active_work_not_cancelled": {
+          "status": "pending",
+          "evidence": []
+        },
+        "client_session_retained": {
+          "status": "pending",
+          "evidence": []
+        },
+        "credential_identity_retained": {
+          "status": "pending",
+          "evidence": []
+        },
+        "tool_connections_retained": {
+          "status": "pending",
+          "evidence": []
+        },
+        "billing_owner_retained": {
+          "status": "pending",
+          "evidence": []
+        },
+        "models_retained": {
+          "status": "pending",
+          "evidence": []
+        },
+        "user_configuration_retained": {
+          "status": "pending",
+          "evidence": []
+        },
+        "restoration_records_retained": {
+          "status": "pending",
+          "evidence": []
+        },
+        "independent_cli_use": {
+          "status": "pending",
+          "evidence": []
+        },
+        "network_failure_retry": {
+          "status": "pending",
+          "evidence": []
+        },
+        "invalid_package_refusal_retry": {
+          "status": "pending",
+          "evidence": []
+        },
+        "installer_failure_retry": {
+          "status": "pending",
+          "evidence": []
+        },
+        "external_recovery_opened": {
+          "status": "pending",
+          "evidence": []
+        },
+        "legacy_manual_bootstrap_then_update": {
+          "status": "pending",
+          "evidence": []
+        }
+      }
+    },
+    "windows-x86_64-nsis": {
+      "actual_device": false,
+      "fixture": false,
+      "operator": "",
+      "tested_at": "",
+      "os_version": "",
+      "architecture": "x86_64",
+      "starting_version": "",
+      "starting_updater_enabled": false,
+      "starting_install_path": "",
+      "installed_upgrade": {
+        "status": "pending",
+        "evidence": []
+      },
+      "startup": {
+        "status": "pending",
+        "evidence": [],
+        "version": "",
+        "executable": "",
+        "artifact_sha256": ""
+      },
+      "build_provenance_sha256": "",
+      "prepared_sha256": "",
+      "signing_identity": "",
+      "compiled": {
+        "endpoint": "",
+        "recovery_url": "",
+        "public_key_sha256": ""
+      },
+      "checks": {
+        "signed_out": {
+          "status": "pending",
+          "evidence": []
+        },
+        "zero_balance": {
+          "status": "pending",
+          "evidence": []
+        },
+        "automatic_discovery": {
+          "status": "pending",
+          "evidence": []
+        },
+        "manual_discovery": {
+          "status": "pending",
+          "evidence": []
+        },
+        "release_notes": {
+          "status": "pending",
+          "evidence": []
+        },
+        "download_consent": {
+          "status": "pending",
+          "evidence": []
+        },
+        "install_consent": {
+          "status": "pending",
+          "evidence": []
+        },
+        "later_process_restart": {
+          "status": "pending",
+          "evidence": []
+        },
+        "ignore_process_restart": {
+          "status": "pending",
+          "evidence": []
+        },
+        "ignored_manual_discovery": {
+          "status": "pending",
+          "evidence": []
+        },
+        "newer_version_reminder": {
+          "status": "pending",
+          "evidence": []
+        },
+        "desktop_busy_refusal_retry": {
+          "status": "pending",
+          "evidence": []
+        },
+        "cli_mutation_refusal_retry": {
+          "status": "pending",
+          "evidence": []
+        },
+        "guard_transition_race": {
+          "status": "pending",
+          "evidence": []
+        },
+        "active_work_not_cancelled": {
+          "status": "pending",
+          "evidence": []
+        },
+        "client_session_retained": {
+          "status": "pending",
+          "evidence": []
+        },
+        "credential_identity_retained": {
+          "status": "pending",
+          "evidence": []
+        },
+        "tool_connections_retained": {
+          "status": "pending",
+          "evidence": []
+        },
+        "billing_owner_retained": {
+          "status": "pending",
+          "evidence": []
+        },
+        "models_retained": {
+          "status": "pending",
+          "evidence": []
+        },
+        "user_configuration_retained": {
+          "status": "pending",
+          "evidence": []
+        },
+        "restoration_records_retained": {
+          "status": "pending",
+          "evidence": []
+        },
+        "independent_cli_use": {
+          "status": "pending",
+          "evidence": []
+        },
+        "network_failure_retry": {
+          "status": "pending",
+          "evidence": []
+        },
+        "invalid_package_refusal_retry": {
+          "status": "pending",
+          "evidence": []
+        },
+        "installer_failure_retry": {
+          "status": "pending",
+          "evidence": []
+        },
+        "external_recovery_opened": {
+          "status": "pending",
+          "evidence": []
+        },
+        "legacy_manual_bootstrap_then_update": {
+          "status": "pending",
+          "evidence": []
+        }
+      }
+    }
+  },
+  "provenance_kind": "local-operator-acceptance"
+}

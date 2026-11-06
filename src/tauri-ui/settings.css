@@ -1,4 +1,7 @@
 .settings-content { max-width: 1040px; }
+.client-update-result { padding: 0 22px 18px; font-size: 12px; }
+.client-update-result p { margin: 0; }
+#client-update-notes { white-space: pre-wrap; margin-top: 12px; overflow-wrap: anywhere; }
 .settings-section { margin: 30px 0; }
 .settings-section h2 { margin: 0 0 14px; font-size: 16px; font-weight: 600; }
 .settings-group { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--surface); }
@@ -50,3 +53,6 @@
 .desktop-settings-button { position: relative; margin-top: 24px; padding: 9px 14px; border: 0 !important; border-radius: 7px; }
 .desktop-settings-button::before { content: ''; position: absolute; left: 0; right: 0; top: -12px; border-top: 1px solid var(--line); }
 @media (max-width: 700px) { .desktop-settings-button { margin-top: 0; padding: 8px; } .desktop-settings-button::before { display: none; } }
+
+.client-update-failure-notice { position: fixed; right: 24px; bottom: 24px; z-index: 30; max-width: min(420px, calc(100vw - 32px)); margin: 0; box-shadow: 0 8px 24px #0002; }
+.client-update-failure-notice .inline-actions { margin-top: 10px; }

@@ -2,6 +2,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    if let Some(code) = app_lib::run_client_update_helper() {
+        std::process::exit(code);
+    }
     if tokenmarket_core::connections::qwenwork_relay::is_invocation() {
         if tokenmarket_core::connections::qwenwork_relay::run_blocking().is_err() {
             std::process::exit(1);

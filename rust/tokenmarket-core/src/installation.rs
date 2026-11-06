@@ -961,22 +961,27 @@ fn installation_lock(
     environment: &InstallationEnvironment,
     tool: ToolId,
 ) -> Result<InstallationGuard> {
-    let tool = if tool == ToolId::DuMateEnterprise {
-        ToolId::DuMate
-    } else {
-        tool
-    };
-    let directory = environment.home.join(".tokenmarket/install-locks");
-    std::fs::create_dir_all(&directory)?;
+    let path = installation_lock_path(&environment.home, tool);
+    std::fs::create_dir_all(path.parent().unwrap())?;
     let file = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
         .truncate(false)
-        .open(directory.join(format!("{tool}.lock")))?;
+        .open(path)?;
     file.try_lock()
         .map_err(|_| anyhow::anyhow!("该工具正在安装或接入，请等待另一个客户端操作完成"))?;
     Ok(InstallationGuard { file })
+}
+
+pub(crate) fn installation_lock_path(home: &Path, tool: ToolId) -> PathBuf {
+    let tool = if tool == ToolId::DuMateEnterprise {
+        ToolId::DuMate
+    } else {
+        tool
+    };
+    home.join(".tokenmarket/install-locks")
+        .join(format!("{tool}.lock"))
 }
 
 fn safe_output(line: &str) -> String {

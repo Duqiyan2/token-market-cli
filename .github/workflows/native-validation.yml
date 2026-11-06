@@ -11,10 +11,12 @@ on:
       - "tests/helpers/**"
       - "scripts/macos-local-signing.py"
       - "scripts/build-macos-clients.sh"
+      - "scripts/build-windows-clients.ps1"
       - "tests/test_macos_signing.py"
       - "scripts/reset-macos-client-state.py"
       - "tests/test_macos_reset.py"
       - "package.json"
+      - ".gitattributes"
       - ".github/workflows/native-validation.yml"
   push:
     branches:
@@ -45,6 +47,21 @@ jobs:
       - name: Report checked revision
         run: git rev-parse HEAD
 
+      - name: Check Windows client build script syntax
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $parseErrors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $PWD 'scripts/build-windows-clients.ps1'),
+            [ref]$tokens, [ref]$parseErrors
+          ) | Out-Null
+          if ($parseErrors.Count -gt 0) {
+            $parseErrors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -65,7 +82,12 @@ jobs:
         shell: bash
         run: |
           identity="$RUNNER_TEMP/tokenmarket-signing-fixture"
-          trap '/usr/bin/security delete-keychain "$identity/signing.keychain-db"' EXIT
+          cleanup() {
+            status=$?
+            /usr/bin/security delete-keychain "$identity/signing.keychain-db" || true
+            exit "$status"
+          }
+          trap cleanup EXIT
           python3 scripts/macos-local-signing.py --identity-dir "$identity" init
           python3 scripts/macos-local-signing.py --identity-dir "$identity" --profile production smoke
           python3 scripts/macos-local-signing.py --identity-dir "$identity" --profile production native-smoke
@@ -104,6 +126,10 @@ jobs:
       - name: Test desktop window lifecycle
         if: ${{ !cancelled() && runner.os != 'Linux' }}
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib --locked
+
+      - name: Test Windows guarded installer handoff
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
+        run: cargo test --manifest-path src-tauri/Cargo.toml --features windows-update-fixtures --test windows_guardian --locked -- --nocapture
 
   desktop-ui:
     name: Desktop DOM/IPC fixtures

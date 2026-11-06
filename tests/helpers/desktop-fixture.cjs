@@ -49,6 +49,8 @@ module.exports = async function openFixture(browser, options = {}) {
     const workspace = () => ({user,current_workspace:fixture.current,switchable_workspaces:[personal,team],balance:options.noBalance?null:{currency:'CNY',amount:fixture.balanceAmount},balance_error:options.noBalance?'读取余额失败':null,can_recharge:!options.restricted,menus:options.restricted?[]:[{path:'/console/tokens'},{path:'/console/billing'},{path:'/console/spaces'}]});
     fixture.emit = (name,payload) => (fixture.events[name]||[]).forEach(fn=>fn({payload}));
     fixture.loginStatus = loginStatus;
+    fixture.clientInstallBusy=Boolean(options.clientInstallBusy);
+    fixture.clientUpdateStatus=options.startupClientUpdate || {status:'idle',currentVersion:'1.0.0',availableVersion:null,releaseNotes:null,error:null};
     fixture.usageRows = options.usageEmpty ? [] : Array.from({length:21},(_,i)=>({requestId:'usage-'+i,keyId:i%2?'101':'100',keyName:i%2?'Codex 新 Key':'Codex 历史 Key',tool:'codex',model:options.usageModel || 'fixture-model',status:'SUCCESS',statusCode:200,inputTokens:100,outputTokens:20,totalTokens:120,cacheReadTokens:80,cacheWriteTokens:0,costMicro:'100000',durationMs:2200,ttftMs:i===0?null:200,startedAt:Date.now()-i*1000,workspaceId:'personal'}));
     fixture.usageRows.push({requestId:'team-only',keyId:'200',keyName:'团队 Key',tool:'claude-code',model:'team-model',status:'FAILED',statusCode:429,inputTokens:0,outputTokens:0,totalTokens:0,cacheReadTokens:0,cacheWriteTokens:0,costMicro:'0',durationMs:50,ttftMs:null,startedAt:Date.now(),workspaceId:'team'});
     fixture.usageDeferred = [];
@@ -82,6 +84,18 @@ module.exports = async function openFixture(browser, options = {}) {
       if (options.credentialLost && ['connect_tool','reconnect_tool'].includes(command) && !args.recovery) throw {message:'本机保存的连接信息已丢失',recovery:{keyId:'missing-fixture',ownerId:user.id,workspaceId:fixture.current.id,ownerName:user.name,workspaceName:fixture.current.name}};
       if (args.recovery && (args.recovery.ownerId!==user.id || args.recovery.workspaceId!==fixture.current.id)) throw Error('账号或空间已改变');
       switch(command) {
+        case 'desktop_client_update_status': {
+          const value=clone(fixture.clientUpdateStatus);
+          if(options.deferClientUpdateStatus) return new Promise(resolve=>fixture.resolveClientUpdateStatus=()=>resolve(value));
+          return value;
+        }
+        case 'download_client_update': if(options.deferClientDownload)return new Promise(resolve=>fixture.resolveClientDownload=resolve);return {status:'ready',currentVersion:'1.0.0',availableVersion:args.version,releaseNotes:'保留已有连接',error:null};
+        case 'acknowledge_client_update_failure': fixture.clientUpdateStatus.showRecoveryNotice=false;return clone(fixture.clientUpdateStatus);
+        case 'open_client_update_recovery': return null;
+        case 'install_client_update': if(options.deferClientInstall)return new Promise(resolve=>fixture.resolveClientInstall=resolve);return fixture.clientInstallBusy ? {status:'ready',currentVersion:'1.0.0',availableVersion:args.version,installAvailable:true,error:'工具连接操作正在进行，请完成后重试安装客户端更新'} : {status:'handoff',currentVersion:'1.0.0',availableVersion:args.version,installAvailable:true,error:null};
+        case 'defer_client_update': fixture.clientUpdateStatus.remind=false;return clone(fixture.clientUpdateStatus);
+        case 'ignore_client_update_version': fixture.clientUpdateStatus.remind=false;fixture.ignoredClientUpdate=args.version;return clone(fixture.clientUpdateStatus);
+        case 'check_client_update': return clone(fixture.clientUpdate || options.clientUpdate || {status:'current',currentVersion:'1.0.0',availableVersion:null,releaseNotes:null,error:null});
         case 'desktop_usage_logs': case 'desktop_usage_buckets': if(fixture.deferUsage || options.deferUsage)return new Promise(resolve=>fixture.usageDeferred.push(()=>resolve(usageResponse(command,args.request))));return usageResponse(command,args.request);
         case 'desktop_window_preferences': if(fixture.deferPreferences)return new Promise(resolve=>{fixture.resolvePreferences=()=>resolve(clone(fixture.windowPreferences));});return clone(fixture.windowPreferences);
         case 'save_desktop_window_preferences': if(options.preferenceSaveError)throw Error('无法保存应用设置');fixture.windowPreferences.run_in_background=args.runInBackground;return clone(fixture.windowPreferences);

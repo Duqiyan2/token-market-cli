@@ -25,3 +25,5 @@ mod qwenwork;
 pub mod qwenwork_runtime;
 mod workbuddy;
 mod yaml;
+
+pub mod client_update;

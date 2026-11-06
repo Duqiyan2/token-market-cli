@@ -40,9 +40,19 @@
     ],
     "android": {
       "debugApplicationIdSuffix": ".debug"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "installerHooks": "windows/update-hooks.nsh"
+      }
     }
   },
   "plugins": {
+    "updater": {
+      "pubkey": "",
+      "requireSignedVersion": true
+    },
     "deep-link": {
       "desktop": {
         "schemes": [

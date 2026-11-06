@@ -70,6 +70,8 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         with:
           projectPath: src-tauri
+          tauriScript: npx --yes @tauri-apps/cli@2.12.4
+          includeUpdaterJson: false
           args: ${{ matrix.args }}
 
       - name: Build matching macOS CLI

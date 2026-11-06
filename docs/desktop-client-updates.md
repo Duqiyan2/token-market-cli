@@ -1,7 +1,10 @@
 # Desktop client updates
 
-Product design confirmed on 2026-11-05. The decisions below describe intended
-behavior, not an implemented or released updater.
+Product design confirmed on 2026-11-05. This document records the design and
+implementation status of the desktop updater, including isolated validation.
+Production OSS/domain configuration, native local release signing and builds, and
+actual installed-client upgrade acceptance remain outstanding. The updater has
+not been released.
 
 ## Confirmed behavior
 
@@ -9,6 +12,10 @@ behavior, not an implemented or released updater.
   managed Tool Upgrades retain their respective delivery paths.
 - Initial architecture matrix: macOS Apple Silicon and Windows x64. Intel Mac
   and Windows ARM support are deferred pending their builds and device acceptance.
+- Windows in-app installation initially supports current-user NSIS (.exe)
+  installations only, as subsequently confirmed by the user. Keep MSI available
+  for manual installation/recovery without mixing installer ownership; MSI
+  auto-update requires separate lifecycle verification.
 - Check for updates automatically at application startup and provide a manual
   check in Settings.
 - Show the available version and release notes. Download and install only after
@@ -16,9 +23,11 @@ behavior, not an implemented or released updater.
 - No mandatory updates or unexpected restarts during user operations in the
   initial scope.
 - Use a fixed HTTPS update address under a project-controlled domain, a static
-  version manifest and domestically accessible object storage/CDN. GitHub remains
-  the build and release-archive channel; no dedicated update backend is required
-  initially. Hosting and domain configuration still need to be provisioned.
+  version manifest and Alibaba Cloud OSS/CDN. Operators trigger local native
+  builds/signing, candidate upload and explicit accepted-byte promotion. Private
+  release configuration, keys, credential profiles, evidence and outputs stay
+  outside Git; GitHub secrets, R2 and a GitHub fallback are not required. No
+  dedicated update backend is needed. Hosting remains to be provisioned.
 - Offer only stable releases to production clients. Distribute test builds by
   separate links, without an in-app release-channel switch in the initial scope.
 - After confirmation, download and verify the package. Present an explicit
@@ -80,12 +89,39 @@ These constraints come from the shared storage/locking implementation, the
 [macOS packaging flow](../scripts/macos-local-signing.py) and the
 [Tauri updater documentation](https://v2.tauri.app/plugin/updater/).
 
+## Manual check implementation
+
+Settings now has a separate **客户端更新** section, available without a Client
+Session or workspace balance. It reads the current native application version
+and lets the user manually check a stable static manifest. A successful check
+shows the newer supported version and plain-text release notes, or reports that
+no newer supported stable version is available. Failures show a reason and an
+explicit retry action. Discovery does not download, install or restart anything.
+
+Build the desktop with `TOKEN_MARKET_UPDATER_ENDPOINT` set to the fixed HTTPS
+static-manifest address and `TOKEN_MARKET_UPDATER_PUBLIC_KEY` set to the contents
+of the Tauri signer's public key file. These are compile-time settings; the
+renderer cannot replace either value. Both may remain empty until deployment
+is provisioned, in which case manual checking reports the missing configuration.
+The configured manifest and artifact URLs must use HTTPS, including redirects
+in production. Only compiled native tests may opt into a loopback HTTP fixture.
+
+The manifest uses Tauri's static format: `version`, optional `notes` and
+`pub_date`, and `platforms.darwin-aarch64` / `platforms.windows-x86_64` entries
+containing `url` and the `.sig` file contents in `signature`. Only versions newer
+than the running application with no prerelease suffix are offered. Dynamic
+single-package manifests, missing matching packages and empty signatures are
+rejected. Downloaded bytes still require Tauri verification before installation;
+a check result does not mean those bytes have been verified.
+
+Isolated native integration tests use signed synthetic fixtures and the real
+Tauri updater. Playwright tests exercise the existing UI-to-native boundary.
+Run them with `cargo test --locked --manifest-path src-tauri/Cargo.toml` and
+`node --test tests/desktop-ui.test.cjs` (Playwright and a browser are required).
+These tests do not establish configured production hosting or device upgrades.
+
 ## Implementation and release work remaining
 
-- Integrate the Tauri updater with desktop Settings, startup checks, persistent
-  ignored-version preferences and the confirmed install/restart interaction.
-- Add cross-process installation coordination without changing the independent
-  CLI update path or interrupting running mutations.
 - Provision the concrete HTTPS domain and storage/CDN; configure updater public
   keys and protect the corresponding release signing key outside the repository.
 - Generate updater packages and signatures from the final platform-signed
@@ -101,6 +137,16 @@ These constraints come from the shared storage/locking implementation, the
   deployment and device acceptance as separate evidence. None is established by
   this design document.
 
-The current desktop has no built-in self-updater. The existing release workflow
-publishes installers; this design discussion does not establish that deployed
-clients can already update themselves.
+Older deployed desktop versions contain no built-in updater and require one
+manual installation of an updater-enabled release. The local release workflow
+prepares independently downloadable installers; source implementation alone does
+not establish that deployed clients can already update themselves.
+
+## Release distribution tooling
+
+See the [Chinese local release guide](client-update-local-release.zh-CN.md) and
+[desktop update release distribution](desktop-update-distribution.md) for
+final-signature preparation, isolated OSS candidate publication, independent
+recovery installers and the real native-client published-fixture check. Hosting
+configuration may remain empty. Production promotion and actual platform
+installed-client acceptance remain separate #38 work.
