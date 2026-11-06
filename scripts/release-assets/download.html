@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>下载 Token Market</title>
+<style>
+:root{color-scheme:light dark;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#18232f;background:#f5f7fa}body{margin:0;padding:32px 20px}main{max-width:600px;margin:10vh auto;padding:32px;border:1px solid #dce2e9;border-radius:16px;background:#fff}h1{font-size:28px;margin:0 0 16px}p{line-height:1.7;color:#566475}.downloads{display:grid;gap:12px;margin:24px 0}.downloads a{display:block;padding:16px;border:1px solid #aebac8;border-radius:10px;color:#173c6b;text-decoration:none;font-weight:600}.downloads a:hover{background:#edf4fc}.downloads a:focus-visible{outline:3px solid #1c68ba;outline-offset:3px}.note{font-size:14px}small{display:block;font-weight:400;color:#566475;margin-top:6px}@media(prefers-color-scheme:dark){:root{background:#111820;color:#eef3fa}main{background:#19232e;border-color:#3e4d5c}p,small{color:#b9c6d4}.downloads a{color:#bddaff;border-color:#61758b}.downloads a:hover{background:#263748}}@media(max-width:480px){main{margin:5vh auto;padding:24px}}
+</style>
+</head>
+<body><main>
+<h1>下载 Token Market</h1>
+<p id="status" role="status" aria-live="polite">正在识别你的系统…</p>
+<div class="downloads">
+<a id="mac-download" href="__DOWNLOAD_ORIGIN__/TokenMarket-mac-arm64.dmg">下载 macOS 版<small>适用于 Apple Silicon（M 系列芯片）；暂不提供 Intel Mac 安装包。</small></a>
+<a id="windows-download" href="__DOWNLOAD_ORIGIN__/TokenMarket-windows-x64.exe">下载 Windows 版<small>Windows x64 · NSIS 安装包</small></a>
+</div>
+<p class="note">若下载没有自动开始，请点击对应系统的下载按钮。手机和其他系统可手动选择要保存的安装包。</p>
+<noscript><p>请点击上面的系统按钮下载安装包。</p></noscript>
+</main>
+<script>
+(() => {
+  const nav = window.navigator;
+  const ua = nav.userAgent || '';
+  const platform = nav.userAgentData?.platform || nav.platform || '';
+  const mobile = /Android|iPhone|iPad|iPod/i.test(ua) ||
+    ((/Mac/i.test(platform) || /Macintosh/i.test(ua)) && nav.maxTouchPoints > 1);
+  let target = null;
+  if (!mobile && (/Windows|Win32|Win64/i.test(platform) || /Windows NT/i.test(ua))) target = 'windows';
+  else if (!mobile && (/macOS|MacIntel|MacPPC|Macintosh/i.test(platform) || /Macintosh|Mac OS X/i.test(ua))) target = 'mac';
+  const status = document.getElementById('status');
+  if (!target) {
+    status.textContent = '请选择需要下载的桌面安装包。';
+    return;
+  }
+  const link = document.getElementById(target + '-download');
+  link.setAttribute('aria-current', 'true');
+  status.textContent = target === 'windows'
+    ? '已识别为 Windows，正在下载 x64 安装包…'
+    : '已识别为 macOS，正在下载 Apple Silicon 安装包（暂不支持 Intel Mac）…';
+  window.location.assign(link.href);
+})();
+</script>
+</body></html>

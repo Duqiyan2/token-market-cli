@@ -4,7 +4,7 @@
 
 Connect local AI agent tools to Token Market from the desktop app or command line. Manage tool installation, model configuration and connection status in one place.
 
-[Download desktop app](https://github.com/FitBBC/token-market-cli/releases/latest) · [Get the CLI](https://www.npmjs.com/package/tokenmarket) · [Report an issue](https://github.com/FitBBC/token-market-cli/issues)
+[Download desktop app](https://dl.tokensapi.cn/download) · [Get the CLI](https://www.npmjs.com/package/tokenmarket) · [Report an issue](https://github.com/FitBBC/token-market-cli/issues)
 
 ## Installation
 
@@ -12,12 +12,12 @@ You need a Token Market account. Use the desktop app and CLI independently or to
 
 ### Desktop app
 
-Download the installer for your system from [Releases](https://github.com/FitBBC/token-market-cli/releases/latest):
+Download the installer for your system from [the download page](https://dl.tokensapi.cn/download):
 
 | System | Installation |
 | --- | --- |
 | macOS · Apple Silicon | Open the `.dmg` and drag **Token Market** into **Applications**. |
-| Windows · x64 | Run the `.exe` or `.msi` installer. |
+| Windows · x64 | Run the NSIS `.exe` installer. |
 
 ### CLI
 
@@ -182,3 +182,5 @@ for build and release configuration.
 ## Feedback
 
 Report problems through [GitHub Issues](https://github.com/FitBBC/token-market-cli/issues). Include your operating system, Token Market version, tool name and steps to reproduce. Remove API keys, sign-in credentials and other sensitive information before sharing screenshots or logs.
+
+[Desktop build and release runbook](docs/client-update-local-release.zh-CN.md)

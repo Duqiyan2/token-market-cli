@@ -5,6 +5,9 @@ on:
     paths:
       - "scripts/desktop-update-release.py"
       - "scripts/desktop_update_local.py"
+      - "scripts/release-desktop.py"
+      - "scripts/desktop_release_managed.py"
+      - "scripts/release-assets/**"
       - "scripts/build-macos-clients.sh"
       - "scripts/build-windows-clients.ps1"
       - "scripts/macos-local-signing.py"

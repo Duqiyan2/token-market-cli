@@ -1,11 +1,10 @@
-# Accepted desktop release promotion
+# Optional native candidate and device-acceptance contract
 
-`local-validate` and `local-publish` consume the same local schema2 acceptance
-record. The former is read-only; the latter explicitly publishes exact accepted
-bytes to the configured OSS destination. Use the [local config example](client-update-local.example.json)
-and [Chinese release guide](client-update-local-release.zh-CN.md). Production
-resources and both actual devices remain external #38 work; no Windows device
-acceptance is claimed. Parent #30 remains open.
+This is the stricter native acceptance path, not the current day-to-day release entry.
+Use [release-desktop.py and the operator guide](client-update-local-release.zh-CN.md) for
+Mac builds, Mac-hosted NSIS cross-builds, website fixed downloads and OSS publishing.
+This contract remains for separately recorded native Windows signing and actual
+installed-client upgrade evidence; cross-build publication does not claim it passed.
 
 ## Candidate and installed acceptance clients
 

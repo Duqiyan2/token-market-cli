@@ -4,7 +4,7 @@
 
 通过桌面应用或命令行，将本机 AI Agent 工具接入 Token Market，统一管理工具安装、模型配置和连接状态。
 
-[下载桌面端](https://github.com/FitBBC/token-market-cli/releases/latest) · [获取 CLI](https://www.npmjs.com/package/tokenmarket) · [反馈问题](https://github.com/FitBBC/token-market-cli/issues)
+[下载桌面端](https://dl.tokensapi.cn/download) · [获取 CLI](https://www.npmjs.com/package/tokenmarket) · [反馈问题](https://github.com/FitBBC/token-market-cli/issues)
 
 ## 安装
 
@@ -12,12 +12,12 @@
 
 ### 桌面端
 
-从 [Releases](https://github.com/FitBBC/token-market-cli/releases/latest) 下载适合系统的安装包：
+从 [下载页面](https://dl.tokensapi.cn/download) 下载适合系统的安装包：
 
 | 系统 | 安装方式 |
 | --- | --- |
 | macOS · Apple Silicon | 打开 `.dmg`，将 **Token Market** 拖入 **Applications**。 |
-| Windows · x64 | 运行 `.exe` 或 `.msi` 安装程序。 |
+| Windows · x64 | 运行 NSIS `.exe` 安装程序。 |
 
 ### CLI
 
@@ -181,3 +181,5 @@ macOS 使用系统钥匙串工具保持 App、CLI 和升级后的凭证访问者
 ## 问题反馈
 
 请通过 [GitHub Issues](https://github.com/FitBBC/token-market-cli/issues) 反馈问题，附上操作系统、Token Market 版本、工具名称和复现步骤。提交截图或日志前，请移除 API Key、登录凭据等敏感信息。
+
+[桌面端构建与发布流程](docs/client-update-local-release.zh-CN.md)

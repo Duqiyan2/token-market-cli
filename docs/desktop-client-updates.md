@@ -107,7 +107,7 @@ The configured manifest and artifact URLs must use HTTPS, including redirects
 in production. Only compiled native tests may opt into a loopback HTTP fixture.
 
 The manifest uses Tauri's static format: `version`, optional `notes` and
-`pub_date`, and `platforms.darwin-aarch64` / `platforms.windows-x86_64` entries
+`pub_date`, and `platforms.darwin-aarch64` / `platforms.windows-x86_64-nsis` entries
 containing `url` and the `.sig` file contents in `signature`. Only versions newer
 than the running application with no prerelease suffix are offered. Dynamic
 single-package manifests, missing matching packages and empty signatures are
@@ -120,33 +120,18 @@ Run them with `cargo test --locked --manifest-path src-tauri/Cargo.toml` and
 `node --test tests/desktop-ui.test.cjs` (Playwright and a browser are required).
 These tests do not establish configured production hosting or device upgrades.
 
-## Implementation and release work remaining
+## Release operations and remaining device evidence
 
-- Provision the concrete HTTPS domain and storage/CDN; configure updater public
-  keys and protect the corresponding release signing key outside the repository.
-- Generate updater packages and signatures from the final platform-signed
-  application. Publish all artifacts successfully before making a new stable
-  manifest visible, so clients never discover incomplete release assets.
-- Keep separately accessible official installers and recovery instructions.
-- Validate macOS Apple Silicon and Windows x64 upgrades from an older installed
-  version on actual devices. Cover startup/manual checks, logged-out use,
-  "Later"/ignored-version behavior, active desktop and CLI mutations, failed
-  network and signature checks, installer failure handling and successful
-  post-update startup with shared credentials and connections retained.
-- Keep build, updater-signature validation, platform signing/notarization,
-  deployment and device acceptance as separate evidence. None is established by
-  this design document.
+The static first-release manifest and both installers are published in Alibaba Cloud OSS.
+Use [the current operator guide](client-update-local-release.zh-CN.md) and
+[distribution contract](desktop-update-distribution.md). The website fixed package
+names and application-internal versioned package URLs serve different purposes.
+The recovery HTML page is not currently published.
 
-Older deployed desktop versions contain no built-in updater and require one
-manual installation of an updater-enabled release. The local release workflow
-prepares independently downloadable installers; source implementation alone does
-not establish that deployed clients can already update themselves.
-
-## Release distribution tooling
-
-See the [Chinese local release guide](client-update-local-release.zh-CN.md) and
-[desktop update release distribution](desktop-update-distribution.md) for
-final-signature preparation, isolated OSS candidate publication, independent
-recovery installers and the real native-client published-fixture check. Hosting
-configuration may remain empty. Production promotion and actual platform
-installed-client acceptance remain separate #38 work.
+Older clients without an updater need one manual installation of an updater-enabled
+release. Current-version metadata checks, package downloads and signatures are
+separately verified by the release tooling. Actual Mac/Windows installed-client
+cross-version upgrades, shared credential continuity and the complete installer
+lifecycle still require their own device evidence. Current Mac packages use a
+persistent local certificate without Apple notarization; the Mac-hosted Windows
+NSIS build does not imply Authenticode signing or Windows runtime acceptance.

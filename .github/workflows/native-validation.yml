@@ -8,6 +8,8 @@ on:
       - "src/tauri-ui/**"
       - "tests/desktop-ui.test.cjs"
       - "tests/desktop-usage.test.cjs"
+      - "tests/desktop-download-entry.test.cjs"
+      - "scripts/release-assets/**"
       - "tests/helpers/**"
       - "scripts/macos-local-signing.py"
       - "scripts/build-macos-clients.sh"
@@ -161,4 +163,4 @@ jobs:
         env:
           NODE_PATH: ${{ runner.temp }}/tokenmarket-ui-runtime/node_modules
           PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/tokenmarket-ui-browsers
-        run: node --test --test-reporter=tap tests/desktop-ui.test.cjs tests/desktop-usage.test.cjs
+        run: node --test --test-reporter=tap tests/desktop-ui.test.cjs tests/desktop-usage.test.cjs tests/desktop-download-entry.test.cjs

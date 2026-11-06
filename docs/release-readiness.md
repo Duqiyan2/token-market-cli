@@ -18,6 +18,8 @@ macOS arm64 和 Linux arm64 的有界运行记录见
 - Intel macOS、其他 Linux 原生目标，以及普通 Linux 宿主机上的 Codex 沙箱行为。
 - 逐工具首次选择、完整连接生命周期与凭据持久化。
 - 安装包在真实设备上的冷启动、浏览器回跳与重启恢复。
-- macOS Apple Developer ID 签名与公证；当前打包使用 ad-hoc 签名。
+- macOS Apple Developer ID 签名与公证；当前打包使用持久本地证书签名，未公证。
 
 构建通过不等于设备交互或实际模型请求通过。各项结果应记录实际平台、工具版本和验证范围。
+
+日常桌面构建与分发操作统一见[发布流程](client-update-local-release.zh-CN.md)。
